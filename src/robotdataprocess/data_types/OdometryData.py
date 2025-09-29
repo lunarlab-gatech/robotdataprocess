@@ -275,6 +275,20 @@ class OdometryData(Data):
         self.positions = convert_collection_into_decimal_array(self.positions)
         self.orientations = convert_collection_into_decimal_array(self.orientations)
 
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep
+        mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask
+        self.timestamps = self.timestamps[mask]
+        self.positions = self.positions[mask]
+        self.orientations = self.orientations[mask]
+
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+
     # def umeyama_alignment(self, other: OdometryData):
     #     """ Aligns self with other using Umeyama alignment """
 

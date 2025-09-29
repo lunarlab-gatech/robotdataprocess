@@ -1,3 +1,4 @@
+from copy import deepcopy
 import cv2
 from decimal import Decimal
 import numpy as np
@@ -188,5 +189,24 @@ class TestImageData(unittest.TestCase):
         np.testing.assert_equal(image_data.width, npy_data.width)
         np.testing.assert_equal(image_data.encoding, npy_data.encoding)
         
+    def test_crop_data(self):
+        """ Ensure the correct data is cropped. """
+
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_crop_data', 'images').absolute()
+        image_data = ImageData.from_image_files(files_folder, 'camera')
+
+        # Ensure cropping works correctly
+        image_data_cropped = deepcopy(image_data)
+        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.15'))
+        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:])
+        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:])
+
+        image_data_cropped = deepcopy(image_data)
+        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.125'))
+        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:2])
+        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:2])
+
+
 if __name__ == "__main__":
     unittest.main()

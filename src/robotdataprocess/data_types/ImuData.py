@@ -171,6 +171,22 @@ class ImuData(Data):
 
         # Create the ImuData class
         return cls(frame_id, frame, timestamps, lin_acc, ang_vel, orientation)
+    
+    # =========================================================================
+    # ========================= Manipulation Methods ========================== 
+    # =========================================================================  
+
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep
+        mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask
+        self.timestamps = self.timestamps[mask]
+        self.lin_acc = self.lin_acc[mask]
+        self.ang_vel = self.ang_vel[mask]
+        self.orientation = self.orientation[mask]
 
     # =========================================================================
     # =========================== Frame Conversions =========================== 
