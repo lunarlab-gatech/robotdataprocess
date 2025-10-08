@@ -5,6 +5,7 @@ import csv
 from .Data import CoordinateFrame, Data
 import decimal
 from decimal import Decimal
+from evo.core import geometry
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -238,6 +239,7 @@ class OdometryData(Data):
             self.positions[i][1] += Decimal(cumulative_noise_pos['y'])
             self.positions[i][2] += Decimal(cumulative_noise_pos['z'])
 
+    @typechecked
     def shift_position(self, x_shift: float, y_shift: float, z_shift: float):
         """
         Shifts the positions of the odometry.
@@ -269,10 +271,60 @@ class OdometryData(Data):
         for i in range(self.len()):
             self.orientations[i] = R.from_matrix((R_inv @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
 
+        # Convert back to decimal array
+        self.positions = convert_collection_into_decimal_array(self.positions)
+        self.orientations = convert_collection_into_decimal_array(self.orientations)
+
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep
+        mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask
+        self.timestamps = self.timestamps[mask]
+        self.positions = self.positions[mask]
+        self.orientations = self.orientations[mask]
+
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+
+    # def umeyama_alignment(self, other: OdometryData):
+    #     """ Aligns self with other using Umeyama alignment """
+
+    #     # Make sure they are in the same frame
+    #     assert self.frame == other.frame
+
+    #     # Get matching timestamps
+    #     matched_idx = np.zeros((0, 2), dtype=int)
+    #     for i, ts in enumerate(self.timestamps):
+    #         indices = np.where(other.timestamps == ts)[0]
+    #         assert len(indices) <= 1
+    #         if len(indices) == 1:
+    #             matched_idx = np.concatenate((matched_idx, np.array([[i, indices[0]]], dtype=int)), axis=0)
+
+    #     # Get positions that overlap
+    #     matched_self = self.positions[matched_idx[:,0]]
+    #     matched_other = other.positions[matched_idx[:,1]]
+
+    #     # Use evo to do umeyama alignment
+    #     R_a, T_a, _ = geometry.umeyama_alignment(matched_self.astype(float).T, matched_other.astype(float).T, False)
+    #     T_a = convert_collection_into_decimal_array(np.expand_dims(T_a, axis=1))
+
+    #     # Update positions and orientations
+    #     self.positions = (R_a @ (self.positions.T - T_a).astype(float)).T
+    #     for i in range(self.len()):
+    #         self.orientations[i] = R.from_matrix((R_a @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
+
+    #     # Convert back to decimal array
+    #     self.positions = convert_collection_into_decimal_array(self.positions)
+    #     self.orientations = convert_collection_into_decimal_array(self.orientations)
+
     # =========================================================================
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
+    @typechecked
     def to_csv(self, csv_path: Path | str):
         """
         Writes the odometry data to a .csv file. Note that data will be
@@ -328,8 +380,8 @@ class OdometryData(Data):
 
         def draw_axes(data: OdometryData, label_prefix=""):
             """Helper function that visualizes orientation along the trajectory path with axes."""
-            axes_interval = 5000
-            axes_length = 5
+            axes_interval = 1000
+            axes_length = 10
 
             for i in range(0, data.len(), axes_interval):
                 # Extract data
@@ -420,8 +472,7 @@ class OdometryData(Data):
 
             # Do a change of basis
             self.positions = (R_NED @ self.positions.T).T
-            for i in range(self.len()):
-                self.orientations[i] = (R_NED_Q * R.from_quat(self.orientations[i]) * R_NED_Q.inv()).as_quat()
+            self._ori_change_of_basis(R_NED_Q)
 
             # Update frame
             self.frame = CoordinateFrame.FLU
@@ -429,6 +480,18 @@ class OdometryData(Data):
         # Otherwise, throw an error
         else:
             raise RuntimeError(f"OdometryData class is in an unexpected frame: {self.frame}!")
+    
+    @typechecked
+    def _ori_apply_rotation(self, R_i: R):
+        """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
+        for i in range(self.len()):
+            self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
+
+    @typechecked
+    def _ori_change_of_basis(self, R_i: R):
+        """ Applies a change of basis to orientations """
+        for i in range(self.len()):
+            self.orientations[i] = (R_i * R.from_quat(self.orientations[i]) * R_i.inv()).as_quat()
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 

@@ -12,6 +12,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 dependencies = ["coverage",
+                "evo",
                 "matplotlib",
                 "numpy",
                 "opencv-python",

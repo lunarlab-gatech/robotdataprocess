@@ -1,3 +1,5 @@
+from copy import deepcopy
+from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
@@ -132,6 +134,18 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_equal(odom_data.frame_id, '/Husky1')
         np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
         np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
+
+    def test_crop_data(self):
+        # Load the Odometry data
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_crop_data', 'odom.txt').absolute()
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+
+        # Test cropping out some data
+        odom_data_cropped = deepcopy(odom_data)
+        odom_data_cropped.crop_data(Decimal('0.45'), Decimal('2.95')) 
+        np.testing.assert_array_equal(odom_data_cropped.timestamps, odom_data.timestamps[8:59])
+        np.testing.assert_array_equal(odom_data_cropped.positions, odom_data.positions[8:59])
+        np.testing.assert_array_equal(odom_data_cropped.orientations, odom_data.orientations[8:59])
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,11 +38,16 @@ class Data:
         """ Returns the number of items in this data class """
         return len(self.timestamps)
     
+    @staticmethod
     def get_ros_msg_type():
         """ Will return the msgtype needed to add a connetion to a rosbag writer. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
-    def get_ros_msg(i: int):
+    def get_ros_msg(self, i: int):
         """ Will return a ROS message object ready to be written into a ROS2 Humble bag. """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
+    
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 
