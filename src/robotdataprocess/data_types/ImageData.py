@@ -278,7 +278,7 @@ class ImageData(Data):
         # Load the images as numpy arrays
         assert channels == 1
         images = np.zeros((len(all_image_files_sorted), height, width), dtype=np.float32)
-        pbar = tqdm.tqdm(total=len(all_image_files_sorted), desc="Extracting Images...", unit=" images")
+        pbar = tqdm.tqdm(total=len(all_image_files_sorted), desc="Extracting NPY...", unit=" images")
         for i, path in enumerate(all_image_files_sorted):
             images[i] = np.load(path, 'r')
             pbar.update()
@@ -600,28 +600,38 @@ class ImageData(Data):
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
 
-        # Get ROS2  message classes
+        # Get ROS2 message classes
         typestore = get_typestore(Stores.ROS2_HUMBLE)
         Image, Header, Time = typestore.types['sensor_msgs/msg/Image'], typestore.types['std_msgs/msg/Header'], typestore.types['builtin_interfaces/msg/Time']
 
-        # Calculate the step
+        # Calculate the step based on encoding
         if self.encoding == ImageData.ImageEncoding.RGB8:
             step = 3 * self.width
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             step = 4 * self.width
+        elif self.encoding == ImageData.ImageEncoding.Mono8:
+            step = self.width
+        else:
+            raise ValueError(f"Unsupported encoding: {self.encoding}")
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
         nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
 
+        # Get image data and ensure it's contiguous
+        image_data = np.ascontiguousarray(self.images[i])
+        
+        # The ROS Image message data field expects uint8 array (raw bytes)
+        # We need to view the data as uint8 regardless of original dtype
+        image_data_bytes = image_data.view(np.uint8).ravel()
+
         # Write the data into the new class
         return Image(Header(stamp=Time(sec=int(seconds), 
-                                       nanosec=int(nanoseconds)), 
+                                    nanosec=int(nanoseconds)), 
                             frame_id=self.frame_id),
                     height=self.height, 
                     width=self.width, 
                     encoding=ImageData.ImageEncoding.to_ros_str(self.encoding),
                     is_bigendian=0, 
                     step=step, 
-                    data=self.images[i].flatten())
-        
+                    data=image_data_bytes)
