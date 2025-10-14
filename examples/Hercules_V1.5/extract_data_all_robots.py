@@ -1,0 +1,97 @@
+from decimal import Decimal
+from pathlib import Path
+from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.rosbag import Ros2BagWrapper
+
+def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None):
+    # Check paramters
+    if crop_data and end_time is None:
+        raise ValueError("end_time required if crop_data is True!")
+    
+    # Make directory paths
+    input_path = Path(input_dir).absolute()
+    output_path = input_path.parent / 'extract' / 'files_for_roman_baseline'
+    
+    # Extract depth data from Hercules V1.5 from individual .npy files to a single .npy file
+    depth_data = ImageData.from_npy_files(input_path / robot_name / 'depth', 'front_center_DepthPerspective')
+    if crop_data: 
+        depth_data.crop_data(Decimal('0.0'), end_time)
+    depth_data.to_npy(output_path / robot_name / 'depth')
+
+    # Extract image data from Hercules V1.5 to .npy
+    rgb_data = ImageData.from_image_files(input_path / robot_name / 'rgb', 'front_center_Scene')
+    if crop_data: 
+        rgb_data.crop_data(Decimal('0.0'), end_time)
+    rgb_data.to_npy(output_path / robot_name / 'rgb')
+
+    # Load the odometry data
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED)
+
+    # Convert to the FLU coordinate frame & crop
+    pose_data.to_FLU_frame()
+    if crop_data: 
+        pose_data.crop_data(Decimal('0.0'), end_time)
+
+    # Save back to a csv file
+    pose_data.to_csv(output_path / robot_name / 'poseGT.csv')
+
+def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None):
+    # Check parameters
+    if crop_data and end_time is None:
+        raise ValueError("end_time required if crop_data is True!")
+    
+    # Make directory paths
+    input_path = Path(input_dir).absolute()
+    output_path = input_path.parent / 'extract' / 'bags_for_vins_mono'
+
+    # Extract RGB and IMU from Hercules v1.5
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
+    image_data = ImageData.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
+
+    # Convert data from NED frame to ROS frame (and make sure it is at the identity)
+    pose_data.to_FLU_frame()
+    pose_data.shift_to_start_at_identity()
+
+    # Leave the IMU data in the NED frame (I believe that VINS-Mono actually adjusts internally)
+    imu_data.frame = CoordinateFrame.FLU # This lets us write it into a ROS bag without an error, without actually changing data
+
+    # Crop the data
+    if crop_data:
+        imu_data.crop_data(Decimal('0.0'), end_time)
+        pose_data.crop_data(Decimal('0.0'), end_time)
+        image_data.crop_data(Decimal('0.0'), end_time)
+
+    # Save it into a ROS2 Humble bag
+    Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
+             [imu_data, image_data,  pose_data,       pose_data],
+             [  '/imu',    '/cam0', '/odom_gt', '/odom_gt/path'],
+             [    None,       None, "Odometry",          "Path"], 
+             None)
+
+def main(): 
+    # Enter desired configuration here
+    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/V1.4.1/data'
+    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_crop_end_times = [None, None, None, None]
+
+    # Check validity of inputs
+    assert len(robot_names) == len(robot_crop_end_times)
+    num_robots = len(robot_names)
+
+    # Run extraction for each robot
+    for i in range(num_robots):
+        if robot_crop_end_times[i] == None: crop_data = False
+        else: crop_data = True
+
+        data_extraction(input_dir=input_dir, 
+                        robot_name=robot_names[i],
+                        crop_data=crop_data,
+                        end_time=robot_crop_end_times[i])
+        to_bag(input_dir=input_dir,
+               robot_name=robot_names[i],
+               crop_data=crop_data,
+               end_time=robot_crop_end_times[i])
+        
+if __name__ == "__main__":
+    main()
