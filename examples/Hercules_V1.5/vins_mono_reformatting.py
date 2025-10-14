@@ -12,8 +12,8 @@ def main():
 
     # Since positions are in FLU but orientations are in NED rotated to FLU, lets fix that
     R_NED = np.array([[1,  0,  0],
-                        [0, -1,  0],
-                        [0,  0, -1]])
+                      [0, -1,  0],
+                      [0,  0, -1]])
     R_NED_Q = R.from_matrix(R_NED)
     odom_data._ori_apply_rotation(R_NED_Q.inv())
     odom_data._ori_change_of_basis(R_NED_Q)

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
 from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
-from robotdataprocess.rosbag import Ros2BagWrapper
+from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
 
 def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None):
     # Check paramters

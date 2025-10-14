@@ -7,6 +7,7 @@ from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from scipy.spatial.transform import Rotation as R
 import unittest
 
 class TestOdometryData(unittest.TestCase):
@@ -146,6 +147,17 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data_cropped.timestamps, odom_data.timestamps[8:59])
         np.testing.assert_array_equal(odom_data_cropped.positions, odom_data.positions[8:59])
         np.testing.assert_array_equal(odom_data_cropped.orientations, odom_data.orientations[8:59])
+
+    def test_ori_apply_rotation(self):
+        # Load the Odometry data
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+
+        # Ensure the rotation functions properly
+        odom_data_rotated = deepcopy(odom_data)
+        rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
+        odom_data_rotated._ori_apply_rotation(rotation)
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
 
 if __name__ == "__main__":
     unittest.main()
