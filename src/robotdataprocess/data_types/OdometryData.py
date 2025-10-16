@@ -26,7 +26,7 @@ class OdometryData(Data):
     frame: CoordinateFrame
     positions: np.ndarray[Decimal] # meters (x, y, z)
     orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
-    poses = [] # Saved nav_msgs/msg/Pose
+    poses: list # Saved nav_msgs/msg/Pose
 
     @typechecked
     def __init__(self, frame_id: str, child_frame_id: str, frame: CoordinateFrame, 
@@ -35,10 +35,11 @@ class OdometryData(Data):
         
         # Copy initial values into attributes
         super().__init__(frame_id, timestamps)
-        self.child_frame_id = child_frame_id
-        self.frame = frame
-        self.positions = convert_collection_into_decimal_array(positions)
-        self.orientations = convert_collection_into_decimal_array(orientations)
+        self.child_frame_id: str = child_frame_id
+        self.frame: CoordinateFrame = frame
+        self.positions: np.ndarray[Decimal] = convert_collection_into_decimal_array(positions)
+        self.orientations: np.ndarray[Decimal] = convert_collection_into_decimal_array(orientations)
+        self.poses: list = []
 
         # Check to ensure that all arrays have same length
         if len(self.timestamps) != len(self.positions) or len(self.positions) != len(self.orientations):
@@ -132,7 +133,7 @@ class OdometryData(Data):
             column_to_data = [0,1,2,3,4,5,6,7]
         else:
             # Check column_to_data values are valid
-            assert np.all(column_to_data >= 0)
+            assert np.all(np.array(column_to_data) >= 0)
 
         # Determine column names to apply
         column_names = []
