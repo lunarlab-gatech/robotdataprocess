@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
+from .PathData import PathData
 from pathlib import Path
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
@@ -19,13 +20,11 @@ from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
 import tqdm
 
-class OdometryData(Data):
+class OdometryData(PathData):
 
     # Define odometry-specific data attributes
     child_frame_id: str
     frame: CoordinateFrame
-    positions: np.ndarray[Decimal] # meters (x, y, z)
-    orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
     poses: list # Saved nav_msgs/msg/Pose
 
     @typechecked
@@ -34,11 +33,9 @@ class OdometryData(Data):
                  orientations: np.ndarray | list):
         
         # Copy initial values into attributes
-        super().__init__(frame_id, timestamps)
+        super().__init__(frame_id, timestamps, positions, orientations)
         self.child_frame_id: str = child_frame_id
         self.frame: CoordinateFrame = frame
-        self.positions: np.ndarray[Decimal] = convert_collection_into_decimal_array(positions)
-        self.orientations: np.ndarray[Decimal] = convert_collection_into_decimal_array(orientations)
         self.poses: list = []
 
         # Check to ensure that all arrays have same length

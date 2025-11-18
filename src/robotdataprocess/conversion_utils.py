@@ -23,3 +23,7 @@ def convert_collection_into_decimal_array(collection: np.ndarray | list) -> np.n
         return collection
     else:
         return np.vectorize(safe_decimal)(collection)
+    
+def convert_decimal_array_into_float_array(decimal_array: np.ndarray[Decimal]) -> np.ndarray[float]:
+    """ Converts decimal arrays into float arrays for use with external libraries. """
+    return np.vectorize(float)(decimal_array)
