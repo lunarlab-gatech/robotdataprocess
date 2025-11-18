@@ -4,7 +4,7 @@ from pprint import pprint
 def main():
     # Load the GT and estimated path data
     robot_name = "Husky1"
-    dataset_version = "V.1.4.1"
+    dataset_version = "V1.4.1"
     robot_folder = "/home/dbutterfield3/Desktop/data/Hercules_datasets/" + dataset_version + \
                    "/extract/files_for_roman_baseline/" + robot_name
     gt_data = OdometryData.from_csv(robot_folder + '/vins_result_no_loop_reformatted.csv', 

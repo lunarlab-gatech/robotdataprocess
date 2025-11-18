@@ -18,8 +18,8 @@ class TestPathData(unittest.TestCase):
         results_dict: dict = PathData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1)
         
         # Make sure the values match what we expect
-        numpy.testing.assert_equal(results_dict['APE']['translation_part']['rmse'], 0.43900241699624326)
-        numpy.testing.assert_equal(results_dict['APE']['translation_part']['max'], 0.5769000332405032)
+        numpy.testing.assert_almost_equal(results_dict['APE']['translation_part']['rmse'], 0.43900241699624326, 12)
+        numpy.testing.assert_almost_equal(results_dict['APE']['translation_part']['max'], 0.5769000332405032, 12)
         numpy.testing.assert_almost_equal(results_dict['APE']['rotation_angle_deg']['mean'], 35.1468632257006, 12)
 
         # TODO: Write test cases to verify that RPE metrics are good.
