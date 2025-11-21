@@ -1,3 +1,4 @@
+from decimal import Decimal
 import numpy as np
 import os
 from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
@@ -5,25 +6,37 @@ from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
 
 def main():
-    robot_name = "Drone2"
+    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    dataset_names = ["V1.6"]
+    file_names = ['vins_result_loop.csv', 'vins_result_no_loop.csv']
 
-    # Load the odometry data
-    odom_data = OdometryData.from_csv('/home/dbutterfield3/Research/ros_workspaces/vins_mono_ws/src/VINS-MONO-ROS2/output/hercules_V1.4.1/'+robot_name+'/vins_result_no_loop.csv', "odom", 'base_link', CoordinateFrame.FLU, False, None)
+    # Do it for all files, robots, and datasets
+    for robot_name in robot_names:
+        for dataset_name in dataset_names:
+            for file_name in file_names:
+                
+                # Load the odometry data
+                odom_data = OdometryData.from_csv('/home/dbutterfield3/Research/ros_workspaces/vins_mono_ws/src/VINS-MONO-ROS2/output/hercules_'+dataset_name+'_LC/'+robot_name+'/'+file_name, "odom", 'base_link', CoordinateFrame.FLU, False, None)
 
-    # Since positions are in FLU but orientations are in NED rotated to FLU, lets fix that
-    R_NED = np.array([[1,  0,  0],
-                      [0, -1,  0],
-                      [0,  0, -1]])
-    R_NED_Q = R.from_matrix(R_NED)
-    odom_data._ori_apply_rotation(R_NED_Q.inv())
-    odom_data._ori_change_of_basis(R_NED_Q)
+                # Since positions are in FLU but orientations are in NED rotated to FLU, lets fix that
+                R_NED = np.array([[1,  0,  0],
+                                [0, -1,  0],
+                                [0,  0, -1]])
+                R_NED_Q = R.from_matrix(R_NED)
+                odom_data._ori_apply_rotation(R_NED_Q.inv())
+                odom_data._ori_change_of_basis(R_NED_Q)
 
-    # Save the csv in a ROMAN friendly format
-    output_path = '/home/dbutterfield3/Desktop/data/Hercules_datasets/V1.4.1/extract/files_for_roman_baseline/'+robot_name+'/vins_result_no_loop_reformatted.csv'
-    if os.path.exists(output_path):
-        print("Deleting CSV file at this location previously...")
-        os.remove(output_path)
-    odom_data.to_csv(output_path)
+                # The timestamps are in ns for 'vins_result_loop.csv', so set to seconds
+                if file_name == 'vins_result_loop.csv':
+                    odom_data.timestamps = odom_data.timestamps / Decimal('1e9')
+
+                # Save the csv in a ROMAN friendly format
+                output_path = '/home/dbutterfield3/Desktop/data/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/' \
+                              + robot_name + '/' + file_name.replace('.csv', '_reformatted.csv')
+                if os.path.exists(output_path):
+                    print("Deleting CSV file at this location previously...")
+                    os.remove(output_path)
+                odom_data.to_csv(output_path)
 
 if __name__ == "__main__":
     main()
