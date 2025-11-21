@@ -8,3 +8,6 @@ htmlcov/
 
 # Ignore profile output
 profile.out
+
+#ignore pyenv
+venv/

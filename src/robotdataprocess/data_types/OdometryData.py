@@ -376,9 +376,8 @@ class OdometryData(PathData):
                 with self.
         """
 
-        def draw_axes(data: OdometryData, label_prefix=""):
+        def draw_axes(data: OdometryData, label_prefix="", axes_interval=1000):
             """Helper function that visualizes orientation along the trajectory path with axes."""
-            axes_interval = 1000
             axes_length = 10
 
             for i in range(0, data.len(), axes_interval):
@@ -466,11 +465,9 @@ class OdometryData(PathData):
             R_NED = np.array([[1,  0,  0],
                               [0, -1,  0],
                               [0,  0, -1]])
-            R_NED_Q = R.from_matrix(R_NED)
 
-            # Do a change of basis
-            self.positions = (R_NED @ self.positions.T).T
-            self._ori_change_of_basis(R_NED_Q)
+            # Do a change of basis to update the frame
+            self._convert_frame(R_NED)
 
             # Update frame
             self.frame = CoordinateFrame.FLU
@@ -479,6 +476,13 @@ class OdometryData(PathData):
         else:
             raise RuntimeError(f"OdometryData class is in an unexpected frame: {self.frame}!")
     
+    @typechecked
+    def _convert_frame(self, R_frame: np.ndarray):
+        """ Uses a change of basis to update the positions and orientations. """
+        R_frame_Q = R.from_matrix(R_frame)
+        self.positions = (R_frame @ self.positions.T).T
+        self._ori_change_of_basis(R_frame_Q)
+
     @typechecked
     def _ori_apply_rotation(self, R_i: R):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
