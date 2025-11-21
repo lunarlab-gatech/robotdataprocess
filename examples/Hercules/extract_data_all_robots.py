@@ -65,13 +65,13 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal |
     # Save it into a ROS2 Humble bag
     Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
              [imu_data, image_data,  pose_data,       pose_data],
-             [  '/imu',    '/cam0', '/odom_gt', '/odom_gt/path'],
+             [  '/imu0',    '/cam0/image_raw', '/odom_gt', '/odom_gt/path'],
              [    None,       None, "Odometry",          "Path"], 
              None)
 
 def main(): 
     # Enter desired configuration here
-    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/V1.4.1/data'
+    input_dir = '/media/nisemono/T7/GT/SLAM/test3_2uav2ugv_calib_752x480'
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
     robot_crop_end_times = [None, None, None, None]
 
