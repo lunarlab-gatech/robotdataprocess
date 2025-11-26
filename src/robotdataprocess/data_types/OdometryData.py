@@ -107,7 +107,7 @@ class OdometryData(PathData):
     
     @classmethod
     @typechecked
-    def from_csv(cls, csv_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame, header_included: bool, column_to_data: list[int] | None):
+    def from_csv(cls, csv_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame, header_included: bool, column_to_data: list[int] | None, separator: str | None = None):
         """
         Creates a class structure from a csv file.
 
@@ -121,6 +121,7 @@ class OdometryData(PathData):
                 of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
                 index 0 of column_to_data should be the column that timestamp data is found in the 
                 csv file. Set to None to use [0,1,2,3,4,5,6,7].
+            separator (str | None): The separator used in the csv file. If None, will use a comma by default.
         Returns:
             OdometryData: Instance of this class.
         """
@@ -150,7 +151,7 @@ class OdometryData(PathData):
 
         # Read the csv file
         header = 0 if header_included else None
-        df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False)
+        df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False, sep=separator)
 
         # Convert columns to np.ndarray[Decimal]
         timestamps_np = np.array([Decimal(str(ts)) for ts in df1['timestamp']], dtype=object)
@@ -364,7 +365,7 @@ class OdometryData(PathData):
     # =========================================================================  
 
     @typechecked
-    def visualize(self, otherList: list[OdometryData], titles: list[str]):
+    def visualize(self, otherList: list[OdometryData], titles: list[str], axes_length: float = 10.0, axes_interval: int = 1000):
         """
         Visualizes this OdometryData (and all others included in otherList)
         on a single plot.
@@ -376,9 +377,8 @@ class OdometryData(PathData):
                 with self.
         """
 
-        def draw_axes(data: OdometryData, label_prefix="", axes_interval=1000):
+        def draw_axes(data: OdometryData, axes_length: int, axes_interval: int):
             """Helper function that visualizes orientation along the trajectory path with axes."""
-            axes_length = 10
 
             for i in range(0, data.len(), axes_interval):
                 # Extract data
@@ -414,9 +414,9 @@ class OdometryData(PathData):
                     label=titles[1+i])
 
         # Draw orientation axes (X = red, Y = green, Z = blue)
-        draw_axes(self)
+        draw_axes(self, axes_length=axes_length, axes_interval=axes_interval)
         for other in otherList:
-            draw_axes(other)
+            draw_axes(other, axes_length=axes_length, axes_interval=axes_interval)
 
         # Set labels
         ax.set_title("Trajectory Comparison with Full Orientation")

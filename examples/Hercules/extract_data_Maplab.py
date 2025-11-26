@@ -49,7 +49,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print("\n2. Loading images...")
     image_data = ImageData.from_image_files(
         input_path / 'rgb',
-        f'{robot_name}/camera'
+        f'{robot_name}/cam0'
     )
     print(f"   Loaded {image_data.len()} images")
 
@@ -58,7 +58,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     # to allow writing to ROS bag without errors. Many applications
     # like VINS-Mono handle the coordinate frame conversion internally.
     # FIXME: this is not implemented yet!
-    imu_data.to_FLU_frame() 
+    # imu_data.to_FLU_frame() 
     imu_data.frame = CoordinateFrame.FLU
 
     print("\n3. Writing to temporary ROS2 bag...")
@@ -93,14 +93,15 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
 def main():
     # ========== CONFIGURE THESE PATHS ==========
 
-    # Input directory containing your data
-    input_dir = '/media/nisemono/T7/GT/SLAM/test3_2uav2ugv_calib_752x480/Drone1'
-
-    # Output bag path
-    output_bag = '/media/nisemono/T7/GT/SLAM/test3_2uav2ugv_calib_752x480/output_bags/Drone1.bag'
-
     # Robot name (used for frame IDs in the bag)
     robot_name = 'Drone1'
+    dataset_num = "V1.5"
+
+    # Input directory containing your data
+    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+
+    # Output bag path
+    output_bag = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 

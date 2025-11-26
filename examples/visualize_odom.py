@@ -2,8 +2,8 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess import CoordinateFrame
 
 def main():
-    robot_names = ["Drone1"]
-    dataset_name = "V1.6"
+    robot_names = ["Drone2"]
+    dataset_name = "V1.4.1"
     file_path = '/home/dbutterfield3/Desktop/data/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/'
 
     # Load csv files

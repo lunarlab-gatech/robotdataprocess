@@ -624,6 +624,12 @@ class ImageData(Data):
         seconds = int(self.timestamps[i])
         nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
 
+        # Calculate the ROS2 Image data
+        if self.encoding == ImageData.ImageEncoding.RGB8:
+            data = self.images[i].flatten()
+        elif self.encoding == ImageData.ImageEncoding._32FC1:
+            data = self.images[i].flatten().view(np.uint8)
+
         # Write the data into the new class
         return Image(Header(stamp=Time(sec=int(seconds), 
                                        nanosec=int(nanoseconds)), 
@@ -633,5 +639,5 @@ class ImageData(Data):
                     encoding=ImageData.ImageEncoding.to_ros_str(self.encoding),
                     is_bigendian=0, 
                     step=step, 
-                    data=self.images[i].flatten())
+                    data=data)
         
