@@ -65,7 +65,7 @@ class TestOdometryData(unittest.TestCase):
         Ros2BagWrapper.write_data_to_rosbag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
 
         # Load the data back again
-        ros_data = OdometryData.from_ros2_bag(bag_path, '/odom')
+        ros_data = OdometryData.from_ros2_bag(bag_path, '/odom', CoordinateFrame.FLU)
 
         # Make sure this data matches what we expect
         np.testing.assert_equal(float(ros_data.timestamps[32]), 690.100000)
@@ -76,7 +76,7 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_equal(ros_data.frame, CoordinateFrame.FLU)
 
         # Make sure the Odometry and Path options match in their data. 
-        path_data = PathData.from_ros2_bag(bag_path, '/odom/path')
+        path_data = PathData.from_ros2_bag(bag_path, '/odom/path', CoordinateFrame.FLU)
         np.testing.assert_equal(ros_data.len(), path_data.len() * 10)
         np.testing.assert_equal(ros_data.frame_id, path_data.frame_id)
         np.testing.assert_equal(ros_data.timestamps[30], path_data.timestamps[3])

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 import cv2
 from .Data import Data
 import decimal
@@ -253,7 +253,7 @@ class ImageData(Data):
         all_image_files = [str(p) for p in Path(npy_folder_path).glob("*.npy")]
 
         # Extract the timestamps and sort them
-        timestamps = convert_collection_into_decimal_array([s.split('/')[-1][:-4] for s in all_image_files])
+        timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_image_files])
         sorted_indices = np.argsort(timestamps)
         timestamps_sorted = timestamps[sorted_indices]
 
@@ -305,7 +305,7 @@ class ImageData(Data):
         all_image_files = [str(p) for p in Path(image_folder_path).glob("*.png")]
 
         # Extract the timestamps and sort them
-        timestamps = convert_collection_into_decimal_array([s.split('/')[-1][:-4] for s in all_image_files])
+        timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_image_files])
         sorted_indices = np.argsort(timestamps)
         timestamps_sorted = timestamps[sorted_indices]
 
@@ -619,6 +619,8 @@ class ImageData(Data):
             step = 3 * self.width
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             step = 4 * self.width
+        else:
+            raise NotImplementedError(f"Only RGB8 and 32FC1 encodings are currently supported for export, not {self.encoding}!")
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])

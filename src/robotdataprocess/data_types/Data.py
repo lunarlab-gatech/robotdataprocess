@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 from decimal import Decimal
 from enum import Enum
 import numpy as np
@@ -11,6 +11,7 @@ class CoordinateFrame(Enum):
     NED = 1 # https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates
             # - X forward (north), Y right (East), Z Down := RHS
     ENU = 2 # https://www.ros.org/reps/rep-0103.html - X east, Y north, Z up := RHS
+    NONE = 3 # No defined coordinate frame
 
 class Data:
     """
@@ -27,7 +28,7 @@ class Data:
         
         # Copy initial values into attributes
         self.frame_id = frame_id
-        self.timestamps = convert_collection_into_decimal_array(timestamps)
+        self.timestamps = col_to_dec_arr(timestamps)
 
         # Check to ensure that all timestamps are sequential
         for i in range(len(self.timestamps) - 1):

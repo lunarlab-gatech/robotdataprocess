@@ -15,25 +15,25 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
     temp_ros2_bag = output_path.parent / (output_path.stem + "_temp_ros2")
 
     # Extract RGB and IMU from Hercules v1.5
-    #odom_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
-    #seg_data = ImageData.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
+    odom_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
+    seg_data = ImageData.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageData.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')
 
     # Convert data from NED frame to FLU frame
-   # odom_data.to_FLU_frame()
+    odom_data.to_FLU_frame()
 
     # Crop the data
     if crop_data:
-        #odom_data.crop_data(Decimal('0.0'), end_time)
-        #seg_data.crop_data(Decimal('0.0'), end_time)
+        odom_data.crop_data(Decimal('0.0'), end_time)
+        seg_data.crop_data(Decimal('0.0'), end_time)
         depth_data.crop_data(Decimal('0.0'), end_time)
 
     # Write data to temporary ROS2 bag (required intermediate step)
     Ros2BagWrapper.write_data_to_rosbag(
         temp_ros2_bag,
-        [ depth_data], 
-        ['/cam0/depth'], 
-        [None], 
+        [odom_data, seg_data, depth_data], 
+        ['/odom', '/cam0/seg', '/cam0/depth'], 
+        [None, None, None], 
         None)
 
     # Get the repository root path (where external_msgs_ros1 is located)

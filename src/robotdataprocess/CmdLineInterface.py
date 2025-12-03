@@ -1,4 +1,5 @@
 from collections import defaultdict
+from .data_types.Data import CoordinateFrame
 from .data_types.ImageData import ImageData
 from .data_types.OdometryData import OdometryData
 from decimal import Decimal
@@ -115,7 +116,7 @@ class CmdLineInterface():
         shift_position_xy: float = self.operation_params['extract_odometry_to_csv']['shift_position_xy']
         shift_position_z: float = self.operation_params['extract_odometry_to_csv']['shift_position_z']
 
-        odom_data = OdometryData.from_ros2_bag(self.input_bag, topic)
+        odom_data = OdometryData.from_ros2_bag(self.input_bag, topic, CoordinateFrame.NONE)
         if add_noise:
             odom_data.add_folded_guassian_noise_to_position(xy_noise_std_per_frame, z_noise_std_per_frame)
             odom_data.shift_position(shift_position_xy, shift_position_xy, shift_position_z)

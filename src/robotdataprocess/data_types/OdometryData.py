@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 import csv
 from .Data import CoordinateFrame, Data
 import decimal
@@ -24,18 +24,15 @@ class OdometryData(PathData):
 
     # Define odometry-specific data attributes
     child_frame_id: str
-    frame: CoordinateFrame
     poses: list # Saved nav_msgs/msg/Pose
 
     @typechecked
-    def __init__(self, frame_id: str, child_frame_id: str, frame: CoordinateFrame, 
-                 timestamps: np.ndarray | list, positions: np.ndarray | list, 
-                 orientations: np.ndarray | list):
+    def __init__(self, frame_id: str, child_frame_id: str, timestamps: np.ndarray | list, 
+                 positions: np.ndarray | list, orientations: np.ndarray | list, frame: CoordinateFrame):
         
         # Copy initial values into attributes
-        super().__init__(frame_id, timestamps, positions, orientations)
+        super().__init__(frame_id, timestamps, positions, orientations, frame)
         self.child_frame_id: str = child_frame_id
-        self.frame: CoordinateFrame = frame
         self.poses: list = []
 
         # Check to ensure that all arrays have same length
@@ -48,7 +45,7 @@ class OdometryData(PathData):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str):
+    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str, frame: CoordinateFrame):
         """
         Creates a class structure from a ROS2 bag file with an Odometry topic.
 
@@ -103,7 +100,7 @@ class OdometryData(PathData):
                 pbar.update(1)
 
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, CoordinateFrame.FLU, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
     @typechecked
@@ -161,7 +158,7 @@ class OdometryData(PathData):
                                     for qx, qy, qz, qw in zip(df1['qx'], df1['qy'], df1['qz'], df1['qw'])], dtype=object)
 
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, frame, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
     @typechecked
@@ -199,7 +196,7 @@ class OdometryData(PathData):
                 orientations_np[i] =  line_split[5:8] + [line_split[4]]
         
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, frame, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     # =========================================================================
     # ========================= Manipulation Methods ========================== 
@@ -271,8 +268,8 @@ class OdometryData(PathData):
             self.orientations[i] = R.from_matrix((R_inv @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
 
         # Convert back to decimal array
-        self.positions = convert_collection_into_decimal_array(self.positions)
-        self.orientations = convert_collection_into_decimal_array(self.orientations)
+        self.positions = col_to_dec_arr(self.positions)
+        self.orientations = col_to_dec_arr(self.orientations)
 
     def crop_data(self, start: Decimal, end: Decimal):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
@@ -287,37 +284,6 @@ class OdometryData(PathData):
 
         # Empty poses as they might need to be recalculated
         self.poses = []
-
-    # def umeyama_alignment(self, other: OdometryData):
-    #     """ Aligns self with other using Umeyama alignment """
-
-    #     # Make sure they are in the same frame
-    #     assert self.frame == other.frame
-
-    #     # Get matching timestamps
-    #     matched_idx = np.zeros((0, 2), dtype=int)
-    #     for i, ts in enumerate(self.timestamps):
-    #         indices = np.where(other.timestamps == ts)[0]
-    #         assert len(indices) <= 1
-    #         if len(indices) == 1:
-    #             matched_idx = np.concatenate((matched_idx, np.array([[i, indices[0]]], dtype=int)), axis=0)
-
-    #     # Get positions that overlap
-    #     matched_self = self.positions[matched_idx[:,0]]
-    #     matched_other = other.positions[matched_idx[:,1]]
-
-    #     # Use evo to do umeyama alignment
-    #     R_a, T_a, _ = geometry.umeyama_alignment(matched_self.astype(float).T, matched_other.astype(float).T, False)
-    #     T_a = convert_collection_into_decimal_array(np.expand_dims(T_a, axis=1))
-
-    #     # Update positions and orientations
-    #     self.positions = (R_a @ (self.positions.T - T_a).astype(float)).T
-    #     for i in range(self.len()):
-    #         self.orientations[i] = R.from_matrix((R_a @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
-
-    #     # Convert back to decimal array
-    #     self.positions = convert_collection_into_decimal_array(self.positions)
-    #     self.orientations = convert_collection_into_decimal_array(self.orientations)
 
     # =========================================================================
     # ============================ Export Methods ============================= 
@@ -359,96 +325,6 @@ class OdometryData(PathData):
                     str(self.orientations[i][3]), str(self.orientations[i][0]), str(self.orientations[i][1]), 
                     str(self.orientations[i][2])])
                 pbar.update(1)
-
-    # =========================================================================
-    # ============================ Visualization ============================== 
-    # =========================================================================  
-
-    @typechecked
-    def visualize(self, otherList: list[OdometryData], titles: list[str], axes_length: float = 10.0, axes_interval: int = 1000):
-        """
-        Visualizes this OdometryData (and all others included in otherList)
-        on a single plot.
-
-        Args:
-            otherList (list[OdometryData]): All other OdometryData objects whose
-                odometry should also be visualized on this plot.
-            titles (list[str]): Titles for each OdometryData object, starting 
-                with self.
-        """
-
-        def draw_axes(data: OdometryData, axes_length: int, axes_interval: int):
-            """Helper function that visualizes orientation along the trajectory path with axes."""
-
-            for i in range(0, data.len(), axes_interval):
-                # Extract data
-                pos = data.positions[i].astype(np.float64)
-                quat = data.orientations[i].astype(np.float64)
-                rot = R.from_quat(quat, scalar_first=False)
-
-                # Define unit vectors for X, Y, Z in local frame
-                x_axis = rot.apply([1, 0, 0])
-                y_axis = rot.apply([0, 1, 0])
-                z_axis = rot.apply([0, 0, 1])
-
-                # Plot axes
-                ax.quiver(*pos, *x_axis, length=axes_length, color='r', normalize=True, linewidth=0.8)
-                ax.quiver(*pos, *y_axis, length=axes_length, color='g', normalize=True, linewidth=0.8)
-                ax.quiver(*pos, *z_axis, length=axes_length, color='b', normalize=True, linewidth=0.8)
-
-        # Ensure that the lists are of the proper sizes
-        if (len(otherList) + 1) != len(titles):
-            raise ValueError("Length of titles should be one more than length of otherlist!")
-
-        # Build a 3D plot
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-
-        ax.plot(self.positions[:,0].astype(np.float64), 
-                self.positions[:,1].astype(np.float64), 
-                self.positions[:,2].astype(np.float64), label=titles[0])
-        for i, other in enumerate(otherList):
-            ax.plot(other.positions[:,0].astype(np.float64), 
-                    other.positions[:,1].astype(np.float64), 
-                    other.positions[:,2].astype(np.float64), 
-                    label=titles[1+i])
-
-        # Draw orientation axes (X = red, Y = green, Z = blue)
-        draw_axes(self, axes_length=axes_length, axes_interval=axes_interval)
-        for other in otherList:
-            draw_axes(other, axes_length=axes_length, axes_interval=axes_interval)
-
-        # Set labels
-        ax.set_title("Trajectory Comparison with Full Orientation")
-        ax.set_xlabel("X (m)")
-        ax.set_ylabel("Y (m)")
-        ax.set_zlabel("Z (m)")
-        ax.legend()
-
-        # Concatenate all x, y and z values together
-        all_x = self.positions[:,0]
-        all_y = self.positions[:,1]
-        all_z = self.positions[:,2]
-        for other in otherList:
-            all_x = np.concatenate((all_x, other.positions[:,0]))
-            all_y = np.concatenate((all_y, other.positions[:,1]))
-            all_z = np.concatenate((all_z, other.positions[:,2]))
-        all_x = all_x.astype(np.float64)
-        all_y = all_y.astype(np.float64)
-        all_z = all_z.astype(np.float64)
-
-        # Set an equal scale for all axes
-        x_center = (all_x.max() + all_x.min()) / 2
-        y_center = (all_y.max() + all_y.min()) / 2
-        z_center = (all_z.max() + all_z.min()) / 2
-        max_range = max(all_x.max() - all_x.min(), all_y.max() - all_y.min(), all_z.max() - all_z.min()) / 2
-        ax.set_xlim(x_center - max_range, x_center + max_range)
-        ax.set_ylim(y_center - max_range, y_center + max_range)
-        ax.set_zlim(z_center - max_range, z_center + max_range)
-
-        # Show the plot
-        plt.tight_layout()
-        plt.show()
 
     # =========================================================================
     # =========================== Frame Conversions =========================== 

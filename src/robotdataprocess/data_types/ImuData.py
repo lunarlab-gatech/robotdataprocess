@@ -1,39 +1,41 @@
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .Data import Data, CoordinateFrame
 import decimal
 from decimal import Decimal
 import numpy as np
 from pathlib import Path
+from robotdataprocess.data_types.PathData import PathData
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
+import tqdm
 
 class ImuData(Data):
 
     # Define IMU-specific data attributes
     lin_acc: np.ndarray[Decimal]
     ang_vel: np.ndarray[Decimal]
-    orientation: np.ndarray[Decimal] # quaternions (x, y, z, w)
+    orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
     @typechecked
     def __init__(self, frame_id: str, frame: CoordinateFrame, timestamps: np.ndarray | list, 
                  lin_acc: np.ndarray | list, ang_vel: np.ndarray | list,
-                 orientation: np.ndarray | list):
+                 orientations: np.ndarray | list):
         
         # Copy initial values into attributes
         super().__init__(frame_id, timestamps)
         self.frame = frame
-        self.lin_acc = convert_collection_into_decimal_array(lin_acc)
-        self.ang_vel = convert_collection_into_decimal_array(ang_vel)
-        self.orientation = convert_collection_into_decimal_array(orientation)
+        self.lin_acc = col_to_dec_arr(lin_acc)
+        self.ang_vel = col_to_dec_arr(ang_vel)
+        self.orientations = col_to_dec_arr(orientations)
 
         # Check to ensure that all arrays have same length
         if len(self.timestamps) != len(self.lin_acc) or len(self.lin_acc) != len(self.ang_vel) \
-            or len(self.ang_vel) != len(self.orientation):
+            or len(self.ang_vel) != len(self.orientations):
             raise ValueError("Lengths of timestamp, lin_acc, ang_vel, and orientation arrays are not equal!")
 
     # =========================================================================
@@ -116,7 +118,7 @@ class ImuData(Data):
         orientation_folder_path = Path(folder_path) / 'ori_global.npy'
 
         # Load the data
-        timestamps = convert_collection_into_decimal_array(np.load(ts_folder_path))
+        timestamps = col_to_dec_arr(np.load(ts_folder_path))
         lin_acc = np.load(lin_acc_folder_path)
         ang_vel = np.load(ang_vel_folder_path)
 
@@ -144,6 +146,8 @@ class ImuData(Data):
             frame (CoordinateFrame): The coordinate system convention of this data.
         Returns:
             ImuData: Instance of this class.
+
+        NOTE: Sets orientation to identity! 
         """
         
         # Count the number of lines in the file
@@ -165,7 +169,7 @@ class ImuData(Data):
                 lin_acc[i] = line_split[1:4]
                 ang_vel[i] = line_split[4:7]
         
-        # Set orientation to identity, as we don't have orientation from HERCULES IMU
+        # Set orientation to identity, as it is assumed this text file doesn't have it
         orientation = np.zeros((lin_acc.shape[0], 4), dtype=int)
         orientation[:,3] = np.ones((lin_acc.shape[0]), dtype=int)
 
@@ -186,7 +190,7 @@ class ImuData(Data):
         self.timestamps = self.timestamps[mask]
         self.lin_acc = self.lin_acc[mask]
         self.ang_vel = self.ang_vel[mask]
-        self.orientation = self.orientation[mask]
+        self.orientations = self.orientations[mask]
 
     # =========================================================================
     # =========================== Frame Conversions =========================== 
@@ -210,7 +214,7 @@ class ImuData(Data):
             self.lin_acc = (R_NED @ self.lin_acc.T).T
             self.ang_vel = (R_NED @ self.ang_vel.T).T
             for i in range(self.len()):
-                self.orientation[i] = (R_NED_Q * R.from_quat(self.orientation[i]) * R_NED_Q.inv()).as_quat()
+                self.orientations[i] = (R_NED_Q * R.from_quat(self.orientations[i]) * R_NED_Q.inv()).as_quat()
 
             # Update frame
             self.frame = CoordinateFrame.FLU
@@ -218,6 +222,82 @@ class ImuData(Data):
         # Otherwise, throw an error
         else:
             raise RuntimeError(f"ImuData class is in an unexpected frame: {self.frame}!")
+        
+    # =========================================================================
+    # ============================ Export Methods ============================= 
+    # =========================================================================  
+
+    def to_PathData(self, initial_pos: np.ndarray[float], initial_vel: np.ndarray[float], 
+                    initial_ori: np.ndarray[float], use_ang_vel: bool) -> PathData:
+        """
+        Converts this IMUData class into OdometeryData by integrating the IMU data using
+        Euler's method.
+
+        Parameters:
+            initial_pos: The initial position as a numpy array.
+            initial_vel: The initial velocity as a numpy array.
+            initial_ori: The initial orientation as a numpy array (quaternion x, y, z, w).
+            use_ang_vel: If True, will use angular velocity data to calculate orientation.
+                If False, will use orientation data directly from the IMUData class.
+
+        Returns:
+            PathData: The resulting PathData class.
+        """
+
+        print("WARNING: This code has not been extensively tested yet!")
+
+        # Setup arrays to hold integrated data 
+        pos = np.zeros((self.len(), 3), dtype=float)
+        pos[0] = initial_pos
+        vel = np.zeros((self.len(), 3), dtype=float)
+        vel[0] = initial_vel
+
+        # Setup array to hold orientation data
+        if use_ang_vel:
+            ori = np.zeros((self.len(), 4), dtype=float)  
+            ori[:, 3] = np.ones((self.len()), dtype=float)
+        else:
+            ori = dec_arr_to_float_arr(self.orientations)
+        ori[0] = initial_ori
+
+        # Setup a tqdm progress bar
+        pbar = tqdm.tqdm(total=self.len()-1, desc="Integrating IMU Data", unit="steps")
+
+        # Integrate the IMU data
+        for i in range(1, self.len()):
+            # Get time difference
+            dt: float = dec_arr_to_float_arr(self.timestamps[i] - self.timestamps[i-1])
+
+            # Calculate orientation
+            if use_ang_vel:
+                cur_ori = R.from_quat(ori[i-1])
+                delta_q = R.from_rotvec(dec_arr_to_float_arr(self.ang_vel[i-1]) * dt)
+                new_ori = (cur_ori * delta_q).as_quat()
+                ori[i] = new_ori / np.linalg.norm(new_ori)
+
+            # Rotate linear acceleration into world frame
+            r = R.from_quat(ori[i-1])
+            lin_acc_world = r.apply(dec_arr_to_float_arr(self.lin_acc[i-1]))
+            lin_acc_world = lin_acc_world
+
+            # Subtract gravity
+            GRAVITY_CONST = 9.80665
+            if self.frame == CoordinateFrame.FLU:
+                lin_acc_world[2] -= GRAVITY_CONST
+            elif self.frame == CoordinateFrame.NED:
+                lin_acc_world[2] += GRAVITY_CONST
+            else:
+                raise RuntimeError(f"to_PathData() doesn't currently support this frame: {self.frame}!")
+
+            # Calculate velocity
+            vel[i] = vel[i-1] + lin_acc_world * dt
+
+            # Calculate position
+            pos[i] = pos[i-1] + vel[i-1] * dt + 0.5 * lin_acc_world * dt * dt
+            pbar.update(1)
+
+        # Return the resulting PathData class
+        return PathData(self.frame_id, self.timestamps, pos, ori, self.frame)
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
@@ -244,10 +324,6 @@ class ImuData(Data):
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
-
-        # Make sure our data is in the FLU frame, otherwise throw an error
-        if self.frame != CoordinateFrame.FLU:
-            raise RuntimeError("Convert this IMU Data to a FLU coordinate frame before writing to a ROS2 bag!")
 
         # Get ROS2 message classes
         typestore = get_typestore(Stores.ROS2_HUMBLE)

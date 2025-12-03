@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array, convert_decimal_array_into_float_array
+from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
-from .Data import Data
+from .Data import Data, CoordinateFrame
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
+from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
 import tqdm
 
@@ -18,13 +20,16 @@ class PathData(Data):
 
     positions: np.ndarray[Decimal] # meters (x, y, z)
     orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
+    frame: CoordinateFrame
 
     @typechecked
     def __init__(self, frame_id: str, timestamps: np.ndarray | list, 
-                 positions: np.ndarray | list, orientations: np.ndarray | list):
+                 positions: np.ndarray | list, orientations: np.ndarray | list, 
+                 frame: CoordinateFrame):
         super().__init__(frame_id, timestamps)
-        self.positions = convert_collection_into_decimal_array(positions)
-        self.orientations = convert_collection_into_decimal_array(orientations)
+        self.positions = col_to_dec_arr(positions)
+        self.orientations = col_to_dec_arr(orientations)
+        self.frame = frame
 
     # =========================================================================
     # ============================ Class Methods ============================== 
@@ -32,7 +37,7 @@ class PathData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str):
+    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str, frame: CoordinateFrame) -> PathData:
         """
         Creates a class structure from a ROS2 bag file with a Path topic.
 
@@ -95,32 +100,175 @@ class PathData(Data):
                     pbar.update(1)
 
         # Create an OdometryData class
-        return cls(frame_id, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, timestamps_np, positions_np, orientations_np, frame)
+    
+    @classmethod
+    def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame) -> PathData:
+        """ Creates a PathData object from an evo PoseTrajectory3D object. """
+        
+        print("Warning! This code has not been unit tested yet!")
+
+        # Convert orientations from wxyz to xyzw
+        orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
+
+        return cls(frame_id=frame_id, 
+                   timestamps=pose_trajectory_3d.timestamps, 
+                   positions=pose_trajectory_3d.positions_xyz, 
+                   orientations=orientations_xyzw,
+                   frame=frame)
+    
+    # =========================================================================
+    # ============================ Visualization ============================== 
+    # =========================================================================  
+
+    @typechecked
+    def visualize(self, otherList: list[PathData], titles: list[str], axes_length: float | list[float] = 10.0, axes_interval: int | list[int] = 1000):
+        """
+        Visualizes this PathData (and all others included in otherList)
+        on a single plot.
+
+        Args:
+            otherList (list[PathData]): All other PathData objects whose path should also be visualized on this plot.
+            titles (list[str]): Titles for each PathData object, starting with self.
+
+        """
+
+        print("Warning! This code has not been unit tested yet!")
+
+        def draw_axes(data: PathData, axes_length: int, axes_interval: int):
+            """Helper function that visualizes orientation along the trajectory path with axes."""
+
+            for i in range(0, data.len(), axes_interval):
+                # Extract data
+                pos = data.positions[i].astype(np.float64)
+                quat = data.orientations[i].astype(np.float64)
+                rot = R.from_quat(quat, scalar_first=False)
+
+                # Define unit vectors for X, Y, Z in local frame
+                x_axis = rot.apply([1, 0, 0])
+                y_axis = rot.apply([0, 1, 0])
+                z_axis = rot.apply([0, 0, 1])
+
+                # Plot axes
+                ax.quiver(*pos, *x_axis, length=axes_length, color='r', normalize=True, linewidth=0.8)
+                ax.quiver(*pos, *y_axis, length=axes_length, color='g', normalize=True, linewidth=0.8)
+                ax.quiver(*pos, *z_axis, length=axes_length, color='b', normalize=True, linewidth=0.8)
+
+        # Ensure that the lists are of the proper sizes
+        if (len(otherList) + 1) != len(titles):
+            raise ValueError("Length of titles should be one more than length of otherlist!")
+
+        # Build a 3D plot
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        ax.plot(self.positions[:,0].astype(np.float64), 
+                self.positions[:,1].astype(np.float64), 
+                self.positions[:,2].astype(np.float64), label=titles[0])
+        for i, other in enumerate(otherList):
+            ax.plot(other.positions[:,0].astype(np.float64), 
+                    other.positions[:,1].astype(np.float64), 
+                    other.positions[:,2].astype(np.float64), 
+                    label=titles[1+i])
+            
+        # Handle axes_length and axes_interval if they are lists
+        if isinstance(axes_length, list):
+            if len(axes_length) != (len(otherList) + 1):
+                raise ValueError("If axes_length is a list, it must be the same length as otherList + 1!")
+        else: axes_length: list[float] = [axes_length] * (len(otherList) + 1)
+
+        if isinstance(axes_interval, list):
+            if len(axes_interval) != (len(otherList) + 1):
+                raise ValueError("If axes_interval is a list, it must be the same length as otherList + 1!")
+        else: axes_interval: list[int] = [axes_interval] * (len(otherList) + 1)
+
+        # Draw orientation axes (X = red, Y = green, Z = blue)
+        draw_axes(self, axes_length=axes_length[0], axes_interval=axes_interval[0])
+        for i, other in enumerate(otherList):
+            draw_axes(other, axes_length=axes_length[i+1], axes_interval=axes_interval[i+1])
+
+        # Set labels
+        ax.set_title("Trajectory Comparison with Full Orientation")
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_zlabel("Z (m)")
+        ax.legend()
+
+        # Concatenate all x, y and z values together
+        all_x = self.positions[:,0]
+        all_y = self.positions[:,1]
+        all_z = self.positions[:,2]
+        for other in otherList:
+            all_x = np.concatenate((all_x, other.positions[:,0]))
+            all_y = np.concatenate((all_y, other.positions[:,1]))
+            all_z = np.concatenate((all_z, other.positions[:,2]))
+        all_x = all_x.astype(np.float64)
+        all_y = all_y.astype(np.float64)
+        all_z = all_z.astype(np.float64)
+
+        # Set an equal scale for all axes
+        x_center = (all_x.max() + all_x.min()) / 2
+        y_center = (all_y.max() + all_y.min()) / 2
+        z_center = (all_z.max() + all_z.min()) / 2
+        max_range = max(all_x.max() - all_x.min(), all_y.max() - all_y.min(), all_z.max() - all_z.min()) / 2
+        ax.set_xlim(x_center - max_range, x_center + max_range)
+        ax.set_ylim(y_center - max_range, y_center + max_range)
+        ax.set_zlim(z_center - max_range, z_center + max_range)
+
+        # Show the plot
+        plt.tight_layout()
+        plt.show()
     
     # =========================================================================
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
+    def to_OdometryData(self, new_frame_id: str):
+        """ 
+        Returns an OdometryData object for this class. 
+
+        Parameters:
+            new_frame_id: The new frame ID to assign to the OdometryData object. 
+                The previous frame ID of this PathData object will be used as the
+                child_frame_id of the OdometryData object.
+        """
+
+        print("Warning! This code has not been unit tested yet!")
+
+        from .OdometryData import OdometryData
+        return OdometryData(frame_id=new_frame_id,
+                            child_frame_id=self.frame_id,
+                            timestamps=self.timestamps,
+                            positions=self.positions,
+                            orientations=self.orientations,
+                            frame=self.frame)
+
     def to_evo(self) -> PoseTrajectory3D:
         """ Returns an evo PoseTrajectory3D object for this class. """
 
-        orientations_wxyz = convert_decimal_array_into_float_array(self.orientations[:, [3, 0, 1, 2]])
-        return PoseTrajectory3D(positions_xyz=convert_decimal_array_into_float_array(self.positions), 
+        print("Warning! This code has not been unit tested yet!")
+
+        orientations_wxyz = dec_arr_to_float_arr(self.orientations[:, [3, 0, 1, 2]])
+        return PoseTrajectory3D(positions_xyz=dec_arr_to_float_arr(self.positions), 
                                 orientations_quat_wxyz=orientations_wxyz,
-                                timestamps=convert_decimal_array_into_float_array(self.timestamps))
+                                timestamps=dec_arr_to_float_arr(self.timestamps))
     
     # =========================================================================
     # ======================= Multi PathData Methods ========================== 
     # ========================================================================= 
 
     @staticmethod
-    def calculate_trajectory_errors(gt_path: PathData, est_path: PathData, max_diff: float) -> dict:
+    def calculate_trajectory_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
+                                    axes_length: float | list[float] = 10.0, axes_interval: int | list[int] = 1000) -> dict:
         """
         Utilizing the evo library, calculates a variety of trajectory error metrics
         and returns them in a dictionary.
 
         Parameters:
             max_diff: maximum absolute time difference allowed between associated timestamps
+            visualize: If true, will show a 3D plot of the aligned trajectories.
+            axes_length: Same as in visualize() method.
+            axes_interval: Same as in visualize() method.
         """
 
         gt_traj: PoseTrajectory3D = gt_path.to_evo()
@@ -171,5 +319,15 @@ class PathData(Data):
                 dict_metric[pose_relation.name] = dict_relation
             
             dict_all_results[metric.__name__] = dict_metric
+
+        # Visualize the aligned trajectories if desired
+        if visualize:
+            
+            # Convert est_traj_align back to PathData
+            est_traj_align_pathdata: PathData = PathData.from_evo(est_traj_align, gt_path.frame_id, gt_path.frame)
+
+            # Visualize the aligned trajectories with specified axes length and interval
+            gt_path.visualize([est_traj_align_pathdata], ['Ground Truth', 'Estimated (Aligned)'], 
+                              axes_interval=axes_interval, axes_length=axes_length)
 
         return dict_all_results
