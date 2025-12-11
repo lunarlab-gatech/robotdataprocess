@@ -98,10 +98,10 @@ def main():
     dataset_num = "V1.5"
 
     # Input directory containing your data
-    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 

@@ -108,7 +108,8 @@ class OdometryData(PathData):
     @typechecked
     def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
                  header_included: bool, column_to_data: Union[List[int], None] = None, 
-                 separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None):
+                 separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None,
+                 ts_in_ns: bool = False):
         """
         Creates a class structure from a csv file.
 
@@ -121,10 +122,12 @@ class OdometryData(PathData):
             column_to_data (list[int]): Tells the algorithms which columns in the csv contain which
                 of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
                 index 0 of column_to_data should be the column that timestamp data is found in the 
-                csv file. Set to None to use [0,1,2,3,4,5,6,7]. If filter is not None, then the index
-                of the column_name should be appended to the end of this list.
+                csv file. Set to None to use [0,1,2,3,4,5,6,7].
             separator (str | None): The separator used in the csv file. If None, will use a comma by default.
-            filter: A tuple of (column_name, value), where only rows with column_name == value will be kept.
+            filter: A tuple of (column_name, value), where only rows with column_name == value will be kept. If
+                csv file has no headers, then `column_name` should be the index of the column as a string.
+            ts_in_ns (bool): If True, assumes timestamps are in nanoseconds and converts to seconds. Otherwise,
+                assumes timestamps are already in seconds.
 
         Returns:
             OdometryData: Instance of this class.
@@ -133,40 +136,23 @@ class OdometryData(PathData):
         # If column_to_data is None, assume default
         if column_to_data is None:
             column_to_data = [0,1,2,3,4,5,6,7]
-            if filter is not None:
-                raise ValueError(f"Since filter is provided, column_to_data must be provided to specify location of {filter[0]}!")
         else:
             # Check column_to_data values are valid
             assert np.all(np.array(column_to_data) >= 0)
-
-        # Check length of column_to_data
-        if filter is not None: assert len(column_to_data) == 9
-        else: assert len(column_to_data) == 8
-
-        # Determine column names to apply
-        column_names = []
-        desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
-        if filter is not None:
-            desired_data.append(filter[0])
-        i = 0
-        while not np.all([x == -1 for x in column_to_data]):
-            if i in column_to_data: # This column has relevant data
-                index_in_column_to_data = column_to_data.index(i)
-                column_names.append(desired_data[index_in_column_to_data])
-                column_to_data[index_in_column_to_data] = -1
-                
-            else: # This column should be ignored
-                column_names.append("unused_" + str(i))
-
-            # Increase count
-            i += 1
+            assert len(column_to_data) == 8
 
         # Read the csv file
         header = 0 if header_included else None
-        df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False, sep=separator)
+        df1 = pd.read_csv(str(csv_path), header=header, index_col=False, sep=separator, engine='python')
+
+        # Rename columns to standard names
+        rename_dict = {}
+        desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
+        for j, ind in enumerate(column_to_data):
+            rename_dict[df1.columns[ind]] = desired_data[j]
+        df1 = df1.rename(columns=rename_dict)
 
         # Using the filter if provided, remove unwanted rows
-        print("WARNING! The filter functionality is untested!") # TODO: Remove this warning after testing
         if filter is not None:
             df1 = df1[df1[filter[0]] == filter[1]]
 
@@ -176,6 +162,10 @@ class OdometryData(PathData):
                                  for x, y, z in zip(df1['x'], df1['y'], df1['z'])], dtype=object)
         orientations_np = np.array([[Decimal(str(qx)), Decimal(str(qy)), Decimal(str(qz)), Decimal(str(qw))]
                                     for qx, qy, qz, qw in zip(df1['qx'], df1['qy'], df1['qz'], df1['qw'])], dtype=object)
+        
+        # If timestamps are in ns, convert to s
+        if ts_in_ns:
+            timestamps_np = timestamps_np / Decimal('1e9')
 
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)

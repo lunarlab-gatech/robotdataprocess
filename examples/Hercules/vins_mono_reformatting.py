@@ -31,7 +31,7 @@ def main():
                     odom_data.timestamps = odom_data.timestamps / Decimal('1e9')
 
                 # Save the csv in a ROMAN friendly format
-                output_path = '/home/dbutterfield3/Desktop/data/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/' \
+                output_path = '/media/dbutterfield3/T731/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/' \
                               + robot_name + '/' + file_name.replace('.csv', '_reformatted.csv')
                 if os.path.exists(output_path):
                     print("Deleting CSV file at this location previously...")

@@ -8,7 +8,7 @@ def main():
 
     for robot_name in robot_names:
         dataset_version = "V1.4.1"
-        robot_folder = "/home/dbutterfield3/Desktop/data/Hercules_datasets/" + dataset_version + \
+        robot_folder = "/media/dbutterfield3/T731/Hercules_datasets/" + dataset_version + \
                     "/extract/files_for_roman_baseline/" + robot_name
         est_data = OdometryData.from_csv(robot_folder + '/vins_result_loop_reformatted.csv', 
                                         "world", "robot", CoordinateFrame.FLU, True, None)

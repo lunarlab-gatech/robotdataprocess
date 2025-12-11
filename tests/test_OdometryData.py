@@ -46,6 +46,19 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data.positions[688].astype(np.float128), [-3.896535,-1.679678,-1.445265])
         np.testing.assert_array_almost_equal(odom_data.orientations[688].astype(np.float128), [0.0034349994640731434,0.00016199997472484692,-0.9997928440128326, 0.020060996870093543], 16)
 
+        # ===== Test with header and a filter =====
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_csv', 'vertex_poses_velocities_biases.csv').absolute()
+        odom_data = OdometryData.from_csv(file_path, "odom", "base_link", CoordinateFrame.NED, True, [0,3,4,5,6,7,8,9], filter=(' mission-id', ' 38a88adc194a7f180900000000000000'), ts_in_ns=True)
+
+        # Make sure it matches what we expect
+        np.testing.assert_equal(float(odom_data.timestamps[0]), 589.1)
+        np.testing.assert_array_equal(odom_data.positions[0].astype(np.float128), [-68521.3784775933, -96139.6097434788, 3995.39987267099])
+        np.testing.assert_array_equal(odom_data.orientations[0].astype(np.float128), [-0.68937326290076, -0.344671762209619, -0.636848081697329, 0.0197585822190744])
+
+        np.testing.assert_equal(float(odom_data.timestamps[10]), 590.1)
+        np.testing.assert_array_equal(odom_data.positions[10].astype(np.float128), [-68760.22833236, -97018.3443167711, 4776.87739072918])
+        np.testing.assert_array_equal(odom_data.orientations[10].astype(np.float128), [0.586834741837591, 0.199208236471664, -0.784542763433785, 0.0208258646384441])
+
     def test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag(self):
         """
         Test that we can load Odometry data from a txt file 

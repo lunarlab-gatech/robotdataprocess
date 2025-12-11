@@ -40,7 +40,7 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
 def main(): 
     # Enter desired configuration here
     dataset_num = "V1.6"
-    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/data'
+    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Drone1"]
     robot_crop_end_times = [None] 
 

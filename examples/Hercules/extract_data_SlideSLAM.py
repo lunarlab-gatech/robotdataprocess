@@ -56,8 +56,8 @@ def main():
     crop_data = False
     end_time = None
 
-    input_dir = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/data/' + robot_name
-    output_bag = '/home/dbutterfield3/Desktop/data/Hercules_datasets/' + dataset_num + '/extract/bags_for_slideslam/' + robot_name + '.bag'
+    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    output_bag = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/extract/bags_for_slideslam/' + robot_name + '.bag'
 
     extract_to_bag(input_dir, output_bag, robot_name, crop_data, end_time)
 

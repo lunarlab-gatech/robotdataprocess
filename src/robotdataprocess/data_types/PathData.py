@@ -144,7 +144,7 @@ class PathData(Data):
                 # Extract data
                 pos = data.positions[i].astype(np.float64)
                 quat = data.orientations[i].astype(np.float64)
-                rot = R.from_quat(quat, scalar_first=False)
+                rot = R.from_quat(quat)
 
                 # Define unit vectors for X, Y, Z in local frame
                 x_axis = rot.apply([1, 0, 0])
@@ -234,8 +234,6 @@ class PathData(Data):
             new_child_frame_id: The new child frame ID to assign to the OdometryData object.
         """
 
-        print("Warning! This code has not been unit tested yet!")
-
         from .OdometryData import OdometryData
         return OdometryData(frame_id=new_frame_id,
                             child_frame_id=new_child_frame_id,
@@ -262,8 +260,9 @@ class PathData(Data):
     def make_start_and_end_times_match(est: list[PathData], gt: list[PathData]) -> tuple[list[PathData], list[PathData]]:
         """ 
         For pairs of lists of PathData objects, extract each pair by index and 
-        ensure that the first and last timestamps match by adding extra entries from 
-        the other PathData object as needed. 
+        ensure that the first and last timestamps match by extending the data
+        as necessary at the start and end with duplicate values. Used for evaluation
+        purposes.
         
         Mimics the behavior found in ROMAN's (https://github.com/lunarlab-gatech/roman) evaluation scripts.
 
@@ -271,8 +270,6 @@ class PathData(Data):
             est: List of PathData objects that represent estimated paths.
             gt: List of PathData objects that represent ground truth paths.
         """
-
-        print("Warning! This code has not been unit tested yet!")
 
         # Check that the lists are the same length
         if len(est) == 0 or len(gt) == 0 or len(est) != len(gt):

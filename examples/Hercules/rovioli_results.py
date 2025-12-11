@@ -9,9 +9,9 @@ def main():
     for robot_name in robot_names:
         dataset_version = "V1.5"
 
-        gt_csv = "/home/dbutterfield3/Desktop/data/Hercules_datasets/" + dataset_version + \
+        gt_csv = "/media/dbutterfield3/T731/Hercules_datasets/" + dataset_version + \
                     "/extract/files_for_roman_baseline/" + robot_name + '/poseGT.csv'
-        rovioli_csv = "/home/dbutterfield3/Desktop/data/Hercules_datasets/" + dataset_version + \
+        rovioli_csv = "/media/dbutterfield3/T731/Hercules_datasets/" + dataset_version + \
                     "/results/maplab_results/rovioli/" + robot_name + '/estimated_poses.csv'
         
         est_data = OdometryData.from_csv(rovioli_csv, "world", "robot", CoordinateFrame.FLU, True, [0,1,2,3,7,4,5,6], separator=r'\s')
