@@ -38,7 +38,7 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_equal(float(ros_data.timestamps[87212]), 436.065000)
         np.testing.assert_array_equal(ros_data.lin_acc[87212].astype(np.float128), [-0.124648, -0.091863, -10.415014])
         np.testing.assert_array_equal(ros_data.ang_vel[87212].astype(np.float128), [0.001785, 0.004928, 0.003135])
-        np.testing.assert_array_equal(ros_data.orientation[87212].astype(np.float128), [0, 0, 0, 1])
+        np.testing.assert_array_equal(ros_data.orientations[87212].astype(np.float128), [0, 0, 0, 1])
         np.testing.assert_equal(ros_data.frame_id, '/Husky1/base_link')
 
     def test_crop_data(self):
@@ -54,7 +54,7 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(imu_data_cropped.timestamps, imu_data.timestamps[13:75])
         np.testing.assert_array_equal(imu_data_cropped.lin_acc, imu_data.lin_acc[13:75])
         np.testing.assert_array_equal(imu_data_cropped.ang_vel, imu_data.ang_vel[13:75])
-        np.testing.assert_array_equal(imu_data_cropped.orientation, imu_data.orientation[13:75])
+        np.testing.assert_array_equal(imu_data_cropped.orientations, imu_data.orientations[13:75])
 
 
     # def test_to_FLU_frame(self):

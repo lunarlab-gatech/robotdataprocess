@@ -7,6 +7,7 @@ from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from scipy.spatial.transform import Rotation as R
 import unittest
 
 class TestOdometryData(unittest.TestCase):
@@ -64,7 +65,7 @@ class TestOdometryData(unittest.TestCase):
         Ros2BagWrapper.write_data_to_rosbag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
 
         # Load the data back again
-        ros_data = OdometryData.from_ros2_bag(bag_path, '/odom')
+        ros_data = OdometryData.from_ros2_bag(bag_path, '/odom', CoordinateFrame.FLU)
 
         # Make sure this data matches what we expect
         np.testing.assert_equal(float(ros_data.timestamps[32]), 690.100000)
@@ -75,7 +76,7 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_equal(ros_data.frame, CoordinateFrame.FLU)
 
         # Make sure the Odometry and Path options match in their data. 
-        path_data = PathData.from_ros2_bag(bag_path, '/odom/path')
+        path_data = PathData.from_ros2_bag(bag_path, '/odom/path', CoordinateFrame.FLU)
         np.testing.assert_equal(ros_data.len(), path_data.len() * 10)
         np.testing.assert_equal(ros_data.frame_id, path_data.frame_id)
         np.testing.assert_equal(ros_data.timestamps[30], path_data.timestamps[3])
@@ -90,7 +91,7 @@ class TestOdometryData(unittest.TestCase):
         def compare_with_expected(odom_data: OdometryData):
             np.testing.assert_equal(float(odom_data.timestamps[32]), 690.100000)
             np.testing.assert_array_equal(odom_data.positions[32].astype(np.float128), [-66.153381, 76.155663, -1.445448])
-            np.testing.assert_array_almost_equal(odom_data.orientations[32].astype(np.float128), [0.0012460003013751132, 0.0005660001369007335, -0.9165542216906626, 0.3999080967273826], 8)
+            np.testing.assert_array_almost_equal(odom_data.orientations[32].astype(np.float128), [-0.0012460003013751132, -0.0005660001369007335, 0.9165542216906626, -0.3999080967273826], 8)
             np.testing.assert_equal(odom_data.frame_id, '/Husky1')
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
@@ -146,6 +147,17 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data_cropped.timestamps, odom_data.timestamps[8:59])
         np.testing.assert_array_equal(odom_data_cropped.positions, odom_data.positions[8:59])
         np.testing.assert_array_equal(odom_data_cropped.orientations, odom_data.orientations[8:59])
+
+    def test_ori_apply_rotation(self):
+        # Load the Odometry data
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+
+        # Ensure the rotation functions properly
+        odom_data_rotated = deepcopy(odom_data)
+        rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
+        odom_data_rotated._ori_apply_rotation(rotation)
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
 
 if __name__ == "__main__":
     unittest.main()

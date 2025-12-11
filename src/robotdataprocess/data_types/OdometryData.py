@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 import csv
 from .Data import CoordinateFrame, Data
 import decimal
@@ -8,8 +8,10 @@ from decimal import Decimal
 from evo.core import geometry
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 import os
 import pandas as pd
+from .PathData import PathData
 from pathlib import Path
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
@@ -17,28 +19,23 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
+from typing import Union, List, Tuple
 import tqdm
 
-class OdometryData(Data):
+class OdometryData(PathData):
 
     # Define odometry-specific data attributes
     child_frame_id: str
-    frame: CoordinateFrame
-    positions: np.ndarray[Decimal] # meters (x, y, z)
-    orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
-    poses = [] # Saved nav_msgs/msg/Pose
+    poses: list # Saved nav_msgs/msg/Pose
 
     @typechecked
-    def __init__(self, frame_id: str, child_frame_id: str, frame: CoordinateFrame, 
-                 timestamps: np.ndarray | list, positions: np.ndarray | list, 
-                 orientations: np.ndarray | list):
+    def __init__(self, frame_id: str, child_frame_id: str, timestamps: Union[np.ndarray, list], 
+                 positions: Union[np.ndarray, list], orientations: Union[np.ndarray, list], frame: CoordinateFrame):
         
         # Copy initial values into attributes
-        super().__init__(frame_id, timestamps)
-        self.child_frame_id = child_frame_id
-        self.frame = frame
-        self.positions = convert_collection_into_decimal_array(positions)
-        self.orientations = convert_collection_into_decimal_array(orientations)
+        super().__init__(frame_id, timestamps, positions, orientations, frame)
+        self.child_frame_id: str = child_frame_id
+        self.poses: list = []
 
         # Check to ensure that all arrays have same length
         if len(self.timestamps) != len(self.positions) or len(self.positions) != len(self.orientations):
@@ -50,7 +47,7 @@ class OdometryData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
         """
         Creates a class structure from a ROS2 bag file with an Odometry topic.
 
@@ -105,11 +102,11 @@ class OdometryData(Data):
                 pbar.update(1)
 
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, CoordinateFrame.FLU, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
     @typechecked
-    def from_csv(cls, csv_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame, header_included: bool, column_to_data: list[int] | None):
+    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          header_included: bool, column_to_data: Union[List[int], None] = None, separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None):
         """
         Creates a class structure from a csv file.
 
@@ -122,21 +119,33 @@ class OdometryData(Data):
             column_to_data (list[int]): Tells the algorithms which columns in the csv contain which
                 of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
                 index 0 of column_to_data should be the column that timestamp data is found in the 
-                csv file. Set to None to use [0,1,2,3,4,5,6,7].
+                csv file. Set to None to use [0,1,2,3,4,5,6,7]. If filter is not None, then the index
+                of the column_name should be appended to the end of this list.
+            separator (str | None): The separator used in the csv file. If None, will use a comma by default.
+            filter: A tuple of (column_name, value), where only rows with column_name == value will be kept.
+
         Returns:
             OdometryData: Instance of this class.
         """
 
-        # If column_to_data is None, assume default:
+        # If column_to_data is None, assume default
         if column_to_data is None:
             column_to_data = [0,1,2,3,4,5,6,7]
+            if filter is not None:
+                raise ValueError(f"Since filter is provided, column_to_data must be provided to specify location of {filter[0]}!")
         else:
             # Check column_to_data values are valid
-            assert np.all(column_to_data >= 0)
+            assert np.all(np.array(column_to_data) >= 0)
+
+        # Check length of column_to_data
+        if filter is not None: assert len(column_to_data) == 9
+        else: assert len(column_to_data) == 8
 
         # Determine column names to apply
         column_names = []
         desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
+        if filter is not None:
+            desired_data.append(filter[0])
         i = 0
         while not np.all([x == -1 for x in column_to_data]):
             if i in column_to_data: # This column has relevant data
@@ -152,9 +161,14 @@ class OdometryData(Data):
 
         # Read the csv file
         header = 0 if header_included else None
-        df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False)
+        df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False, sep=separator)
 
-        # Convert columns to np.ndarray[Decimal]
+        # Using the filter if provided, remove unwanted rows
+        print("WARNING! The filter functionality is untested!") # TODO: Remove this warning after testing
+        if filter is not None:
+            df1 = df1[df1[filter[0]] == filter[1]]
+
+        # Convert columns to NDArray[Decimal]
         timestamps_np = np.array([Decimal(str(ts)) for ts in df1['timestamp']], dtype=object)
         positions_np = np.array([[Decimal(str(x)), Decimal(str(y)), Decimal(str(z))] 
                                  for x, y, z in zip(df1['x'], df1['y'], df1['z'])], dtype=object)
@@ -162,11 +176,11 @@ class OdometryData(Data):
                                     for qx, qy, qz, qw in zip(df1['qx'], df1['qy'], df1['qz'], df1['qw'])], dtype=object)
 
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, frame, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame):
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame):
         """
         Creates a class structure from a text file, where the order of values
         in the files follows ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'].
@@ -200,7 +214,7 @@ class OdometryData(Data):
                 orientations_np[i] =  line_split[5:8] + [line_split[4]]
         
         # Create an OdometryData class
-        return cls(frame_id, child_frame_id, frame, timestamps_np, positions_np, orientations_np)
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     # =========================================================================
     # ========================= Manipulation Methods ========================== 
@@ -272,8 +286,8 @@ class OdometryData(Data):
             self.orientations[i] = R.from_matrix((R_inv @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
 
         # Convert back to decimal array
-        self.positions = convert_collection_into_decimal_array(self.positions)
-        self.orientations = convert_collection_into_decimal_array(self.orientations)
+        self.positions = col_to_dec_arr(self.positions)
+        self.orientations = col_to_dec_arr(self.orientations)
 
     def crop_data(self, start: Decimal, end: Decimal):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
@@ -289,43 +303,12 @@ class OdometryData(Data):
         # Empty poses as they might need to be recalculated
         self.poses = []
 
-    # def umeyama_alignment(self, other: OdometryData):
-    #     """ Aligns self with other using Umeyama alignment """
-
-    #     # Make sure they are in the same frame
-    #     assert self.frame == other.frame
-
-    #     # Get matching timestamps
-    #     matched_idx = np.zeros((0, 2), dtype=int)
-    #     for i, ts in enumerate(self.timestamps):
-    #         indices = np.where(other.timestamps == ts)[0]
-    #         assert len(indices) <= 1
-    #         if len(indices) == 1:
-    #             matched_idx = np.concatenate((matched_idx, np.array([[i, indices[0]]], dtype=int)), axis=0)
-
-    #     # Get positions that overlap
-    #     matched_self = self.positions[matched_idx[:,0]]
-    #     matched_other = other.positions[matched_idx[:,1]]
-
-    #     # Use evo to do umeyama alignment
-    #     R_a, T_a, _ = geometry.umeyama_alignment(matched_self.astype(float).T, matched_other.astype(float).T, False)
-    #     T_a = convert_collection_into_decimal_array(np.expand_dims(T_a, axis=1))
-
-    #     # Update positions and orientations
-    #     self.positions = (R_a @ (self.positions.T - T_a).astype(float)).T
-    #     for i in range(self.len()):
-    #         self.orientations[i] = R.from_matrix((R_a @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
-
-    #     # Convert back to decimal array
-    #     self.positions = convert_collection_into_decimal_array(self.positions)
-    #     self.orientations = convert_collection_into_decimal_array(self.orientations)
-
     # =========================================================================
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
     @typechecked
-    def to_csv(self, csv_path: Path | str):
+    def to_csv(self, csv_path: Union[Path, str]):
         """
         Writes the odometry data to a .csv file. Note that data will be
         saved in the following order: timestamp, pos.x, pos.y, pos.z,
@@ -362,98 +345,6 @@ class OdometryData(Data):
                 pbar.update(1)
 
     # =========================================================================
-    # ============================ Visualization ============================== 
-    # =========================================================================  
-
-    @typechecked
-    def visualize(self, otherList: list[OdometryData], titles: list[str]):
-        """
-        Visualizes this OdometryData (and all others included in otherList)
-        on a single plot.
-
-        Args:
-            otherList (list[OdometryData]): All other OdometryData objects whose
-                odometry should also be visualized on this plot.
-            titles (list[str]): Titles for each OdometryData object, starting 
-                with self.
-        """
-
-        def draw_axes(data: OdometryData, label_prefix=""):
-            """Helper function that visualizes orientation along the trajectory path with axes."""
-            axes_interval = 1000
-            axes_length = 10
-
-            for i in range(0, data.len(), axes_interval):
-                # Extract data
-                pos = data.positions[i].astype(np.float64)
-                quat = data.orientations[i].astype(np.float64)
-                rot = R.from_quat(quat, scalar_first=False)
-
-                # Define unit vectors for X, Y, Z in local frame
-                x_axis = rot.apply([1, 0, 0])
-                y_axis = rot.apply([0, 1, 0])
-                z_axis = rot.apply([0, 0, 1])
-
-                # Plot axes
-                ax.quiver(*pos, *x_axis, length=axes_length, color='r', normalize=True, linewidth=0.8)
-                ax.quiver(*pos, *y_axis, length=axes_length, color='g', normalize=True, linewidth=0.8)
-                ax.quiver(*pos, *z_axis, length=axes_length, color='b', normalize=True, linewidth=0.8)
-
-        # Ensure that the lists are of the proper sizes
-        if (len(otherList) + 1) != len(titles):
-            raise ValueError("Length of titles should be one more than length of otherlist!")
-
-        # Build a 3D plot
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-
-        ax.plot(self.positions[:,0].astype(np.float64), 
-                self.positions[:,1].astype(np.float64), 
-                self.positions[:,2].astype(np.float64), label=titles[0])
-        for i, other in enumerate(otherList):
-            ax.plot(other.positions[:,0].astype(np.float64), 
-                    other.positions[:,1].astype(np.float64), 
-                    other.positions[:,2].astype(np.float64), 
-                    label=titles[1+i])
-
-        # Draw orientation axes (X = red, Y = green, Z = blue)
-        draw_axes(self)
-        for other in otherList:
-            draw_axes(other)
-
-        # Set labels
-        ax.set_title("Trajectory Comparison with Full Orientation")
-        ax.set_xlabel("X (m)")
-        ax.set_ylabel("Y (m)")
-        ax.set_zlabel("Z (m)")
-        ax.legend()
-
-        # Concatenate all x, y and z values together
-        all_x = self.positions[:,0]
-        all_y = self.positions[:,1]
-        all_z = self.positions[:,2]
-        for other in otherList:
-            all_x = np.concatenate((all_x, other.positions[:,0]))
-            all_y = np.concatenate((all_y, other.positions[:,1]))
-            all_z = np.concatenate((all_z, other.positions[:,2]))
-        all_x = all_x.astype(np.float64)
-        all_y = all_y.astype(np.float64)
-        all_z = all_z.astype(np.float64)
-
-        # Set an equal scale for all axes
-        x_center = (all_x.max() + all_x.min()) / 2
-        y_center = (all_y.max() + all_y.min()) / 2
-        z_center = (all_z.max() + all_z.min()) / 2
-        max_range = max(all_x.max() - all_x.min(), all_y.max() - all_y.min(), all_z.max() - all_z.min()) / 2
-        ax.set_xlim(x_center - max_range, x_center + max_range)
-        ax.set_ylim(y_center - max_range, y_center + max_range)
-        ax.set_zlim(z_center - max_range, z_center + max_range)
-
-        # Show the plot
-        plt.tight_layout()
-        plt.show()
-
-    # =========================================================================
     # =========================== Frame Conversions =========================== 
     # ========================================================================= 
     def to_FLU_frame(self):
@@ -468,11 +359,9 @@ class OdometryData(Data):
             R_NED = np.array([[1,  0,  0],
                               [0, -1,  0],
                               [0,  0, -1]])
-            R_NED_Q = R.from_matrix(R_NED)
 
-            # Do a change of basis
-            self.positions = (R_NED @ self.positions.T).T
-            self._ori_change_of_basis(R_NED_Q)
+            # Do a change of basis to update the frame
+            self._convert_frame(R_NED)
 
             # Update frame
             self.frame = CoordinateFrame.FLU
@@ -481,6 +370,13 @@ class OdometryData(Data):
         else:
             raise RuntimeError(f"OdometryData class is in an unexpected frame: {self.frame}!")
     
+    @typechecked
+    def _convert_frame(self, R_frame: np.ndarray):
+        """ Uses a change of basis to update the positions and orientations. """
+        R_frame_Q = R.from_matrix(R_frame)
+        self.positions = (R_frame @ self.positions.T).T
+        self._ori_change_of_basis(R_frame_Q)
+
     @typechecked
     def _ori_apply_rotation(self, R_i: R):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
