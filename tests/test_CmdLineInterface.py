@@ -331,6 +331,11 @@ class TestCmdLineInterface(unittest.TestCase):
         if os.path.exists(output_file):
             os.remove(output_file)
 
+        # Create output folder if it doesn't exist
+        output_folder = output_file.parent
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
         # Call the operation to write the csv file
         self.manipulator = CmdLineInterface(**config_dict)
 
