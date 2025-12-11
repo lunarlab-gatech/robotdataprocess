@@ -91,7 +91,7 @@ class TestOdometryData(unittest.TestCase):
         def compare_with_expected(odom_data: OdometryData):
             np.testing.assert_equal(float(odom_data.timestamps[32]), 690.100000)
             np.testing.assert_array_equal(odom_data.positions[32].astype(np.float128), [-66.153381, 76.155663, -1.445448])
-            np.testing.assert_array_almost_equal(odom_data.orientations[32].astype(np.float128), [0.0012460003013751132, 0.0005660001369007335, -0.9165542216906626, 0.3999080967273826], 8)
+            np.testing.assert_array_almost_equal(odom_data.orientations[32].astype(np.float128), [-0.0012460003013751132, -0.0005660001369007335, 0.9165542216906626, -0.3999080967273826], 8)
             np.testing.assert_equal(odom_data.frame_id, '/Husky1')
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)

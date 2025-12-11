@@ -8,6 +8,7 @@ from decimal import Decimal
 from evo.core import geometry
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 import os
 import pandas as pd
 from .PathData import PathData
@@ -18,6 +19,7 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
+from typing import Union, List, Tuple
 import tqdm
 
 class OdometryData(PathData):
@@ -27,8 +29,8 @@ class OdometryData(PathData):
     poses: list # Saved nav_msgs/msg/Pose
 
     @typechecked
-    def __init__(self, frame_id: str, child_frame_id: str, timestamps: np.ndarray | list, 
-                 positions: np.ndarray | list, orientations: np.ndarray | list, frame: CoordinateFrame):
+    def __init__(self, frame_id: str, child_frame_id: str, timestamps: Union[np.ndarray, list], 
+                 positions: Union[np.ndarray, list], orientations: Union[np.ndarray, list], frame: CoordinateFrame):
         
         # Copy initial values into attributes
         super().__init__(frame_id, timestamps, positions, orientations, frame)
@@ -45,7 +47,7 @@ class OdometryData(PathData):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str, frame: CoordinateFrame):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
         """
         Creates a class structure from a ROS2 bag file with an Odometry topic.
 
@@ -104,7 +106,7 @@ class OdometryData(PathData):
     
     @classmethod
     @typechecked
-    def from_csv(cls, csv_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame, header_included: bool, column_to_data: list[int] | None, separator: str | None = None):
+    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          header_included: bool, column_to_data: Union[List[int], None] = None, separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None):
         """
         Creates a class structure from a csv file.
 
@@ -117,22 +119,33 @@ class OdometryData(PathData):
             column_to_data (list[int]): Tells the algorithms which columns in the csv contain which
                 of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
                 index 0 of column_to_data should be the column that timestamp data is found in the 
-                csv file. Set to None to use [0,1,2,3,4,5,6,7].
+                csv file. Set to None to use [0,1,2,3,4,5,6,7]. If filter is not None, then the index
+                of the column_name should be appended to the end of this list.
             separator (str | None): The separator used in the csv file. If None, will use a comma by default.
+            filter: A tuple of (column_name, value), where only rows with column_name == value will be kept.
+
         Returns:
             OdometryData: Instance of this class.
         """
 
-        # If column_to_data is None, assume default:
+        # If column_to_data is None, assume default
         if column_to_data is None:
             column_to_data = [0,1,2,3,4,5,6,7]
+            if filter is not None:
+                raise ValueError(f"Since filter is provided, column_to_data must be provided to specify location of {filter[0]}!")
         else:
             # Check column_to_data values are valid
             assert np.all(np.array(column_to_data) >= 0)
 
+        # Check length of column_to_data
+        if filter is not None: assert len(column_to_data) == 9
+        else: assert len(column_to_data) == 8
+
         # Determine column names to apply
         column_names = []
         desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
+        if filter is not None:
+            desired_data.append(filter[0])
         i = 0
         while not np.all([x == -1 for x in column_to_data]):
             if i in column_to_data: # This column has relevant data
@@ -150,7 +163,12 @@ class OdometryData(PathData):
         header = 0 if header_included else None
         df1 = pd.read_csv(str(csv_path), header=header, names=column_names, index_col=False, sep=separator)
 
-        # Convert columns to np.ndarray[Decimal]
+        # Using the filter if provided, remove unwanted rows
+        print("WARNING! The filter functionality is untested!") # TODO: Remove this warning after testing
+        if filter is not None:
+            df1 = df1[df1[filter[0]] == filter[1]]
+
+        # Convert columns to NDArray[Decimal]
         timestamps_np = np.array([Decimal(str(ts)) for ts in df1['timestamp']], dtype=object)
         positions_np = np.array([[Decimal(str(x)), Decimal(str(y)), Decimal(str(z))] 
                                  for x, y, z in zip(df1['x'], df1['y'], df1['z'])], dtype=object)
@@ -162,7 +180,7 @@ class OdometryData(PathData):
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Path | str, frame_id: str, child_frame_id: str, frame: CoordinateFrame):
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame):
         """
         Creates a class structure from a text file, where the order of values
         in the files follows ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'].
@@ -290,7 +308,7 @@ class OdometryData(PathData):
     # =========================================================================  
 
     @typechecked
-    def to_csv(self, csv_path: Path | str):
+    def to_csv(self, csv_path: Union[Path, str]):
         """
         Writes the odometry data to a .csv file. Note that data will be
         saved in the following order: timestamp, pos.x, pos.y, pos.z,

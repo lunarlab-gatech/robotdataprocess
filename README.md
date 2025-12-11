@@ -10,7 +10,7 @@ Currently, for operations with rosbags, the library inputs and outputs ROS2 Humb
 
 ## Installation
 
-You will need Python 3.10+ to run this code. Run the following commands to install the repository:
+You will need Python 3.8+ to run this code. Run the following commands to install the repository:
 ```
 git submodule init
 git submodule update

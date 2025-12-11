@@ -8,23 +8,25 @@ from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from pathlib import Path
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
+from typing import Union, Tuple, List
 import tqdm
 
 class PathData(Data):
 
-    positions: np.ndarray[Decimal] # meters (x, y, z)
-    orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
+    positions: NDArray[Decimal] # meters (x, y, z)
+    orientations: NDArray[Decimal] # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
     @typechecked
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, 
-                 positions: np.ndarray | list, orientations: np.ndarray | list, 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
+                 positions: Union[np.ndarray, list], orientations: Union[np.ndarray, list], 
                  frame: CoordinateFrame):
         super().__init__(frame_id, timestamps)
         self.positions = col_to_dec_arr(positions)
@@ -37,12 +39,12 @@ class PathData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, odom_topic: str, frame: CoordinateFrame) -> PathData:
+    def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame) -> PathData:
         """
         Creates a class structure from a ROS2 bag file with a Path topic.
 
         Args:
-            bag_path (Path | str): Path to the ROS2 bag file.
+            bag_path (Union[Path, str]): Path to the ROS2 bag file.
             odom_topic (str): Topic of the Path messages.
         Returns:
             PathData: Instance of this class.
@@ -122,7 +124,7 @@ class PathData(Data):
     # =========================================================================  
 
     @typechecked
-    def visualize(self, otherList: list[PathData], titles: list[str], axes_length: float | list[float] = 10.0, axes_interval: int | list[int] = 1000):
+    def visualize(self, otherList: list[PathData], titles: list[str], axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000):
         """
         Visualizes this PathData (and all others included in otherList)
         on a single plot.
@@ -223,21 +225,20 @@ class PathData(Data):
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
-    def to_OdometryData(self, new_frame_id: str):
+    def to_OdometryData(self, new_frame_id: str, new_child_frame_id: str):
         """ 
         Returns an OdometryData object for this class. 
 
         Parameters:
             new_frame_id: The new frame ID to assign to the OdometryData object. 
-                The previous frame ID of this PathData object will be used as the
-                child_frame_id of the OdometryData object.
+            new_child_frame_id: The new child frame ID to assign to the OdometryData object.
         """
 
         print("Warning! This code has not been unit tested yet!")
 
         from .OdometryData import OdometryData
         return OdometryData(frame_id=new_frame_id,
-                            child_frame_id=self.frame_id,
+                            child_frame_id=new_child_frame_id,
                             timestamps=self.timestamps,
                             positions=self.positions,
                             orientations=self.orientations,
@@ -258,8 +259,97 @@ class PathData(Data):
     # ========================================================================= 
 
     @staticmethod
+    def make_start_and_end_times_match(est: list[PathData], gt: list[PathData]) -> tuple[list[PathData], list[PathData]]:
+        """ 
+        For pairs of lists of PathData objects, extract each pair by index and 
+        ensure that the first and last timestamps match by adding extra entries from 
+        the other PathData object as needed. 
+        
+        Mimics the behavior found in ROMAN's (https://github.com/lunarlab-gatech/roman) evaluation scripts.
+
+        Parameters:
+            est: List of PathData objects that represent estimated paths.
+            gt: List of PathData objects that represent ground truth paths.
+        """
+
+        print("Warning! This code has not been unit tested yet!")
+
+        # Check that the lists are the same length
+        if len(est) == 0 or len(gt) == 0 or len(est) != len(gt):
+            raise ValueError("est and gt lists must be non-empty and of the same length!")
+
+        # For each pair of PathData objects
+        for est_i, gt_i in zip(est, gt):
+
+            # Adjust start times
+            if est_i.timestamps[0] < gt_i.timestamps[0]:
+                gt_i.timestamps = np.concatenate(([est_i.timestamps[0]], gt_i.timestamps))
+                gt_i.positions = np.concatenate(([gt_i.positions[0]], gt_i.positions))
+                gt_i.orientations = np.concatenate(([gt_i.orientations[0]], gt_i.orientations))
+            elif est_i.timestamps[0] > gt_i.timestamps[0]:
+                est_i.timestamps = np.concatenate(([gt_i.timestamps[0]], est_i.timestamps))
+                est_i.positions = np.concatenate(([est_i.positions[0]], est_i.positions))
+                est_i.orientations = np.concatenate(([est_i.orientations[0]], est_i.orientations))
+
+            # Adjust end times
+            if est_i.timestamps[-1] < gt_i.timestamps[-1]:
+                est_i.timestamps = np.concatenate((est_i.timestamps, [gt_i.timestamps[-1]]))
+                est_i.positions = np.concatenate((est_i.positions, [est_i.positions[-1]]))
+                est_i.orientations = np.concatenate((est_i.orientations, [est_i.orientations[-1]]))
+            elif est_i.timestamps[-1] > gt_i.timestamps[-1]:
+                gt_i.timestamps = np.concatenate((gt_i.timestamps, [est_i.timestamps[-1]]))
+                gt_i.positions = np.concatenate((gt_i.positions, [gt_i.positions[-1]]))
+                gt_i.orientations = np.concatenate((gt_i.orientations, [gt_i.orientations[-1]]))
+        
+        # Return the modified lists
+        return est, gt
+
+    @staticmethod
+    def concatenate_PathData(path_data_objs: list[PathData]) -> PathData:
+        """ 
+        Combines multiple PathData objects into a single PathData object. In doing so,
+        will shift the timestamps of each subsequent PathData so that their data starts
+        one second after the previous PathData ends. Also assumes the frame_id and frame
+        of the first PathData object for final PathData object.
+        
+        Mimics the behavior found in ROMAN's (https://github.com/lunarlab-gatech/roman) evaluation scripts.
+        """
+
+        print("Warning! This code has not been unit tested yet!")
+
+        if len(path_data_objs) == 0:
+            raise ValueError("path_data_objs list is empty!")
+        if len(path_data_objs) == 1:
+            raise ValueError("path_data_objs list has only one element; no need to concatenate!")
+
+        # NOTE: Assumes the frame_id and frame of the first object
+        frame_id = path_data_objs[0].frame_id
+        frame = path_data_objs[0].frame
+
+        # Create all empty arrays to hold concatenated data
+        all_timestamps = np.zeros((0,), dtype=Decimal)
+        all_positions = np.zeros((0, 3), dtype=Decimal)
+        all_orientations = np.zeros((0, 4), dtype=Decimal)
+
+        # For each PathData object
+        for i, path_data in enumerate(path_data_objs):
+
+            # If not first PathData, shift timestamps
+            if i == 0:
+                shifted_timestamps = path_data.timestamps
+            else:
+                shifted_timestamps = path_data.timestamps - path_data.timestamps[0] + all_timestamps[-1] + 1
+
+            # Concatentate data
+            all_timestamps =  np.concatenate((all_timestamps, shifted_timestamps), axis=0)
+            all_positions =  np.concatenate((all_positions, path_data.positions), axis=0)
+            all_orientations =  np.concatenate((all_orientations, path_data.orientations), axis=0)
+
+        return PathData(frame_id, all_timestamps, all_positions, all_orientations, frame)
+
+    @staticmethod
     def calculate_trajectory_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
-                                    axes_length: float | list[float] = 10.0, axes_interval: int | list[int] = 1000) -> dict:
+                                    axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000) -> dict:
         """
         Utilizing the evo library, calculates a variety of trajectory error metrics
         and returns them in a dictionary.

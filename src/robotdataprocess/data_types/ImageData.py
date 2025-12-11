@@ -16,7 +16,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from typeguard import typechecked
-from typing import Tuple
+from typing import Tuple, Union
 import tqdm
 
 class ImageData(Data):
@@ -85,15 +85,14 @@ class ImageData(Data):
         
         @staticmethod
         def to_dtype_and_channels(encoding):
-            match encoding:
-                case ImageData.ImageEncoding.Mono8:
-                    return (np.uint8, 1)
-                case ImageData.ImageEncoding.RGB8:
-                    return (np.uint8, 3)
-                case ImageData.ImageEncoding._32FC1:
-                    return (np.float32, 1)
-                case _:
-                    raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
+            if encoding == ImageData.ImageEncoding.Mono8:
+                return (np.uint8, 1)
+            elif encoding == ImageData.ImageEncoding.RGB8:
+                return (np.uint8, 3)
+            elif encoding == ImageData.ImageEncoding._32FC1:
+                return (np.float32, 1)
+            else:
+                raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
             
 
 
@@ -104,7 +103,7 @@ class ImageData(Data):
     images: np.ndarray
 
     @typechecked
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
                  height: int, width: int, encoding: ImageData.ImageEncoding, images: np.ndarray):
         
         # Copy initial values into attributes
@@ -120,7 +119,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, img_topic: str, save_folder: Path | str):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):
         """
         Creates a class structure from a ROS2 bag file with an Image topic. Will
         Also save all the data into .npy and .txt files as this is required if image
@@ -201,7 +200,7 @@ class ImageData(Data):
     
     @classmethod
     @typechecked
-    def from_npy(cls, folder_path: Path | str):
+    def from_npy(cls, folder_path: Union[Path, str]):
         """
         Creates a class structure from .npy and .txt files (the ones written by from_ros2_bag()).
 
@@ -237,7 +236,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_npy_files(cls, npy_folder_path: Path | str, frame_id: str):
+    def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from .npy files, where each individual image
         is stored in an .npy file with the timestamp as the name
@@ -288,7 +287,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_image_files(cls, image_folder_path: Path | str, frame_id: str):
+    def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from a folder with .png files, using the file names
         as the timestamps. This is the format that the HERCULES v1.4 dataset provides
@@ -392,7 +391,7 @@ class ImageData(Data):
     # ========================================================================= 
 
     @typechecked
-    def to_npy(self, output_folder_path: Path | str):
+    def to_npy(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData into three files:
         - imgs.npy (with image data)
@@ -436,7 +435,7 @@ class ImageData(Data):
 
 
     @typechecked
-    def to_image_files(self, output_folder_path: Path | str):
+    def to_image_files(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData instance to the specified folder,
         using the timestamps as filenames in .png format (lossless compression).

@@ -3,6 +3,7 @@ from .Data import Data, CoordinateFrame
 import decimal
 from decimal import Decimal
 import numpy as np
+from numpy.typing import NDArray
 from pathlib import Path
 from robotdataprocess.data_types.PathData import PathData
 from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
@@ -11,20 +12,21 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
+from typing import Union
 import tqdm
 
 class ImuData(Data):
 
     # Define IMU-specific data attributes
-    lin_acc: np.ndarray[Decimal]
-    ang_vel: np.ndarray[Decimal]
-    orientations: np.ndarray[Decimal] # quaternions (x, y, z, w)
+    lin_acc: NDArray[Decimal]
+    ang_vel: NDArray[Decimal]
+    orientations: NDArray[Decimal] # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
     @typechecked
-    def __init__(self, frame_id: str, frame: CoordinateFrame, timestamps: np.ndarray | list, 
-                 lin_acc: np.ndarray | list, ang_vel: np.ndarray | list,
-                 orientations: np.ndarray | list):
+    def __init__(self, frame_id: str, frame: CoordinateFrame, timestamps: Union[np.ndarray, list], 
+                 lin_acc: Union[np.ndarray, list], ang_vel: Union[np.ndarray, list],
+                 orientations: Union[np.ndarray, list]):
         
         # Copy initial values into attributes
         super().__init__(frame_id, timestamps)
@@ -44,7 +46,7 @@ class ImuData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, imu_topic: str, frame_id: str):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], imu_topic: str, frame_id: str):
         """
         Creates a class structure from a ROS2 bag file with an Imu topic.
 
@@ -99,7 +101,7 @@ class ImuData(Data):
 
     @classmethod
     @typechecked
-    def from_TartanAir(cls, folder_path: Path | str, frame_id: str):
+    def from_TartanAir(cls, folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from the TartanAir dataset format, which includes
         various .txt files with IMU data.
@@ -134,7 +136,7 @@ class ImuData(Data):
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Path | str, frame_id: str, frame: CoordinateFrame):
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame):
         """
         Creates a class structure from the TartanAir dataset format, which includes
         various .txt files with IMU data. It expects the timestamp, the linear
@@ -227,8 +229,8 @@ class ImuData(Data):
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
-    def to_PathData(self, initial_pos: np.ndarray[float], initial_vel: np.ndarray[float], 
-                    initial_ori: np.ndarray[float], use_ang_vel: bool) -> PathData:
+    def to_PathData(self, initial_pos: NDArray[float], initial_vel: NDArray[float], 
+                    initial_ori: NDArray[float], use_ang_vel: bool) -> PathData:
         """
         Converts this IMUData class into OdometeryData by integrating the IMU data using
         Euler's method.
