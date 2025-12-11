@@ -394,6 +394,7 @@ class ImageData(Data):
     def to_npy(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData into three files:
+        
         - imgs.npy (with image data)
         - times.npy (with timestamps)
         - attributes.txt
@@ -532,8 +533,8 @@ class ImageData(Data):
             R, T: Rotation and translation from left to right camera.
 
         Returns:
-            Tuple[ImageData, ImageData, np.ndarray, np.ndarray]: Rectified left and right 
-                ImageData, and new Instrinsics matrices for the left and right cameras.
+            Tuple[ImageData, ImageData, np.ndarray, np.ndarray]: 
+                Rectified left and right ImageData, and new Instrinsics matrices for the left and right cameras.
         """
 
         # Make sure the ImageData sequences are compatible

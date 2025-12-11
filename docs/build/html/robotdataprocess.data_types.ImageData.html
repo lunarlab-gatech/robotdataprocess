@@ -1,0 +1,320 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ImageData &mdash; robotdataprocess 0.1.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js?v=b0099a1c"></script>
+      <script src="_static/doctools.js?v=888ff710"></script>
+      <script src="_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="ImuData" href="robotdataprocess.data_types.ImuData.html" />
+    <link rel="prev" title="Data" href="robotdataprocess.data_types.Data.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            robotdataprocess
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="robotdataprocess.data_types.html">Data Types</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="robotdataprocess.data_types.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.Data.html">Data</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">ImageData</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData"><code class="docutils literal notranslate"><span class="pre">ImageData</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImuData.html">ImuData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.OdometryData.html">OdometryData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.PathData.html">PathData</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">robotdataprocess</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="robotdataprocess.data_types.html">Data Types</a></li>
+      <li class="breadcrumb-item active">ImageData</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/robotdataprocess.data_types.ImageData.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-robotdataprocess.data_types.ImageData">
+<span id="imagedata"></span><h1>ImageData<a class="headerlink" href="#module-robotdataprocess.data_types.ImageData" title="Permalink to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.ImageData.</span></span><span class="sig-name descname"><span class="pre">ImageData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">height</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">width</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData.ImageEncoding" title="robotdataprocess.data_types.ImageData.ImageData.ImageEncoding"><span class="pre">ImageEncoding</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">images</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.Data" title="robotdataprocess.data_types.Data.Data"><code class="xref py py-class docutils literal notranslate"><span class="pre">Data</span></code></a></p>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.ImageEncoding">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ImageEncoding</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.ImageEncoding" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>An enumeration.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.compare_timestamps">
+<span class="sig-name descname"><span class="pre">compare_timestamps</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData"><span class="pre">ImageData</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.compare_timestamps" title="Permalink to this definition"></a></dt>
+<dd><p>This method compares two ImageData objects based on the timestamps of their
+images.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.crop_data">
+<span class="sig-name descname"><span class="pre">crop_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.crop_data" title="Permalink to this definition"></a></dt>
+<dd><p>Will crop the data so only values within [start, end] inclusive are kept.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.downscale_by_factor">
+<span class="sig-name descname"><span class="pre">downscale_by_factor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">scale</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.downscale_by_factor" title="Permalink to this definition"></a></dt>
+<dd><p>Scales down all images by the provided factor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>scale</strong> (<em>int</em>) – The downscaling factor. Must evenly divide both height and width.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.from_image_files">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_image_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">image_folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.from_image_files" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a folder with .png files, using the file names
+as the timestamps. This is the format that the HERCULES v1.4 dataset provides
+for image data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>image_folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the folder with the images.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this image data was collected.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.from_npy">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_npy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.from_npy" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from .npy and .txt files (the ones written by from_ros2_bag()).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the folder with:
+- imgs.npy
+- times.npy
+- attributes.txt</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.from_npy_files">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_npy_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">npy_folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.from_npy_files" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from .npy files, where each individual image
+is stored in an .npy file with the timestamp as the name</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>npy_folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the folder with the npy images.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this image data was collected.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.from_ros2_bag">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_ros2_bag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">img_topic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_folder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.from_ros2_bag" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a ROS2 bag file with an Image topic. Will
+Also save all the data into .npy and .txt files as this is required if image
+data doesn’t fit into the RAM.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bag_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the ROS2 bag file.</p></li>
+<li><p><strong>img_topic</strong> (<em>str</em>) – Topic of the Image messages.</p></li>
+<li><p><strong>save_folder</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to save class data into.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.get_ros_msg">
+<span class="sig-name descname"><span class="pre">get_ros_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.get_ros_msg" title="Permalink to this definition"></a></dt>
+<dd><p>Gets an Image ROS2 Humble message corresponding to the image represented by index i.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>i</strong> (<em>int</em>) – The index of the image message to convert.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If i is outside the data bounds.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.get_ros_msg_type">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_ros_msg_type</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.get_ros_msg_type" title="Permalink to this definition"></a></dt>
+<dd><p>Return the __msgtype__ for an Image msg.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.stereo_undistort_and_rectify">
+<span class="sig-name descname"><span class="pre">stereo_undistort_and_rectify</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData"><span class="pre">ImageData</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">K1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">D1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">K2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">D2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">R</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">T</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData"><span class="pre">ImageData</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData"><span class="pre">ImageData</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">ndarray</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.stereo_undistort_and_rectify" title="Permalink to this definition"></a></dt>
+<dd><p>Undistort and rectify stereo images using stereo calibration parameters.
+Note that self NEEDS to be the left stereo image sequence.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>other</strong> (<a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData"><em>ImageData</em></a>) – The right stereo image sequence.</p></li>
+<li><p><strong>K1</strong> – Intrinsics and distortion for left camera.</p></li>
+<li><p><strong>D1</strong> – Intrinsics and distortion for left camera.</p></li>
+<li><p><strong>K2</strong> – Intrinsics and distortion for right camera.</p></li>
+<li><p><strong>D2</strong> – Intrinsics and distortion for right camera.</p></li>
+<li><p><strong>R</strong> – Rotation and translation from left to right camera.</p></li>
+<li><p><strong>T</strong> – Rotation and translation from left to right camera.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Rectified left and right ImageData, and new Instrinsics matrices for the left and right cameras.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Tuple[<a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a>, <a class="reference internal" href="#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a>, np.ndarray, np.ndarray]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.to_image_files">
+<span class="sig-name descname"><span class="pre">to_image_files</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">output_folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.to_image_files" title="Permalink to this definition"></a></dt>
+<dd><p>Saves each image in this ImageData instance to the specified folder,
+using the timestamps as filenames in .png format (lossless compression).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>output_folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – The folder to save images into.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImageData.ImageData.to_npy">
+<span class="sig-name descname"><span class="pre">to_npy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">output_folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImageData.ImageData.to_npy" title="Permalink to this definition"></a></dt>
+<dd><p>Saves each image in this ImageData into three files:</p>
+<ul class="simple">
+<li><p>imgs.npy (with image data)</p></li>
+<li><p>times.npy (with timestamps)</p></li>
+<li><p>attributes.txt</p></li>
+</ul>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>output_folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – The folder to save the .npy file at.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotdataprocess.data_types.Data.html" class="btn btn-neutral float-left" title="Data" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="robotdataprocess.data_types.ImuData.html" class="btn btn-neutral float-right" title="ImuData" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Daniel Butterfield, Sandilya Sai Garimella.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

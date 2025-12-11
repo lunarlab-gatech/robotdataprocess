@@ -106,7 +106,9 @@ class OdometryData(PathData):
     
     @classmethod
     @typechecked
-    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          header_included: bool, column_to_data: Union[List[int], None] = None, separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None):
+    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
+                 header_included: bool, column_to_data: Union[List[int], None] = None, 
+                 separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None):
         """
         Creates a class structure from a csv file.
 

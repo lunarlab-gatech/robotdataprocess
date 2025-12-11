@@ -1,0 +1,188 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data &mdash; robotdataprocess 0.1.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js?v=b0099a1c"></script>
+      <script src="_static/doctools.js?v=888ff710"></script>
+      <script src="_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="ImageData" href="robotdataprocess.data_types.ImageData.html" />
+    <link rel="prev" title="Data Types" href="robotdataprocess.data_types.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            robotdataprocess
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="robotdataprocess.data_types.html">Data Types</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="robotdataprocess.data_types.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3 current"><a class="current reference internal" href="#">Data</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.Data.CoordinateFrame"><code class="docutils literal notranslate"><span class="pre">CoordinateFrame</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.Data.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImageData.html">ImageData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImuData.html">ImuData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.OdometryData.html">OdometryData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.PathData.html">PathData</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="robotdataprocess.data_types.html#module-robotdataprocess.data_types">Module contents</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">robotdataprocess</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="robotdataprocess.data_types.html">Data Types</a></li>
+      <li class="breadcrumb-item active">Data</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/robotdataprocess.data_types.Data.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-robotdataprocess.data_types.Data">
+<span id="data"></span><h1>Data<a class="headerlink" href="#module-robotdataprocess.data_types.Data" title="Permalink to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.CoordinateFrame">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.Data.</span></span><span class="sig-name descname"><span class="pre">CoordinateFrame</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.CoordinateFrame" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Enum</span></code></p>
+<p>Enum for different coordinate frames used in robotics.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.CoordinateFrame.FLU">
+<span class="sig-name descname"><span class="pre">FLU</span></span><a class="headerlink" href="#robotdataprocess.data_types.Data.CoordinateFrame.FLU" title="Permalink to this definition"></a></dt>
+<dd><p>X forward, Y left, Z up := RHS</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.CoordinateFrame.NED">
+<span class="sig-name descname"><span class="pre">NED</span></span><a class="headerlink" href="#robotdataprocess.data_types.Data.CoordinateFrame.NED" title="Permalink to this definition"></a></dt>
+<dd><p>X forward (north), Y right (east), Z down := RHS</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.CoordinateFrame.ENU">
+<span class="sig-name descname"><span class="pre">ENU</span></span><a class="headerlink" href="#robotdataprocess.data_types.Data.CoordinateFrame.ENU" title="Permalink to this definition"></a></dt>
+<dd><p>X right (east), Y forward (north), Z up := RHS</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.CoordinateFrame.NONE">
+<span class="sig-name descname"><span class="pre">NONE</span></span><a class="headerlink" href="#robotdataprocess.data_types.Data.CoordinateFrame.NONE" title="Permalink to this definition"></a></dt>
+<dd><p>No defined coordinate frame.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.Data">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.Data.</span></span><span class="sig-name descname"><span class="pre">Data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">np.ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.Data" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Generic Data class that provides example methods that should be overwritten by children,
+and can run operations between different data types.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.Data.crop_data">
+<span class="sig-name descname"><span class="pre">crop_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.Data.crop_data" title="Permalink to this definition"></a></dt>
+<dd><p>Will crop the data so only values within [start, end] inclusive are kept.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.Data.get_ros_msg">
+<span class="sig-name descname"><span class="pre">get_ros_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.Data.get_ros_msg" title="Permalink to this definition"></a></dt>
+<dd><p>Will return a ROS message object ready to be written into a ROS2 Humble bag.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.Data.get_ros_msg_type">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_ros_msg_type</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.Data.get_ros_msg_type" title="Permalink to this definition"></a></dt>
+<dd><p>Will return the msgtype needed to add a connetion to a rosbag writer.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.Data.Data.len">
+<span class="sig-name descname"><span class="pre">len</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.Data.Data.len" title="Permalink to this definition"></a></dt>
+<dd><p>Returns the number of items in this data class</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotdataprocess.data_types.html" class="btn btn-neutral float-left" title="Data Types" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="robotdataprocess.data_types.ImageData.html" class="btn btn-neutral float-right" title="ImageData" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Daniel Butterfield, Sandilya Sai Garimella.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

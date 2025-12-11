@@ -1,0 +1,297 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OdometryData &mdash; robotdataprocess 0.1.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js?v=b0099a1c"></script>
+      <script src="_static/doctools.js?v=888ff710"></script>
+      <script src="_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="PathData" href="robotdataprocess.data_types.PathData.html" />
+    <link rel="prev" title="ImuData" href="robotdataprocess.data_types.ImuData.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            robotdataprocess
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="robotdataprocess.data_types.html">Data Types</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="robotdataprocess.data_types.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.Data.html">Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImageData.html">ImageData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImuData.html">ImuData</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">OdometryData</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.OdometryData.OdometryData"><code class="docutils literal notranslate"><span class="pre">OdometryData</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.PathData.html">PathData</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">robotdataprocess</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="robotdataprocess.data_types.html">Data Types</a></li>
+      <li class="breadcrumb-item active">OdometryData</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/robotdataprocess.data_types.OdometryData.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-robotdataprocess.data_types.OdometryData">
+<span id="odometrydata"></span><h1>OdometryData<a class="headerlink" href="#module-robotdataprocess.data_types.OdometryData" title="Permalink to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.OdometryData.</span></span><span class="sig-name descname"><span class="pre">OdometryData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">child_frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">positions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">orientations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="robotdataprocess.data_types.PathData.html#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><code class="xref py py-class docutils literal notranslate"><span class="pre">PathData</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.add_folded_guassian_noise_to_position">
+<span class="sig-name descname"><span class="pre">add_folded_guassian_noise_to_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">xy_noise_std_per_frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z_noise_std_per_frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.add_folded_guassian_noise_to_position" title="Permalink to this definition"></a></dt>
+<dd><p>This method simulates odometry drift by adding folded gaussian noise
+to the odometry positions on a per frame basis. It also accumulates
+it over time. NOTE: It completely ignores the timestamps, and the “folded
+guassian noise” distribution stds might not align with the stds of the
+guassian used internally, so this is not a robust function at all.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>xy_noise_std_per_frame</strong> (<em>float</em>) – Standard deviation of the gaussian
+distribution for xy, whose output is then run through abs().</p></li>
+<li><p><strong>z_noise_std_per_frame</strong> (<em>float</em>) – Same as above, but for z.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.calculate_stamped_poses">
+<span class="sig-name descname"><span class="pre">calculate_stamped_poses</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.calculate_stamped_poses" title="Permalink to this definition"></a></dt>
+<dd><p>Pre-calculates all stamped poses if they aren’t calculated yet.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.crop_data">
+<span class="sig-name descname"><span class="pre">crop_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.crop_data" title="Permalink to this definition"></a></dt>
+<dd><p>Will crop the data so only values within [start, end] inclusive are kept.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.from_csv">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_csv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csv_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">child_frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">header_included</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">column_to_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">separator</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">filter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.from_csv" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a csv file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csv_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the CSV file.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame that this odometry is relative to.</p></li>
+<li><p><strong>child_frame_id</strong> (<em>str</em>) – The frame whose pose is represented by this odometry.</p></li>
+<li><p><strong>frame</strong> (<a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><em>CoordinateFrame</em></a>) – The coordinate system convention of this data.</p></li>
+<li><p><strong>header_included</strong> (<em>bool</em>) – If this csv file has a header, so we can remove it.</p></li>
+<li><p><strong>column_to_data</strong> (<em>list</em><em>[</em><em>int</em><em>]</em>) – Tells the algorithms which columns in the csv contain which
+of the following data: [‘timestamp’, ‘x’, ‘y’, ‘z’, ‘qw’, ‘qx’, ‘qy’, ‘qz’]. Thus,
+index 0 of column_to_data should be the column that timestamp data is found in the
+csv file. Set to None to use [0,1,2,3,4,5,6,7]. If filter is not None, then the index
+of the column_name should be appended to the end of this list.</p></li>
+<li><p><strong>separator</strong> (<em>str</em><em> | </em><em>None</em>) – The separator used in the csv file. If None, will use a comma by default.</p></li>
+<li><p><strong>filter</strong> – A tuple of (column_name, value), where only rows with column_name == value will be kept.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.OdometryData.OdometryData" title="robotdataprocess.data_types.OdometryData.OdometryData">OdometryData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.from_ros2_bag">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_ros2_bag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">odom_topic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.from_ros2_bag" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a ROS2 bag file with an Odometry topic.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bag_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the ROS2 bag file.</p></li>
+<li><p><strong>odom_topic</strong> (<em>str</em>) – Topic of the Odometry messages.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.OdometryData.OdometryData" title="robotdataprocess.data_types.OdometryData.OdometryData">OdometryData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.from_txt_file">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_txt_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">child_frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.from_txt_file" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a text file, where the order of values
+in the files follows [‘timestamp’, ‘x’, ‘y’, ‘z’, ‘qw’, ‘qx’, ‘qy’, ‘qz’].</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>file_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the file containing the odometry data.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this odometry is relative to.</p></li>
+<li><p><strong>child_frame_id</strong> (<em>str</em>) – The frame whose pose is represented by this odometry.</p></li>
+<li><p><strong>frame</strong> (<a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><em>CoordinateFrame</em></a>) – The coordinate system convention of this data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.OdometryData.OdometryData" title="robotdataprocess.data_types.OdometryData.OdometryData">OdometryData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.get_ros_msg">
+<span class="sig-name descname"><span class="pre">get_ros_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Odometry'</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.get_ros_msg" title="Permalink to this definition"></a></dt>
+<dd><p>Gets an Image ROS2 Humble message corresponding to the odometry in index i.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>i</strong> (<em>int</em>) – The index of the odometry data to convert.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If i is outside the data bounds.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.get_ros_msg_type">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_ros_msg_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">msg_type</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'Odometry'</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.get_ros_msg_type" title="Permalink to this definition"></a></dt>
+<dd><p>Return the __msgtype__ for an Imu msg.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.shift_position">
+<span class="sig-name descname"><span class="pre">shift_position</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x_shift</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y_shift</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">z_shift</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.shift_position" title="Permalink to this definition"></a></dt>
+<dd><p>Shifts the positions of the odometry.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>x_shift</strong> (<em>float</em>) – Shift in x-axis.</p></li>
+<li><p><strong>y_shift</strong> (<em>float</em>) – Shift in y_axis.</p></li>
+<li><p><strong>z_shift</strong> (<em>float</em>) – Shift in z_axis.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.shift_to_start_at_identity">
+<span class="sig-name descname"><span class="pre">shift_to_start_at_identity</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.shift_to_start_at_identity" title="Permalink to this definition"></a></dt>
+<dd><p>Alter the positions and orientations based so that the first pose
+starts at Identity.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.OdometryData.OdometryData.to_csv">
+<span class="sig-name descname"><span class="pre">to_csv</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csv_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.OdometryData.OdometryData.to_csv" title="Permalink to this definition"></a></dt>
+<dd><p>Writes the odometry data to a .csv file. Note that data will be
+saved in the following order: timestamp, pos.x, pos.y, pos.z,
+ori.w, ori.x, ori.y, ori.z. Timestamp is in seconds.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csv_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the output csv file.</p></li>
+<li><p><strong>odom_topic</strong> (<em>str</em>) – Topic of the Odometry messages.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.OdometryData.OdometryData" title="robotdataprocess.data_types.OdometryData.OdometryData">OdometryData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotdataprocess.data_types.ImuData.html" class="btn btn-neutral float-left" title="ImuData" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="robotdataprocess.data_types.PathData.html" class="btn btn-neutral float-right" title="PathData" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Daniel Butterfield, Sandilya Sai Garimella.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -7,11 +7,21 @@ import numpy as np
 from typeguard import typechecked
 
 class CoordinateFrame(Enum):
-    FLU = 0 # https://www.ros.org/reps/rep-0103.html - X forward, Y left, Z up := RHS
-    NED = 1 # https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates
-            # - X forward (north), Y right (East), Z Down := RHS
-    ENU = 2 # https://www.ros.org/reps/rep-0103.html - X east, Y north, Z up := RHS
-    NONE = 3 # No defined coordinate frame
+    """ 
+    Enum for different coordinate frames used in robotics. 
+    
+    Attributes:
+        FLU: X forward, Y left, Z up := RHS
+        NED: X forward (north), Y right (east), Z down := RHS
+        ENU: X right (east), Y forward (north), Z up := RHS
+        NONE: No defined coordinate frame.
+    """
+
+    FLU = 0
+    NED = 1
+    ENU = 2
+    NONE = 3
+
 
 class Data:
     """
