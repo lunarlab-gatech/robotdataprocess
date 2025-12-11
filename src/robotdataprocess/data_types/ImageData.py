@@ -632,6 +632,8 @@ class ImageData(Data):
             data = self.images[i].flatten()
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             data = self.images[i].flatten().view(np.uint8)
+        else:
+            raise ValueError(f"Unsupported encoding: {self.encoding}")
 
         # Write the data into the new class
         return Image(Header(stamp=Time(sec=int(seconds), 
