@@ -19,19 +19,19 @@ class TestImageData(unittest.TestCase):
         """
 
         # Get paths to test bags & external messages
-        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3').absolute()
+        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
         self.path_external_msgs_ros2 = Path(Path('.').parent, 'external_msgs_ros2').absolute()
         self.path_external_msgs_ros1 = Path(Path('.').parent, 'external_msgs_ros1').absolute()
 
         # Get paths to files within the input bag
-        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3.db3")
+        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
         path_hercules_bag_yaml = self.path_hercules_bag / Path("metadata.yaml")
 
         # Download the test bag (as its too big for GitHub)
         if not os.path.isfile(path_hercules_bag_db3):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/r3qxkbypaiq3o277qu9ad/hercules_test_bag_pruned_3.db3?rlkey=uumrmpt80elj2gjhqls6027pm&st=4g498h35&dl=1", path_hercules_bag_db3)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
         if not os.path.isfile(path_hercules_bag_yaml):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/alze2h2e3h4l09f55uka9/metadata.yaml?rlkey=may9dvginz3bg6gsgtgcod3m7&st=ypw42mhh&dl=1", path_hercules_bag_yaml)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/vsi1tpihpar87459upyiw/metadata.yaml?rlkey=ozi4h0i4wp0kr7ckvaybz70uq&st=vxs10bqt&dl=1", path_hercules_bag_yaml)
 
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
@@ -46,7 +46,7 @@ class TestImageData(unittest.TestCase):
 
         # Convert the data into .npy (byproduct of loading ImageData from rosbag)
         save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy').absolute()
-        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Drone2/front_center_Scene/image', save_folder)
+        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Husky2/front_center_Scene/image', save_folder)
 
         # Load the .npy file
         npyData = ImageData.from_npy(save_folder)

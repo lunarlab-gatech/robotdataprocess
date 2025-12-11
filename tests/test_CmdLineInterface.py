@@ -19,19 +19,19 @@ class TestCmdLineInterface(unittest.TestCase):
         """ Setup paths and download files that will be used for all tests. """
 
         # Get paths to test bags & external messages
-        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3').absolute()
+        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
         self.path_external_msgs_ros2 = Path(Path('.').parent, 'external_msgs_ros2').absolute()
         self.path_external_msgs_ros1 = Path(Path('.').parent, 'external_msgs_ros1').absolute()
 
         # Get paths to files within the input bag
-        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3.db3")
+        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
         path_hercules_bag_yaml = self.path_hercules_bag / Path("metadata.yaml")
 
         # Download the test bag (as its too big for GitHub)
         if not os.path.isfile(path_hercules_bag_db3):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/r3qxkbypaiq3o277qu9ad/hercules_test_bag_pruned_3.db3?rlkey=uumrmpt80elj2gjhqls6027pm&st=4g498h35&dl=1", path_hercules_bag_db3)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
         if not os.path.isfile(path_hercules_bag_yaml):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/alze2h2e3h4l09f55uka9/metadata.yaml?rlkey=may9dvginz3bg6gsgtgcod3m7&st=ypw42mhh&dl=1", path_hercules_bag_yaml)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/vsi1tpihpar87459upyiw/metadata.yaml?rlkey=ozi4h0i4wp0kr7ckvaybz70uq&st=vxs10bqt&dl=1", path_hercules_bag_yaml)
 
     @staticmethod
     def count_msgs_in_ros2_bag(bag_path: Path) -> dict:
@@ -112,7 +112,7 @@ class TestCmdLineInterface(unittest.TestCase):
                 np.testing.assert_equal(msg1.twist.twist.angular.y, msg2.twist.twist.angular.y)
                 np.testing.assert_equal(msg1.twist.twist.angular.z, msg2.twist.twist.angular.z)
                 np.testing.assert_array_equal(msg1.twist.covariance, msg2.twist.covariance)
-            elif topic == '/hercules_node/Drone2/front_center_DepthPlanar/camera_info':
+            elif topic == '/hercules_node/Husky2/front_center_DepthPlanar/camera_info':
                 np.testing.assert_equal(msg1.header.frame_id, msg2.header.frame_id)
                 np.testing.assert_equal(msg1.header.stamp.sec, msg2.header.stamp.sec)
                 np.testing.assert_equal(msg1.header.stamp.nanosec, msg2.header.stamp.nanosec)
@@ -131,7 +131,7 @@ class TestCmdLineInterface(unittest.TestCase):
                 np.testing.assert_equal(msg1.roi.height, msg2.roi.height)
                 np.testing.assert_equal(msg1.roi.width, msg2.roi.width)
                 np.testing.assert_equal(msg1.roi.do_rectify, msg2.roi.do_rectify)
-            elif topic == '/hercules_node/Drone2/imu/imu':
+            elif topic == '/hercules_node/Husky2/imu/imu':
                 np.testing.assert_equal(msg1.header.frame_id, msg2.header.frame_id)
                 np.testing.assert_equal(msg1.header.stamp.sec, msg2.header.stamp.sec)
                 np.testing.assert_equal(msg1.header.stamp.nanosec, msg2.header.stamp.nanosec)
@@ -300,16 +300,15 @@ class TestCmdLineInterface(unittest.TestCase):
         # For certain topics, check that each message in each bag match exactly
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Husky1/front_center_Scene/image')
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Husky1/ground_truth/odom_local')
-        self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Drone2/front_center_DepthPlanar/camera_info')
-        self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Drone2/imu/imu')
+        self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Husky2/front_center_DepthPlanar/camera_info')
+        self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Husky2/imu/imu')
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/tf_static')
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/tf')
-        self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/clock')
     
     def test_extract_odometry_to_csv(self):
         # Setup a dictionary with configuration parameters 
-        output_file = Path(Path('.'), 'tests', 'test_outputs', 'Husky1_odom.csv').absolute()
-        topic = "/hercules_node/Drone1/ground_truth/odom_local"
+        output_file = Path(Path('.'), 'tests', 'temporary_files', 'test_CmdLineInterface', 'test_convert_ros2_to_ros1', 'Husky2_odom.csv').absolute()
+        topic = "/hercules_node/Husky2/ground_truth/odom_local"
         config_dict = {
             "input_bag": self.path_hercules_bag,
             "external_msgs_path_ros2": self.path_external_msgs_ros2,
@@ -339,23 +338,23 @@ class TestCmdLineInterface(unittest.TestCase):
         df = pd.read_csv(output_file)
         
         first_row = df.iloc[0].tolist()
-        np.testing.assert_equal(first_row[0], 1749131152.952076800)
-        np.testing.assert_equal(abs(first_row[1]), 0)
-        np.testing.assert_equal(abs(first_row[2]), 0)
-        np.testing.assert_equal(first_row[3], 5.403892993927002)
-        np.testing.assert_equal(first_row[4], 1)
-        np.testing.assert_equal(abs(first_row[5]), 0)
-        np.testing.assert_equal(abs(first_row[6]), 0)
-        np.testing.assert_equal(abs(first_row[7]), 0)
+        np.testing.assert_almost_equal(first_row[0], 1749131152.801460736, 14)
+        np.testing.assert_almost_equal(first_row[1], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(first_row[2], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(first_row[3], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(first_row[4], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(first_row[5], -0.00005158343992661684751586201171875, 14)
+        np.testing.assert_almost_equal(first_row[6], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(first_row[7], 1.05546661188782309181988239288330078125E-7, 14)
 
-        random_row = df[df['timestamp'] == 1749131155.238170624].iloc[0]
-        np.testing.assert_almost_equal(random_row['x'], 0.033755045384168625, 14)
-        np.testing.assert_almost_equal(random_row['y'], -0.5461319088935852, 14)
-        np.testing.assert_almost_equal(random_row['z'], 11.42676067352295, 14)
-        np.testing.assert_almost_equal(random_row['qw'], 0.7257564067840576, 14)
-        np.testing.assert_almost_equal(random_row['qx'], 0.015878107398748398, 14)
-        np.testing.assert_almost_equal(random_row['qy'], 0.026047201827168465, 14)
-        np.testing.assert_almost_equal(random_row['qz'], -0.6872751116752625, 14)
+        random_row = df[df['timestamp'] == 1749131152.883519488].iloc[0]
+        np.testing.assert_almost_equal(random_row['x'], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(random_row['y'], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(random_row['z'], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(random_row['qw'], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(random_row['qx'], -0.000051583439926616847515106201171875, 14)
+        np.testing.assert_almost_equal(random_row['qy'], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(random_row['qz'], 1.05546661188782309181988239288330078125E-7, 14)
 
     def helper_extract_images_to_npy_for_topic(self, topic, dtype, expected_shape):
         # Setup a dictionary with configuration parameters 

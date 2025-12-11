@@ -533,7 +533,7 @@ class Ros2BagWrapper:
             connections = reader.connections
             
             # Setup the bag writer
-            with Writer2(output_bag, version=5) as writer:
+            with Writer2(output_bag) as writer:
                 conn_map = {}
                 for conn in connections:
                     conn_map[conn.topic] = writer.add_connection(
