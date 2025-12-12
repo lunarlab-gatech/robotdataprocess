@@ -1,12 +1,12 @@
 from collections import defaultdict
 from .data_types.Data import CoordinateFrame
-from .data_types.ImageData import ImageData
+from .data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from .data_types.OdometryData import OdometryData
 from decimal import Decimal
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from .rosbag.Ros2BagWrapper import Ros2BagWrapper
+from .ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.rosbag2 import Writer as Writer2
 from scipy.spatial.transform import Rotation as R
@@ -127,11 +127,11 @@ class CmdLineInterface():
 
         topic: str = self.operation_params['extract_images_to_npy']['topic']
         output_folder: str = self.operation_params['extract_images_to_npy']['output_folder']
-        ImageData.from_ros2_bag(self.input_bag, topic, output_folder)
+        ImageDataInMemory.from_ros2_bag(self.input_bag, topic, output_folder)
 
     def compare_timestamps_two_image_data(self):
         """ Compare timestamps between two ImageData instances. """
 
-        data0 = ImageData.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_0'])
-        data1 = ImageData.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_1'])
+        data0 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_0'])
+        data1 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_1'])
         data0.compare_timestamps(data1)

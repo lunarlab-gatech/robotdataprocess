@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from robotdataprocess import CmdLineInterface
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores

@@ -1,12 +1,12 @@
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-from .Data import Data, CoordinateFrame
+from .Data import Data, CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
 from robotdataprocess.data_types.PathData import PathData
-from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
+from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -15,6 +15,7 @@ from typeguard import typechecked
 from typing import Union
 import tqdm
 
+@typechecked
 class ImuData(Data):
 
     # Define IMU-specific data attributes
@@ -241,13 +242,16 @@ class ImuData(Data):
 
     @typechecked
     @staticmethod
-    def get_ros_msg_type() -> str:
+    def get_ros_msg_type(lib_type: ROSMsgLibType) -> str:
         """ Return the __msgtype__ for an Imu msg. """
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
 
-    @typechecked
-    def get_ros_msg(self, i: int):
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
+        else:
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg_type()!")
+            
+    def get_ros_msg(self, lib_type: ROSMsgLibType, i: int):
         """
         Gets an Image ROS2 Humble message corresponding to the image represented by index i.
         
@@ -274,20 +278,23 @@ class ImuData(Data):
         nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
 
         # Write the data into the new msg
-        return Imu(Header(stamp=Time(sec=int(seconds), 
-                                     nanosec=int(nanoseconds)), 
-                          frame_id=self.frame_id),
-                    orientation=Quaternion(x=0,
-                                           y=0,
-                                           z=0,
-                                           w=1), # Currently ignores data in orientation
-                    orientation_covariance=np.zeros(9),
-                    angular_velocity=Vector3(x=self.ang_vel[i][0],
-                                             y=self.ang_vel[i][1],
-                                             z=self.ang_vel[i][2]),
-                    angular_velocity_covariance=np.zeros(9),
-                    linear_acceleration=Vector3(x=self.lin_acc[i][0],
-                                                y=self.lin_acc[i][1], 
-                                                z=self.lin_acc[i][2]),
-                    linear_acceleration_covariance=np.zeros(9))
-                    
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            return Imu(Header(stamp=Time(sec=int(seconds), 
+                                        nanosec=int(nanoseconds)), 
+                            frame_id=self.frame_id),
+                        orientation=Quaternion(x=0,
+                                            y=0,
+                                            z=0,
+                                            w=1), # Currently ignores data in orientation
+                        orientation_covariance=np.zeros(9),
+                        angular_velocity=Vector3(x=self.ang_vel[i][0],
+                                                y=self.ang_vel[i][1],
+                                                z=self.ang_vel[i][2]),
+                        angular_velocity_covariance=np.zeros(9),
+                        linear_acceleration=Vector3(x=self.lin_acc[i][0],
+                                                    y=self.lin_acc[i][1], 
+                                                    z=self.lin_acc[i][2]),
+                        linear_acceleration_covariance=np.zeros(9))
+        else:
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg()!")
+    

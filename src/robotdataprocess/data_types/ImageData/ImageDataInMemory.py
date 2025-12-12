@@ -1,124 +1,35 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr
+from ...conversion_utils import col_to_dec_arr
 import cv2
-from .Data import Data
-import decimal
+
 from decimal import Decimal
 from enum import Enum
+from .ImageData import ImageData
 import numpy as np
 from numpy.lib.format import open_memmap
 import os
 from pathlib import Path
 from PIL import Image
-from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
+from ...ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
-from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from typeguard import typechecked
 from typing import Tuple, Union
 import tqdm
 
-class ImageData(Data):
+@typechecked
+class ImageDataInMemory(ImageData):
 
-    # Define image encodings enum
-    class ImageEncoding(Enum):
-        Mono8 = 0
-        RGB8 = 1
-        _32FC1 = 2
-
-        # ================ Class Methods ================
-        @classmethod
-        def from_str(cls, encoding_str: str):
-            if encoding_str == "ImageEncoding.Mono8":
-                return cls.Mono8
-            elif encoding_str == "ImageEncoding.RGB8":
-                return cls.RGB8
-            elif encoding_str == "ImageEncoding._32FC1":
-                return cls._32FC1
-            else:
-                raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
-        
-        @classmethod
-        def from_ros_str(cls, encoding_str: str):
-            encoding_str = encoding_str.lower()
-            if encoding_str == 'mono8':
-                return cls.Mono8
-            elif encoding_str == 'rgb8':
-                return cls.RGB8
-            elif encoding_str == "32fc1":
-                return cls._32FC1
-            else:
-                raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
-        
-        @classmethod
-        def from_dtype_and_channels(cls, dtype: np.dtype, channels: int):
-            if dtype == np.uint8 and channels == 1:
-                return cls.Mono8
-            elif dtype == np.uint8 and channels == 3:
-                return cls.RGB8
-            elif dtype == np.float32 and channels == 1:
-                return cls._32FC1
-            else:
-                raise NotImplementedError(f"dtype {dtype} w/ {channels} channel(s) has no corresponding encoding!")
-        
-        @classmethod
-        def from_pillow_str(cls, encoding_str: str):
-            if encoding_str == "RGB":
-                return cls.RGB8
-            elif encoding_str == "L":
-                return cls.Mono8
-            else:
-                raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
-        
-        # ================ Export Methods ================
-        @staticmethod
-        def to_ros_str(encoding: ImageData.ImageEncoding):
-            if encoding == ImageData.ImageEncoding.Mono8:
-                return 'mono8'
-            elif encoding == ImageData.ImageEncoding.RGB8:
-                return 'rgb8'
-            elif encoding == ImageData.ImageEncoding._32FC1:
-                return '32FC1'
-            else:
-                raise NotImplementedError(f"This ImageData.ImageEncoding.{encoding} is not yet implemented (or it doesn't exist)!")
-        
-        @staticmethod
-        def to_dtype_and_channels(encoding):
-            if encoding == ImageData.ImageEncoding.Mono8:
-                return (np.uint8, 1)
-            elif encoding == ImageData.ImageEncoding.RGB8:
-                return (np.uint8, 3)
-            elif encoding == ImageData.ImageEncoding._32FC1:
-                return (np.float32, 1)
-            else:
-                raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
-            
-
-
-    # Define image-specific data attributes
-    height: int
-    width: int
-    encoding: ImageEncoding
-    images: np.ndarray
-
-    @typechecked
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
                  height: int, width: int, encoding: ImageData.ImageEncoding, images: np.ndarray):
-        
-        # Copy initial values into attributes
-        super().__init__(frame_id, timestamps)
-        self.height = height
-        self.width = width
-        self.encoding = encoding
-        self.images = images
+        super().__init__(frame_id, timestamps, height, width, encoding, images)
 
     # =========================================================================
     # ============================ Class Methods ============================== 
     # =========================================================================  
 
     @classmethod
-    @typechecked
     def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):
         """
         Creates a class structure from a ROS2 bag file with an Image topic. Will
@@ -148,7 +59,7 @@ class ImageData(Data):
                 height = msg.height
                 width = msg.width
                 encoding = ImageData.ImageEncoding.from_ros_str(msg.encoding)
-                img = ImageData._decode_image_msg(msg, encoding, height, width)
+                img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
                 image_shape = img.shape
                 break
         
@@ -171,7 +82,7 @@ class ImageData(Data):
                 # Extract images (skipping malformed ones)
                 img = None
                 try:
-                    img = ImageData._decode_image_msg(msg, encoding, height, width)
+                    img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
                 except Exception as e:
                     print("Failure decoding image msg: ", e)
                 if img is not None and img.shape == image_shape: 
@@ -199,7 +110,6 @@ class ImageData(Data):
         return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
     
     @classmethod
-    @typechecked
     def from_npy(cls, folder_path: Union[Path, str]):
         """
         Creates a class structure from .npy and .txt files (the ones written by from_ros2_bag()).
@@ -235,7 +145,6 @@ class ImageData(Data):
         return cls(frame_id, np.load(ts_path), height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
 
     @classmethod
-    @typechecked
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from .npy files, where each individual image
@@ -286,7 +195,6 @@ class ImageData(Data):
         return cls(frame_id, timestamps_sorted, height, width, encoding, images)
 
     @classmethod
-    @typechecked
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from a folder with .png files, using the file names
@@ -341,7 +249,6 @@ class ImageData(Data):
     # ========================= Manipulation Methods ========================== 
     # =========================================================================  
 
-    @typechecked
     def downscale_by_factor(self, scale: int):
         """
         Scales down all images by the provided factor.
@@ -390,7 +297,6 @@ class ImageData(Data):
     # ============================ Export Methods ============================= 
     # ========================================================================= 
 
-    @typechecked
     def to_npy(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData into three files:
@@ -434,8 +340,6 @@ class ImageData(Data):
             f.write(f"width: {self.width}\n")
             f.write(f"encoding: {self.encoding}\n")
 
-
-    @typechecked
     def to_image_files(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData instance to the specified folder,
@@ -474,7 +378,6 @@ class ImageData(Data):
     # ========================================================================= 
 
     @staticmethod
-    @typechecked
     def _decode_image_msg(msg: object, encoding: ImageData.ImageEncoding, height: int, width: int):
         """
         Helper method that decodes image data from a ROS2 Image message.
@@ -495,7 +398,7 @@ class ImageData(Data):
     # ======================= Multi ImageData Methods ========================= 
     # ========================================================================= 
 
-    def compare_timestamps(self, other: ImageData):
+    def compare_timestamps(self, other: ImageDataInMemory):
         """
         This method compares two ImageData objects based on the timestamps of their
         images.
@@ -518,10 +421,10 @@ class ImageData(Data):
         print(f"Mean distance: {np.mean(dists)}")
         print(f"Std distance: {np.std(dists)}")
 
-    @typechecked
-    def stereo_undistort_and_rectify(self: ImageData, other: ImageData,
+    
+    def stereo_undistort_and_rectify(self: ImageDataInMemory, other: ImageDataInMemory,
             K1: np.ndarray, D1: np.ndarray, K2: np.ndarray, D2: np.ndarray, 
-            R: np.ndarray, T: np.ndarray) -> Tuple[ImageData, ImageData, np.ndarray, np.ndarray]:
+            R: np.ndarray, T: np.ndarray) -> Tuple[ImageDataInMemory, ImageDataInMemory, np.ndarray, np.ndarray]:
         """
         Undistort and rectify stereo images using stereo calibration parameters. 
         Note that self NEEDS to be the left stereo image sequence.
@@ -579,67 +482,6 @@ class ImageData(Data):
             right_rectified[i] = cv2.remap(other.images[ri], map2_x, map2_y, interpolation=cv2.INTER_LINEAR)
 
         # Return new ImageData instances with rectified images and matched timestamps
-        left = ImageData(self.frame_id, np.array(common_timestamps), self.height, self.width, self.encoding, left_rectified)
-        right = ImageData(other.frame_id, np.array(common_timestamps), other.height, other.width, other.encoding, right_rectified)
+        left = ImageDataInMemory(self.frame_id, np.array(common_timestamps), self.height, self.width, self.encoding, left_rectified)
+        right = ImageDataInMemory(other.frame_id, np.array(common_timestamps), other.height, other.width, other.encoding, right_rectified)
         return left, right, K1_new, K2_new
-
-
-    # =========================================================================
-    # =========================== Conversion to ROS =========================== 
-    # ========================================================================= 
-
-    @typechecked
-    @staticmethod
-    def get_ros_msg_type() -> str:
-        """ Return the __msgtype__ for an Image msg. """
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        return typestore.types['sensor_msgs/msg/Image'].__msgtype__
-
-    @typechecked
-    def get_ros_msg(self, i: int):
-        """
-        Gets an Image ROS2 Humble message corresponding to the image represented by index i.
-        
-        Args:
-            i (int): The index of the image message to convert.
-        Raises:
-            ValueError: If i is outside the data bounds.
-        """
-
-        # Check to make sure index is within data bounds
-        if i < 0 or i >= self.len():
-            raise ValueError(f"Index {i} is out of bounds!")
-
-        # Get ROS2  message classes
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        Image, Header, Time = typestore.types['sensor_msgs/msg/Image'], typestore.types['std_msgs/msg/Header'], typestore.types['builtin_interfaces/msg/Time']
-
-        # Calculate the step
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            step = 3 * self.width
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            step = 4 * self.width
-        else:
-            raise NotImplementedError(f"Only RGB8 and 32FC1 encodings are currently supported for export, not {self.encoding}!")
-
-        # Get the seconds and nanoseconds
-        seconds = int(self.timestamps[i])
-        nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
-
-        # Calculate the ROS2 Image data
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            data = self.images[i].flatten()
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            data = self.images[i].flatten().view(np.uint8)
-
-        # Write the data into the new class
-        return Image(Header(stamp=Time(sec=int(seconds), 
-                                       nanosec=int(nanoseconds)), 
-                            frame_id=self.frame_id),
-                    height=self.height, 
-                    width=self.width, 
-                    encoding=ImageData.ImageEncoding.to_ros_str(self.encoding),
-                    is_bigendian=0, 
-                    step=step, 
-                    data=data)
-        

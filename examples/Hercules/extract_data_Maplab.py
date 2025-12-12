@@ -10,8 +10,8 @@ Configure the paths in the main() function below.
 
 from pathlib import Path
 import shutil
-from robotdataprocess import ImageData, ImuData, CoordinateFrame
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess import ImageDataInMemory, ImuData, CoordinateFrame
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 
 
 def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
@@ -47,7 +47,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
 
     # Load images from folder
     print("\n2. Loading images...")
-    image_data = ImageData.from_image_files(
+    image_data = ImageDataInMemory.from_image_files(
         input_path / 'rgb',
         f'{robot_name}/cam0'
     )

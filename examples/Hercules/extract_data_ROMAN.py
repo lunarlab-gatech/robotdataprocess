@@ -1,7 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
-from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 
 def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None, skip_depth: bool = False, skip_rgb: bool = False):
     # Check paramters
@@ -14,14 +14,14 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
     
     # Extract depth data from Hercules V1.5 from individual .npy files to a single .npy file
     if not skip_depth:
-        depth_data = ImageData.from_npy_files(input_path / robot_name / 'depth', 'front_center_DepthPerspective')
+        depth_data = ImageDataInMemory.from_npy_files(input_path / robot_name / 'depth', 'front_center_DepthPerspective')
         if crop_data: 
             depth_data.crop_data(Decimal('0.0'), end_time)
         depth_data.to_npy(output_path / robot_name / 'depth')
 
     # Extract image data from Hercules V1.5 to .npy
     if not skip_rgb:
-        rgb_data = ImageData.from_image_files(input_path / robot_name / 'rgb', 'front_center_Scene')
+        rgb_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb', 'front_center_Scene')
         if crop_data: 
             rgb_data.crop_data(Decimal('0.0'), end_time)
         rgb_data.to_npy(output_path / robot_name / 'rgb')

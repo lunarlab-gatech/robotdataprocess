@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.ImuData import ImuData
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 import unittest
 
 class TestImuData(unittest.TestCase):

@@ -1,8 +1,8 @@
 from decimal import Decimal
 import numpy as np
 import os
-from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
 
 def main():

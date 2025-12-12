@@ -1,11 +1,11 @@
 import numpy as np
-from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 
 def main():
     # Extract stereo imagery from GRaCo dataset
-    left_data = ImageData.from_ros2_bag('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05', '/camera_left/image_raw', '/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/left')
-    right_data = ImageData.from_ros2_bag('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05', '/camera_right/image_raw', '/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/right')
+    left_data = ImageDataInMemory.from_ros2_bag('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05', '/camera_left/image_raw', '/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/left')
+    right_data = ImageDataInMemory.from_ros2_bag('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05', '/camera_right/image_raw', '/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/right')
     # left_data = ImageData.from_npy('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-04-extract/npy/left')
     # right_data = ImageData.from_npy('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-04-extract/npy/right')
 

@@ -1,7 +1,7 @@
-from robotdataprocess.data_types.ImageData import ImageData
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 
 def main():
-    images = ImageData.from_npy('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/left_rectified')
+    images = ImageDataInMemory.from_npy('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/left_rectified')
     images.downscale_by_factor(4)
     images.to_npy('/media/dbutterfield3/T75/Graco_Datasets/ground/ros2/ground-05-extract/npy/left_rectified_small')
 

@@ -22,6 +22,17 @@ class CoordinateFrame(Enum):
     ENU = 2
     NONE = 3
 
+class ROSMsgLibType(Enum):
+    """ 
+    Enum for different ROS message library types.
+     
+    Attributes:
+        ROSBAGS: Use ROS messages from the rosbags library (Pure Python library).
+        RCLPY: Use ROS messages from the rclpy library (ROS2 Python client library).
+    """
+
+    ROSBAGS = 0
+    RCLPY = 1
 
 class Data:
     """
@@ -50,12 +61,12 @@ class Data:
         return len(self.timestamps)
     
     @staticmethod
-    def get_ros_msg_type():
-        """ Will return the msgtype needed to add a connetion to a rosbag writer. """
+    def get_ros_msg_type(self, libtype: ROSMsgLibType):
+        """ Will return the msgtype for the ROS message for this Data object. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
-    def get_ros_msg(self, i: int):
-        """ Will return a ROS message object ready to be written into a ROS2 Humble bag. """
+    def get_ros_msg(self, libtype: ROSMsgLibType, i: int):
+        """ Will create and return a ROS message object. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
     def crop_data(self, start: Decimal, end: Decimal):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..conversion_utils import col_to_dec_arr
 import csv
-from .Data import CoordinateFrame, Data
+from .Data import CoordinateFrame, Data, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from evo.core import geometry
@@ -13,7 +13,7 @@ import os
 import pandas as pd
 from .PathData import PathData
 from pathlib import Path
-from ..rosbag.Ros2BagWrapper import Ros2BagWrapper
+from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -22,6 +22,7 @@ from typeguard import typechecked
 from typing import Union, List, Tuple
 import tqdm
 
+@typechecked
 class OdometryData(PathData):
 
     # Define odometry-specific data attributes
@@ -385,26 +386,27 @@ class OdometryData(PathData):
     # =========================== Conversion to ROS =========================== 
     # ========================================================================= 
 
-    @typechecked
     @staticmethod
-    def get_ros_msg_type(msg_type: str = "Odometry") -> str:
+    def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> str:
         """ Return the __msgtype__ for an Imu msg. """
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        if msg_type == "Odometry":
-            return typestore.types['nav_msgs/msg/Odometry'].__msgtype__
-        elif msg_type == "Path":
-            return typestore.types['nav_msgs/msg/Path'].__msgtype__
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            if msg_type == "Odometry":
+                return typestore.types['nav_msgs/msg/Odometry'].__msgtype__
+            elif msg_type == "Path":
+                return typestore.types['nav_msgs/msg/Path'].__msgtype__
+            else:
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
-            raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg_type()!")
     
-    @typechecked
-    def extract_seconds_and_nanoseconds(self, i: int):
+    def _extract_seconds_and_nanoseconds(self, i: int):
         seconds = int(self.timestamps[i])
         nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) \
                         * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
         return seconds, nanoseconds
     
-    def calculate_stamped_poses(self):
+    def _calculate_stamped_poses(self):
         """ Pre-calculates all stamped poses if they aren't calculated yet."""
 
         if len(self.poses) != self.len():
@@ -419,7 +421,7 @@ class OdometryData(PathData):
 
             # Pre-calculate all the poses
             for i in range(self.len()):
-                seconds, nanoseconds = self.extract_seconds_and_nanoseconds(i)
+                seconds, nanoseconds = self._extract_seconds_and_nanoseconds(i)
                 self.poses.append(PoseStamped(Header(stamp=Time(sec=int(seconds), 
                                                                 nanosec=int(nanoseconds)),
                                                     frame_id=self.frame_id),
@@ -431,8 +433,7 @@ class OdometryData(PathData):
                                                     z=self.orientations[i][2],
                                                     w=self.orientations[i][3]))))
 
-    @typechecked
-    def get_ros_msg(self, i: int, msg_type: str = "Odometry"):
+    def get_ros_msg(self, lib_type: ROSMsgLibType, i: int, msg_type: str = "Odometry"):
         """
         Gets an Image ROS2 Humble message corresponding to the odometry in index i.
         
@@ -443,7 +444,7 @@ class OdometryData(PathData):
         """
 
         # Calculate the Stamped Poses
-        self.calculate_stamped_poses()
+        self._calculate_stamped_poses()
 
         # Make sure our data is in the FLU frame, otherwise throw an error
         if self.frame != CoordinateFrame.FLU:
@@ -468,32 +469,35 @@ class OdometryData(PathData):
         Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
 
         # Write the data into the new msg
-        if msg_type == "Odometry":
-            seconds, nanoseconds = self.extract_seconds_and_nanoseconds(i)
-            return Odometry(Header(stamp=Time(sec=int(seconds), 
-                                              nanosec=int(nanoseconds)), 
-                            frame_id=self.frame_id),
-                            child_frame_id=self.child_frame_id,
-                            pose=PoseWithCovariance(pose=Pose(position=Point(x=self.positions[i][0],
-                                                                 y=self.positions[i][1],
-                                                                 z=self.positions[i][2]),
-                                                    orientation=Quaternion(x=self.orientations[i][0],
-                                                                            y=self.orientations[i][1],
-                                                                            z=self.orientations[i][2],
-                                                                            w=self.orientations[i][3])),
-                                                    covariance=np.zeros(36)),
-                            twist=TwistWithCovariance(twist=Twist(linear=Vector3(x=0, # Currently doesn't support Twist
-                                                                                y=0,
-                                                                                z=0,),
-                                                                angular=Vector3(x=0,
-                                                                                y=0,
-                                                                                z=0,)),
-                                                    covariance=np.zeros(36)))
-        elif msg_type == "Path":
-            seconds, nanoseconds = self.extract_seconds_and_nanoseconds(i)
-            return Path(Header(stamp=Time(sec=int(seconds), 
-                                          nanosec=int(nanoseconds)),
-                               frame_id=self.frame_id),
-                               poses=self.poses[0:i+1:10])
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            if msg_type == "Odometry":
+                seconds, nanoseconds = self._extract_seconds_and_nanoseconds(i)
+                return Odometry(Header(stamp=Time(sec=int(seconds), 
+                                                nanosec=int(nanoseconds)), 
+                                frame_id=self.frame_id),
+                                child_frame_id=self.child_frame_id,
+                                pose=PoseWithCovariance(pose=Pose(position=Point(x=self.positions[i][0],
+                                                                    y=self.positions[i][1],
+                                                                    z=self.positions[i][2]),
+                                                        orientation=Quaternion(x=self.orientations[i][0],
+                                                                                y=self.orientations[i][1],
+                                                                                z=self.orientations[i][2],
+                                                                                w=self.orientations[i][3])),
+                                                        covariance=np.zeros(36)),
+                                twist=TwistWithCovariance(twist=Twist(linear=Vector3(x=0, # Currently doesn't support Twist
+                                                                                    y=0,
+                                                                                    z=0,),
+                                                                    angular=Vector3(x=0,
+                                                                                    y=0,
+                                                                                    z=0,)),
+                                                        covariance=np.zeros(36)))
+            elif msg_type == "Path":
+                seconds, nanoseconds = self._extract_seconds_and_nanoseconds(i)
+                return Path(Header(stamp=Time(sec=int(seconds), 
+                                            nanosec=int(nanoseconds)),
+                                frame_id=self.frame_id),
+                                poses=self.poses[0:i+1:10])
+            else:
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
-            raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg()!")

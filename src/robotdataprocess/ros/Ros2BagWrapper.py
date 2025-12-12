@@ -1,4 +1,4 @@
-from ..data_types.Data import Data
+from ..data_types.Data import Data, ROSMsgLibType
 from collections import defaultdict
 from decimal import Decimal
 import glob
@@ -589,8 +589,8 @@ class Ros2BagWrapper:
                 topic = data_topics[i]
 
                 # Add the new connection
-                if data_msg_type[i] is not None: msgtype = data.get_ros_msg_type(data_msg_type[i])
-                else: msgtype = data.get_ros_msg_type()
+                if data_msg_type[i] is not None: msgtype = data.get_ros_msg_type(ROSMsgLibType.ROSBAGS, data_msg_type[i])
+                else: msgtype = data.get_ros_msg_type(ROSMsgLibType.ROSBAGS)
                 connection = writer.add_connection(topic, msgtype, typestore=typestore)
 
                 # Setup a tqdm bar
@@ -598,8 +598,8 @@ class Ros2BagWrapper:
 
                 # Write each of the data entries
                 for j in range(0, data.len()):
-                    if data_msg_type[i] is not None: msg = data.get_ros_msg(j, data_msg_type[i])
-                    else: msg = data.get_ros_msg(j)
+                    if data_msg_type[i] is not None: msg = data.get_ros_msg(ROSMsgLibType.ROSBAGS, j, data_msg_type[i])
+                    else: msg = data.get_ros_msg(ROSMsgLibType.ROSBAGS,j)
                     timestamp = int(Ros2BagWrapper.extract_timestamp(msg) * Decimal('1e9'))
                     writer.write(connection, timestamp, typestore.serialize_cdr(msg, msgtype))
                     pbar.update(1)

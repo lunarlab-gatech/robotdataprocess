@@ -1,7 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
-from robotdataprocess import ImageData, ImuData, OdometryData, CoordinateFrame
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 
 def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None):
     # Check parameters
@@ -15,7 +15,7 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal |
     # Extract RGB and IMU from Hercules v1.5
     imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
-    image_data = ImageData.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
+    image_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
 
     # Convert data from NED frame to ROS frame (and make sure it is at the identity)
     pose_data.to_FLU_frame()

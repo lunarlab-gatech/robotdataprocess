@@ -4,8 +4,8 @@ from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess.data_types.ImageData import ImageData
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 import shutil
 from test_utils import safe_urlretrieve
 import unittest
@@ -36,7 +36,7 @@ class TestImageData(unittest.TestCase):
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
         with np.testing.assert_raises(NotImplementedError):
-            ImageData.ImageEncoding.from_ros_str("fake_name")
+            ImageDataInMemory.ImageEncoding.from_ros_str("fake_name")
 
     def test_from_npy(self):
         """
@@ -46,10 +46,10 @@ class TestImageData(unittest.TestCase):
 
         # Convert the data into .npy (byproduct of loading ImageData from rosbag)
         save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy').absolute()
-        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Husky2/front_center_Scene/image', save_folder)
+        rosData = ImageDataInMemory.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Husky2/front_center_Scene/image', save_folder)
 
         # Load the .npy file
-        npyData = ImageData.from_npy(save_folder)
+        npyData = ImageDataInMemory.from_npy(save_folder)
 
         # Make sure the two classes are equivalent
         np.testing.assert_equal(rosData.frame_id, npyData.frame_id)
@@ -70,7 +70,7 @@ class TestImageData(unittest.TestCase):
         # === Test with 32FC1 Images ===
         # Load the npy files
         files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
+        image_data = ImageDataInMemory.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
 
         # Make sure it matches what is loaded directly using NumPy
         np.testing.assert_array_equal(image_data.images[2], np.load(files_folder / '0.150000.npy', 'r'))
@@ -81,7 +81,7 @@ class TestImageData(unittest.TestCase):
         np.testing.assert_equal(image_data.frame_id, 'Husky1/front_center_DepthPlanar')
         np.testing.assert_equal(image_data.height, 480)
         np.testing.assert_equal(image_data.width, 752)
-        np.testing.assert_equal(image_data.encoding, ImageData.ImageEncoding._32FC1)
+        np.testing.assert_equal(image_data.encoding, ImageDataInMemory.ImageEncoding._32FC1)
 
     def test_from_image_files(self):
         """
@@ -92,7 +92,7 @@ class TestImageData(unittest.TestCase):
         # === Test with RGB8 Images ===
         # Load the image data with the class and save to a ROS2 bag
         files_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'Husky1/front_center_Scene')
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'Husky1/front_center_Scene')
         bag_path = Path(Path('.'), 'tests', 'test_bags', 'test_from_image_files', 'rgb_data_bag').absolute()
         if os.path.isdir(bag_path):
             os.remove(bag_path / 'rgb_data_bag.db3')
@@ -102,14 +102,14 @@ class TestImageData(unittest.TestCase):
 
         # Load that data directly from the rosbag
         npy_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb', 'npy').absolute()
-        image_data_after = ImageData.from_ros2_bag(bag_path, '/cam0', npy_folder)
+        image_data_after = ImageDataInMemory.from_ros2_bag(bag_path, '/cam0', npy_folder)
 
         # Make sure that the data is what we expect
         np.testing.assert_array_almost_equal(np.arange(0.05, 10.05, 0.05), image_data_after.timestamps.astype(np.float128), 14)
         np.testing.assert_equal('Husky1/front_center_Scene', image_data_after.frame_id)
         np.testing.assert_equal(480, image_data_after.height)
         np.testing.assert_equal(752, image_data_after.width)
-        np.testing.assert_equal(ImageData.ImageEncoding.RGB8, image_data_after.encoding)
+        np.testing.assert_equal(ImageDataInMemory.ImageEncoding.RGB8, image_data_after.encoding)
 
         # Manually load a couple images to compare image data
         def manual_cv2_load(path, cvt=True):
@@ -129,7 +129,7 @@ class TestImageData(unittest.TestCase):
 
         # === Test with Mono8 Images ===
         path = Path('.')/'tests'/'files'/'test_ImageData'/'test_from_image_files'/'mono8'
-        image_data = ImageData.from_image_files(path.absolute(), 'callie')
+        image_data = ImageDataInMemory.from_image_files(path.absolute(), 'callie')
 
         images = np.zeros((1, 652, 1196), dtype=np.uint8)
         images[0] = manual_cv2_load(path / "0.0.png", False)
@@ -139,13 +139,13 @@ class TestImageData(unittest.TestCase):
         np.testing.assert_equal('callie', image_data.frame_id)
         np.testing.assert_equal(652, image_data.height)
         np.testing.assert_equal(1196, image_data.width)
-        np.testing.assert_equal(ImageData.ImageEncoding.Mono8, image_data.encoding)
+        np.testing.assert_equal(ImageDataInMemory.ImageEncoding.Mono8, image_data.encoding)
 
         # === Unsupported Formats ===
         # Test that it properly detects an unsupported format
         path = Path('.')/'tests'/'files'/'test_ImageData'/'test_from_image_files'/'rgba'
         with np.testing.assert_raises(NotImplementedError):
-            _ = ImageData.from_image_files(path.absolute(), 'N/A')
+            _ = ImageDataInMemory.from_image_files(path.absolute(), 'N/A')
 
     def test_to_npy(self):
         """ Make sure the data isn't changed after saving to an .npy file. """
@@ -153,7 +153,7 @@ class TestImageData(unittest.TestCase):
         # === Test with RGB8 Images ===
         # Load the images
         files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_to_npy', 'images').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'Husky1/front_center_Scene')
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'Husky1/front_center_Scene')
 
         # Save it to an .npy file
         save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy').absolute()
@@ -161,7 +161,7 @@ class TestImageData(unittest.TestCase):
         image_data.to_npy(save_path)
 
         # Load it back from the .npy file
-        npy_data = ImageData.from_npy(save_path)
+        npy_data = ImageDataInMemory.from_npy(save_path)
 
         # Ensure the data hasn't changed
         np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
@@ -174,13 +174,13 @@ class TestImageData(unittest.TestCase):
         # === Test with 32FC1 Images ===
         # Load the npy files
         files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
+        image_data = ImageDataInMemory.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
 
         # Save to .npy file and reload
         save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy_depth').absolute()
         save_path.mkdir(parents=True, exist_ok=True)
         image_data.to_npy(save_path)
-        npy_data = ImageData.from_npy(save_path)
+        npy_data = ImageDataInMemory.from_npy(save_path)
 
         # Ensure the data hasn't changed
         np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
@@ -195,7 +195,7 @@ class TestImageData(unittest.TestCase):
 
         # Load the images
         files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_crop_data', 'images').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'camera')
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'camera')
 
         # Ensure cropping works correctly
         image_data_cropped = deepcopy(image_data)
@@ -214,7 +214,7 @@ class TestImageData(unittest.TestCase):
         
         # Load the images
         files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_get_ros_msg', 'images').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'cam0')
+        image_data = ImageDataInMemory.from_npy_files(files_folder, 'cam0')
 
         # Write the image data to a ROS message
         bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
@@ -228,7 +228,7 @@ class TestImageData(unittest.TestCase):
             None)
 
         # Load that data back from the rosbag
-        image_data_after = ImageData.from_ros2_bag(bag_path, '/cam0/depth', bag_path.parent / 'npy')
+        image_data_after = ImageDataInMemory.from_ros2_bag(bag_path, '/cam0/depth', bag_path.parent / 'npy')
 
         # Ensure that the data is the same
         np.testing.assert_array_equal(image_data.images, image_data_after.images)

@@ -6,7 +6,7 @@ from pathlib import Path
 from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess.data_types.PathData import PathData
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
 import unittest
 
