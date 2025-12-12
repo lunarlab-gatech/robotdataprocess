@@ -1,0 +1,245 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ImuData &mdash; robotdataprocess 0.1.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js?v=b0099a1c"></script>
+      <script src="_static/doctools.js?v=888ff710"></script>
+      <script src="_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="OdometryData" href="robotdataprocess.data_types.OdometryData.html" />
+    <link rel="prev" title="ImageData" href="robotdataprocess.data_types.ImageData.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            robotdataprocess
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="robotdataprocess.data_types.html">Data Types</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="robotdataprocess.data_types.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.Data.html">Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImageData.html">ImageData</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">ImuData</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.ImuData.ImuData"><code class="docutils literal notranslate"><span class="pre">ImuData</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.OdometryData.html">OdometryData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.PathData.html">PathData</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">robotdataprocess</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="robotdataprocess.data_types.html">Data Types</a></li>
+      <li class="breadcrumb-item active">ImuData</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/robotdataprocess.data_types.ImuData.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-robotdataprocess.data_types.ImuData">
+<span id="imudata"></span><h1>ImuData<a class="headerlink" href="#module-robotdataprocess.data_types.ImuData" title="Permalink to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.ImuData.</span></span><span class="sig-name descname"><span class="pre">ImuData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">lin_acc</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ang_vel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">orientations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.Data" title="robotdataprocess.data_types.Data.Data"><code class="xref py py-class docutils literal notranslate"><span class="pre">Data</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.crop_data">
+<span class="sig-name descname"><span class="pre">crop_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">start</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">end</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Decimal</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.crop_data" title="Permalink to this definition"></a></dt>
+<dd><p>Will crop the data so only values within [start, end] inclusive are kept.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.from_TartanAir">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_TartanAir</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">folder_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.from_TartanAir" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from the TartanAir dataset format, which includes
+various .txt files with IMU data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>folder_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the folder containing the IMU data.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this IMU data was collected.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImuData.ImuData" title="robotdataprocess.data_types.ImuData.ImuData">ImuData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.from_ros2_bag">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_ros2_bag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">imu_topic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.from_ros2_bag" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a ROS2 bag file with an Imu topic.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bag_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the ROS2 bag file.</p></li>
+<li><p><strong>img_topic</strong> (<em>str</em>) – Topic of the Imu messages.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this IMU data was collected.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="robotdataprocess.data_types.ImageData.html#robotdataprocess.data_types.ImageData.ImageData" title="robotdataprocess.data_types.ImageData.ImageData">ImageData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.from_txt_file">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_txt_file</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.from_txt_file" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from the TartanAir dataset format, which includes
+various .txt files with IMU data. It expects the timestamp, the linear
+acceleration, and the angular velocity, seperated by spaced in that order.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>file_path</strong> (<em>Path</em><em> | </em><em>str</em>) – Path to the file containing the IMU data.</p></li>
+<li><p><strong>frame_id</strong> (<em>str</em>) – The frame where this IMU data was collected.</p></li>
+<li><p><strong>frame</strong> (<a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><em>CoordinateFrame</em></a>) – The coordinate system convention of this data.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.ImuData.ImuData" title="robotdataprocess.data_types.ImuData.ImuData">ImuData</a></p>
+</dd>
+</dl>
+<p>NOTE: Sets orientation to identity!</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.get_ros_msg">
+<span class="sig-name descname"><span class="pre">get_ros_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.get_ros_msg" title="Permalink to this definition"></a></dt>
+<dd><p>Gets an Image ROS2 Humble message corresponding to the image represented by index i.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>i</strong> (<em>int</em>) – The index of the image message to convert.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>ValueError</strong> – If i is outside the data bounds.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.get_ros_msg_type">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_ros_msg_type</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.get_ros_msg_type" title="Permalink to this definition"></a></dt>
+<dd><p>Return the __msgtype__ for an Imu msg.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.ImuData.ImuData.to_PathData">
+<span class="sig-name descname"><span class="pre">to_PathData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">initial_pos</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dtype</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_vel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dtype</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_ori</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dtype</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_ang_vel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="robotdataprocess.data_types.PathData.html#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></span><a class="headerlink" href="#robotdataprocess.data_types.ImuData.ImuData.to_PathData" title="Permalink to this definition"></a></dt>
+<dd><p>Converts this IMUData class into OdometeryData by integrating the IMU data using
+Euler’s method.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>initial_pos</strong> – The initial position as a numpy array.</p></li>
+<li><p><strong>initial_vel</strong> – The initial velocity as a numpy array.</p></li>
+<li><p><strong>initial_ori</strong> – The initial orientation as a numpy array (quaternion x, y, z, w).</p></li>
+<li><p><strong>use_ang_vel</strong> – If True, will use angular velocity data to calculate orientation.
+If False, will use orientation data directly from the IMUData class.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The resulting PathData class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="robotdataprocess.data_types.PathData.html#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData">PathData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotdataprocess.data_types.ImageData.html" class="btn btn-neutral float-left" title="ImageData" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="robotdataprocess.data_types.OdometryData.html" class="btn btn-neutral float-right" title="OdometryData" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Daniel Butterfield, Sandilya Sai Garimella.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

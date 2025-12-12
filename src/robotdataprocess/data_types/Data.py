@@ -1,16 +1,27 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 from decimal import Decimal
 from enum import Enum
 import numpy as np
 from typeguard import typechecked
 
 class CoordinateFrame(Enum):
-    FLU = 0 # https://www.ros.org/reps/rep-0103.html - X forward, Y left, Z up := RHS
-    NED = 1 # https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates
-            # - X forward (north), Y right (East), Z Down := RHS
-    ENU = 2 # https://www.ros.org/reps/rep-0103.html - X east, Y north, Z up := RHS
+    """ 
+    Enum for different coordinate frames used in robotics. 
+    
+    Attributes:
+        FLU: X forward, Y left, Z up := RHS
+        NED: X forward (north), Y right (east), Z down := RHS
+        ENU: X right (east), Y forward (north), Z up := RHS
+        NONE: No defined coordinate frame.
+    """
+
+    FLU = 0
+    NED = 1
+    ENU = 2
+    NONE = 3
+
 
 class Data:
     """
@@ -27,7 +38,7 @@ class Data:
         
         # Copy initial values into attributes
         self.frame_id = frame_id
-        self.timestamps = convert_collection_into_decimal_array(timestamps)
+        self.timestamps = col_to_dec_arr(timestamps)
 
         # Check to ensure that all timestamps are sequential
         for i in range(len(self.timestamps) - 1):
@@ -38,11 +49,16 @@ class Data:
         """ Returns the number of items in this data class """
         return len(self.timestamps)
     
+    @staticmethod
     def get_ros_msg_type():
         """ Will return the msgtype needed to add a connetion to a rosbag writer. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
-    def get_ros_msg(i: int):
+    def get_ros_msg(self, i: int):
         """ Will return a ROS message object ready to be written into a ROS2 Humble bag. """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
+    
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 

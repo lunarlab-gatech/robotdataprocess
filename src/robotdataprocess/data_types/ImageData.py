@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import convert_collection_into_decimal_array
+from ..conversion_utils import col_to_dec_arr
 import cv2
 from .Data import Data
 import decimal
@@ -16,7 +16,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from typeguard import typechecked
-from typing import Tuple
+from typing import Tuple, Union
 import tqdm
 
 class ImageData(Data):
@@ -85,15 +85,14 @@ class ImageData(Data):
         
         @staticmethod
         def to_dtype_and_channels(encoding):
-            match encoding:
-                case ImageData.ImageEncoding.Mono8:
-                    return (np.uint8, 1)
-                case ImageData.ImageEncoding.RGB8:
-                    return (np.uint8, 3)
-                case ImageData.ImageEncoding._32FC1:
-                    return (np.float32, 1)
-                case _:
-                    raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
+            if encoding == ImageData.ImageEncoding.Mono8:
+                return (np.uint8, 1)
+            elif encoding == ImageData.ImageEncoding.RGB8:
+                return (np.uint8, 3)
+            elif encoding == ImageData.ImageEncoding._32FC1:
+                return (np.float32, 1)
+            else:
+                raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
             
 
 
@@ -104,7 +103,7 @@ class ImageData(Data):
     images: np.ndarray
 
     @typechecked
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
                  height: int, width: int, encoding: ImageData.ImageEncoding, images: np.ndarray):
         
         # Copy initial values into attributes
@@ -120,7 +119,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Path | str, img_topic: str, save_folder: Path | str):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):
         """
         Creates a class structure from a ROS2 bag file with an Image topic. Will
         Also save all the data into .npy and .txt files as this is required if image
@@ -201,7 +200,7 @@ class ImageData(Data):
     
     @classmethod
     @typechecked
-    def from_npy(cls, folder_path: Path | str):
+    def from_npy(cls, folder_path: Union[Path, str]):
         """
         Creates a class structure from .npy and .txt files (the ones written by from_ros2_bag()).
 
@@ -237,7 +236,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_npy_files(cls, npy_folder_path: Path | str, frame_id: str):
+    def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from .npy files, where each individual image
         is stored in an .npy file with the timestamp as the name
@@ -253,7 +252,7 @@ class ImageData(Data):
         all_image_files = [str(p) for p in Path(npy_folder_path).glob("*.npy")]
 
         # Extract the timestamps and sort them
-        timestamps = convert_collection_into_decimal_array([s.split('/')[-1][:-4] for s in all_image_files])
+        timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_image_files])
         sorted_indices = np.argsort(timestamps)
         timestamps_sorted = timestamps[sorted_indices]
 
@@ -288,7 +287,7 @@ class ImageData(Data):
 
     @classmethod
     @typechecked
-    def from_image_files(cls, image_folder_path: Path | str, frame_id: str):
+    def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str):
         """
         Creates a class structure from a folder with .png files, using the file names
         as the timestamps. This is the format that the HERCULES v1.4 dataset provides
@@ -305,7 +304,7 @@ class ImageData(Data):
         all_image_files = [str(p) for p in Path(image_folder_path).glob("*.png")]
 
         # Extract the timestamps and sort them
-        timestamps = convert_collection_into_decimal_array([s.split('/')[-1][:-4] for s in all_image_files])
+        timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_image_files])
         sorted_indices = np.argsort(timestamps)
         timestamps_sorted = timestamps[sorted_indices]
 
@@ -377,14 +376,25 @@ class ImageData(Data):
             rescaled_images[i] = cv2.resize(self.images[i], (self.width, self.height), interpolation=cv2.INTER_LINEAR)
         self.images = rescaled_images
 
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep
+        mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask
+        self.timestamps = self.timestamps[mask]
+        self.images = self.images[mask]
+
     # =========================================================================
     # ============================ Export Methods ============================= 
     # ========================================================================= 
 
     @typechecked
-    def to_npy(self, output_folder_path: Path | str):
+    def to_npy(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData into three files:
+        
         - imgs.npy (with image data)
         - times.npy (with timestamps)
         - attributes.txt
@@ -426,7 +436,7 @@ class ImageData(Data):
 
 
     @typechecked
-    def to_image_files(self, output_folder_path: Path | str):
+    def to_image_files(self, output_folder_path: Union[Path, str]):
         """
         Saves each image in this ImageData instance to the specified folder,
         using the timestamps as filenames in .png format (lossless compression).
@@ -523,8 +533,8 @@ class ImageData(Data):
             R, T: Rotation and translation from left to right camera.
 
         Returns:
-            Tuple[ImageData, ImageData, np.ndarray, np.ndarray]: Rectified left and right 
-                ImageData, and new Instrinsics matrices for the left and right cameras.
+            Tuple[ImageData, ImageData, np.ndarray, np.ndarray]: 
+                Rectified left and right ImageData, and new Instrinsics matrices for the left and right cameras.
         """
 
         # Make sure the ImageData sequences are compatible
@@ -609,10 +619,18 @@ class ImageData(Data):
             step = 3 * self.width
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             step = 4 * self.width
+        else:
+            raise NotImplementedError(f"Only RGB8 and 32FC1 encodings are currently supported for export, not {self.encoding}!")
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
         nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
+
+        # Calculate the ROS2 Image data
+        if self.encoding == ImageData.ImageEncoding.RGB8:
+            data = self.images[i].flatten()
+        elif self.encoding == ImageData.ImageEncoding._32FC1:
+            data = self.images[i].flatten().view(np.uint8)
 
         # Write the data into the new class
         return Image(Header(stamp=Time(sec=int(seconds), 
@@ -623,5 +641,5 @@ class ImageData(Data):
                     encoding=ImageData.ImageEncoding.to_ros_str(self.encoding),
                     is_bigendian=0, 
                     step=step, 
-                    data=self.images[i].flatten())
+                    data=data)
         

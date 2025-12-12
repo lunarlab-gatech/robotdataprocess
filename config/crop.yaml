@@ -1,9 +1,10 @@
-input_bag: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_pruned
-output_bag: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_pruned_crop
+input_bag: /home/dbutterfield3/Research/robotdataprocess/tests/test_bags/hercules_test_bag_pruned_3
+output_bag: /home/dbutterfield3/Research/robotdataprocess/tests/test_bags/hercules_test_bag_pruned_3_FINAL
 external_msgs_path_ros2: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros2
 external_msgs_path_ros1: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros1
 operation_to_run: 'crop'
 operation_params:
   crop:
-    start_ts: 1749131354.349346016
-    end_ts:   1749131464.349346016
+    start_ts: 1749131354.349358117
+    end_ts:   1749131356.349358117
+              

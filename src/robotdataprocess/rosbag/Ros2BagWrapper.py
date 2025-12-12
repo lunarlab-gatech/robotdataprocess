@@ -14,6 +14,7 @@ from rosbags.typesys import Stores, get_typestore, get_types_from_msg
 from rosbags.typesys.store import Typestore
 import tqdm
 from typeguard import typechecked
+from typing import Union, Tuple, List, Dict
 import yaml
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
@@ -22,7 +23,7 @@ class Ros2BagWrapper:
 
     # Define attributes
     bag_path: Path
-    external_msgs_path: Path | None
+    external_msgs_path: Union[Path, None]
     typestore2: Typestore
     metadata: dict
 
@@ -31,7 +32,7 @@ class Ros2BagWrapper:
     ros1_msg_instances: dict
     
     @typechecked
-    def __init__(self, bag_path: Path | str, external_msgs_path: Path | str | None):
+    def __init__(self, bag_path: Union[Path, str], external_msgs_path: Union[Path, str, None]):
         """
         Args:
             input_bag: Path to the input ROS2 bag file.
@@ -72,13 +73,13 @@ class Ros2BagWrapper:
 
     @staticmethod
     @typechecked
-    def _create_typestore_with_external_msgs(store_type: Stores, external_msgs_path: Path | None) -> Typestore:
+    def _create_typestore_with_external_msgs(store_type: Stores, external_msgs_path: Union[Path, None]) -> Typestore:
         """
         Create Typestore with external message types added from the specified path.
 
         Args:
             store_type (Stores): The rosbags Store type (which defines which ROS version is used).
-            external_msgs_path (Path | None): Path to directory to search for all additional messsages to add.
+            external_msgs_path: Path to directory to search for all additional messsages to add.
         Returns:
             Stores: The typestore will all external messages added.
         """
@@ -107,12 +108,12 @@ class Ros2BagWrapper:
     # =========================================================================
 
     @staticmethod
-    def create_histogram(data: list, title: str, xlabel: str, ylabel: str, filename: str) -> None:
+    def create_histogram(data: List, title: str, xlabel: str, ylabel: str, filename: str) -> None:
         """
         Create and save a histogram from the provided data.
 
         Args:
-            data (list): Data to create the histogram from.
+            data (List): Data to create the histogram from.
             title (str): Title of the histogram.
             xlabel (str): Label for the x-axis.
             ylabel (str): Label for the y-axis.
@@ -132,7 +133,7 @@ class Ros2BagWrapper:
             Path(filename).parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(filename)
 
-    def hertz_analysis(self, topic: str, output_folder: str, expected_msgs: int, max_msgs: int, robot_name: str | None) -> None:
+    def hertz_analysis(self, topic: str, output_folder: str, expected_msgs: int, max_msgs: int, robot_name: Union[str, None]) -> None:
         """
         Analyze the hertz of various topics in a ROS2 bag file. Will output
         a histogram of the hertz for each pair of consecutive messages
@@ -187,7 +188,7 @@ class Ros2BagWrapper:
         if num_seq_messages_with_same_timestamps > 0:
             print(f"Warning: Sequential Pairs of timestamps are equivalent {num_seq_messages_with_same_timestamps} times. Excluding from plot...")
 
-        # Sort each of these lists
+        # Sort each of these Lists
         hertz_diffs.sort()
         hertz_values.sort()
 
@@ -219,15 +220,15 @@ class Ros2BagWrapper:
     # ============================ View IMU Data ==============================
     # =========================================================================
 
-    def view_imu_data(self, topic: str, output_folder: str, expected_msgs: int | None, data_range: tuple[int] | None):
+    def view_imu_data(self, topic: str, output_folder: str, expected_msgs: Union[int, None], data_range: Union[Tuple[int], None]):
         """
         Plot the linear acceleration, angular velocity, and orientation data of an IMU topic in a ROS2 bag.
 
         Args:
             topic (str): The topic to read the IMU data from; must be 'sensor_msgs/msg/Imu'.
             output_folder (str): The folder to save plotted IMU data.
-            expected_msgs (int | None): Expected number of messages in the topic, for progress bar.
-            data_range (tuple[int] | None): The range of data to plot.
+            expected_msgs: Expected number of messages in the topic, for progress bar.
+            data_range: The range of data to plot.
         """
 
         # Create the output folder if it doesn't exist
@@ -246,7 +247,7 @@ class Ros2BagWrapper:
 
         else: # Otherwise, read the bag
 
-            # Initialize lists
+            # Initialize Lists
             lin_accel = {'x': [], 'y': [], 'z': []}
             ang_vel = {'x': [], 'y': [], 'z': []}
             orientation = {'x': [], 'y': [], 'z': [], 'w': []}
@@ -302,7 +303,7 @@ class Ros2BagWrapper:
                 'orientation': orientation,
             })
 
-        def multi_list_plotter(data_dict: dict, timestamps: list, data_range: tuple[int],
+        def multi_list_plotter(data_dict: dict, timestamps: list, data_range: Tuple[int],
                                title: str, ylabel: str, filename: str):
             """
             Helper function that plots each list in a dictionary in its own subplot,
@@ -346,7 +347,7 @@ class Ros2BagWrapper:
     # ============================= Downsampling ==============================
     # =========================================================================
 
-    def downsample(self, output_bag: Path | str, topic_downsample_ratios: dict, include_unmentioned_topics: bool):
+    def downsample(self, output_bag: Union[Path, str], topic_downsample_ratios: dict, include_unmentioned_topics: bool):
         """
         Downsample a ROS2 bag file by downsampling the frequency of specified topics. Additionally
         includes or excludes unmentioned topics based on `include_unmentioned_topics` parameter, which
@@ -398,7 +399,7 @@ class Ros2BagWrapper:
             connections = reader.connections
 
             # Create a writer with only the specified topics
-            with Writer2(output_bag, version=5) as writer:
+            with Writer2(output_bag) as writer:
                 conn_map = {}
                 for conn in connections:
                     if (conn.topic in topic_downsample_ratios) or include_unmentioned_topics:
@@ -510,7 +511,7 @@ class Ros2BagWrapper:
     # ============================== Cropping ================================= 
     # =========================================================================  
 
-    def crop(self, output_path: Path | str, start_ts: float, end_ts: float) -> None:
+    def crop(self, output_path: Union[Path, str], start_ts: float, end_ts: float) -> None:
         """
         Crop this ROS2 bag file to only include messages within the specified time range. Note
         that this function uses the timestamps of when the messages were written to the bag,
@@ -532,7 +533,7 @@ class Ros2BagWrapper:
             connections = reader.connections
             
             # Setup the bag writer
-            with Writer2(output_bag, version=5) as writer:
+            with Writer2(output_bag) as writer:
                 conn_map = {}
                 for conn in connections:
                     conn_map[conn.topic] = writer.add_connection(
@@ -558,19 +559,19 @@ class Ros2BagWrapper:
     
     @staticmethod
     @typechecked
-    def write_data_to_rosbag(bag_path: Path | str, data_list: list[Data], 
-                             data_topics: list[str], data_msg_type: list[str | None],
-                             external_msgs_path: Path | str | None):
+    def write_data_to_rosbag(bag_path: Union[Path, str], data_list: List[Data], 
+                             data_topics: List[str], data_msg_type: List[Union[str, None]],
+                             external_msgs_path: Union[Path, str, None]):
         """
         This helper method writes a new bag with the data in the provided Data classes.
 
         Args:
             bag_path (Path | str): The path to write the output bag.
-            data_list (list[Data]): A list of all Data objects whose contents should
+            data_list (List[Data]): A list of all Data objects whose contents should
                 be written into the bag.
-            data_topics (list[str]): The topics under which the corresponding Data class's
+            data_topics (List[str]): The topics under which the corresponding Data class's
                 data should be saved.
-            data_msg_type (list[str]): If supported, the corresponding message type that
+            data_msg_type (List[str]): If supported, the corresponding message type that
                 the data class data should be written into.
             external_msgs_path (Path | str | None): Path to the directory containing 
                 external message definitions.
@@ -580,7 +581,7 @@ class Ros2BagWrapper:
         typestore = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS2_HUMBLE, external_msgs_path)
 
         # Open a ROS2 Humble bag for writing
-        with Writer2(str(bag_path), version=5) as writer:
+        with Writer2(str(bag_path)) as writer:
 
             # For each data class
             for i in range(0, len(data_list)):
@@ -644,135 +645,134 @@ class Ros2BagWrapper:
             dict: A mapping dictionary where:
                 keys (str): A string defining the attribute in the ros2 message.
                     Thus, a key of "header.stamp" would map to ros2_msg.header.stamp.
-                values (str or tuple): A string defining the attribute in the ros1 message,
-                    OR a tuple where the first element is the attribute in the ros1 message and
+                values (str or Tuple): A string defining the attribute in the ros1 message,
+                    OR a Tuple where the first element is the attribute in the ros1 message and
                     the second element is a mapping dictionary for mapping attributes within 
                     child message types.
         """
 
         map = None
-        match msg_type:
-            case "builtin_interfaces/msg/Time":
-                map = {
-                    "sec": "sec",
-                    "nanosec": "nanosec"
-                }
-            case "geometry_msgs/msg/Point":
-                map = {
-                    "x": "x",
-                    "y": "y",
-                    "z": "z"
-                }
-            case "geometry_msgs/msg/Pose":
-                map = {
-                    "position": ("position", self._get_mapping_2to1("geometry_msgs/msg/Point")),
-                    "orientation": ("orientation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion"))
-                }
-            case "geometry_msgs/msg/PoseWithCovariance":
-                map = {
-                    "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/Pose")),
-                    "covariance": "covariance"
-                }
-            case "geometry_msgs/msg/Quaternion":
-                map = {
-                    "x": "x",
-                    "y": "y",
-                    "z": "z",
-                    "w": "w"
-                }
-            case "geometry_msgs/msg/Transform":
-                map = {
-                    "translation": ("translation", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
-                    "rotation": ("rotation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion"))
-                }
-            case "geometry_msgs/msg/TransformStamped":
-                map = {
-                    "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
-                    "child_frame_id": "child_frame_id",
-                    "transform": ("transform", self._get_mapping_2to1("geometry_msgs/msg/Transform")),
-                }
-            case "geometry_msgs/msg/Twist":
-                map = {
-                    "linear": ("linear", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
-                    "angular": ("angular", self._get_mapping_2to1("geometry_msgs/msg/Vector3"))
-                }
-            case "geometry_msgs/msg/TwistWithCovariance":
-                map = {
-                    "twist": ("twist", self._get_mapping_2to1("geometry_msgs/msg/Twist")),
-                    "covariance": "covariance"          
-                }
-            case "geometry_msgs/msg/Vector3":
-                map = {
-                    "x": "x",
-                    "y": "y",
-                    "z": "z"
-                }
-            case "nav_msgs/msg/Odometry":
-                map = {
-                    "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
-                    "child_frame_id": "child_frame_id",
-                    "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/PoseWithCovariance")),
-                    "twist": ("twist", self._get_mapping_2to1("geometry_msgs/msg/TwistWithCovariance"))
-                }
-            case "rosgraph_msgs/msg/Clock":
-                map = {
-                    "clock": ("clock", self._get_mapping_2to1("builtin_interfaces/msg/Time"))
-                }
-            case "sensor_msgs/msg/Image":
-                map = {
-                    "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
-                    "height": "height",
-                    "width": "width",
-                    "encoding": "encoding",
-                    "is_bigendian": "is_bigendian",
-                    "step": "step",
-                    "data": "data"
-                }
-            case "sensor_msgs/msg/Imu":
-                map = {
-                    "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
-                    "orientation": ("orientation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion")),
-                    "orientation_covariance": "orientation_covariance",
-                    "angular_velocity": ("angular_velocity", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
-                    "angular_velocity_covariance": "angular_velocity_covariance",
-                    "linear_acceleration": ("linear_acceleration", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
-                    "linear_acceleration_covariance": "linear_acceleration_covariance"
-                }
-            case "sensor_msgs/msg/CameraInfo":
-                map = {
-                    "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
-                    "height": "height",
-                    "width": "width",
-                    "distortion_model": "distortion_model",
-                    "d": "D",
-                    "k": "K",
-                    "r": "R",
-                    "p": "P",
-                    "binning_x": "binning_x",
-                    "binning_y": "binning_y",
-                    "roi": ("roi", self._get_mapping_2to1("sensor_msgs/msg/RegionOfInterest"))
-                }
-            case "sensor_msgs/msg/RegionOfInterest":
-                map = {
-                    "x_offset": "x_offset",
-                    "y_offset": "y_offset",
-                    "height": "height",
-                    "width": "width",
-                    "do_rectify": "do_rectify"
-                }
-            case "std_msgs/msg/Header":
-                map = {
-                    "stamp": ("stamp", self._get_mapping_2to1("builtin_interfaces/msg/Time")),
-                    "frame_id": "frame_id"
-                    # Note: ROS1 msg has a 'seq' value, which we define no mapping for.
-                    # Thus, default value in self._get_ros1_msg_instance is used.
-                }
-            case "tf2_msgs/msg/TFMessage":
-                map = {
-                    "transforms": ("transforms", self._get_mapping_2to1("geometry_msgs/msg/TransformStamped"))
-                }
-            case _:
-                raise ValueError(f"Currently unsupported msg_type: {msg_type}")
+        if msg_type == "builtin_interfaces/msg/Time":
+            map = {
+                "sec": "sec",
+                "nanosec": "nanosec"
+            }
+        elif msg_type == "geometry_msgs/msg/Point":
+            map = {
+                "x": "x",
+                "y": "y",
+                "z": "z"
+            }
+        elif msg_type == "geometry_msgs/msg/Pose":
+            map = {
+                "position": ("position", self._get_mapping_2to1("geometry_msgs/msg/Point")),
+                "orientation": ("orientation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion"))
+            }
+        elif msg_type == "geometry_msgs/msg/PoseWithCovariance":
+            map = {
+                "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/Pose")),
+                "covariance": "covariance"
+            }
+        elif msg_type == "geometry_msgs/msg/Quaternion":
+            map = {
+                "x": "x",
+                "y": "y",
+                "z": "z",
+                "w": "w"
+            }
+        elif msg_type == "geometry_msgs/msg/Transform":
+            map = {
+                "translation": ("translation", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
+                "rotation": ("rotation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion"))
+            }
+        elif msg_type == "geometry_msgs/msg/TransformStamped":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "child_frame_id": "child_frame_id",
+                "transform": ("transform", self._get_mapping_2to1("geometry_msgs/msg/Transform")),
+            }
+        elif msg_type == "geometry_msgs/msg/Twist":
+            map = {
+                "linear": ("linear", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
+                "angular": ("angular", self._get_mapping_2to1("geometry_msgs/msg/Vector3"))
+            }
+        elif msg_type == "geometry_msgs/msg/TwistWithCovariance":
+            map = {
+                "twist": ("twist", self._get_mapping_2to1("geometry_msgs/msg/Twist")),
+                "covariance": "covariance"          
+            }
+        elif msg_type == "geometry_msgs/msg/Vector3":
+            map = {
+                "x": "x",
+                "y": "y",
+                "z": "z"
+            }
+        elif msg_type == "nav_msgs/msg/Odometry":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "child_frame_id": "child_frame_id",
+                "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/PoseWithCovariance")),
+                "twist": ("twist", self._get_mapping_2to1("geometry_msgs/msg/TwistWithCovariance"))
+            }
+        elif msg_type == "rosgraph_msgs/msg/Clock":
+            map = {
+                "clock": ("clock", self._get_mapping_2to1("builtin_interfaces/msg/Time"))
+            }
+        elif msg_type == "sensor_msgs/msg/Image":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "height": "height",
+                "width": "width",
+                "encoding": "encoding",
+                "is_bigendian": "is_bigendian",
+                "step": "step",
+                "data": "data"
+            }
+        elif msg_type == "sensor_msgs/msg/Imu":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "orientation": ("orientation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion")),
+                "orientation_covariance": "orientation_covariance",
+                "angular_velocity": ("angular_velocity", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
+                "angular_velocity_covariance": "angular_velocity_covariance",
+                "linear_acceleration": ("linear_acceleration", self._get_mapping_2to1("geometry_msgs/msg/Vector3")),
+                "linear_acceleration_covariance": "linear_acceleration_covariance"
+            }
+        elif msg_type == "sensor_msgs/msg/CameraInfo":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "height": "height",
+                "width": "width",
+                "distortion_model": "distortion_model",
+                "d": "D",
+                "k": "K",
+                "r": "R",
+                "p": "P",
+                "binning_x": "binning_x",
+                "binning_y": "binning_y",
+                "roi": ("roi", self._get_mapping_2to1("sensor_msgs/msg/RegionOfInterest"))
+            }
+        elif msg_type == "sensor_msgs/msg/RegionOfInterest":
+            map = {
+                "x_offset": "x_offset",
+                "y_offset": "y_offset",
+                "height": "height",
+                "width": "width",
+                "do_rectify": "do_rectify"
+            }
+        elif msg_type == "std_msgs/msg/Header":
+            map = {
+                "stamp": ("stamp", self._get_mapping_2to1("builtin_interfaces/msg/Time")),
+                "frame_id": "frame_id"
+                # Note: ROS1 msg has a 'seq' value, which we define no mapping for.
+                # Thus, default value in self._get_ros1_msg_instance is used.
+            }
+        elif msg_type == "tf2_msgs/msg/TFMessage":
+            map = {
+                "transforms": ("transforms", self._get_mapping_2to1("geometry_msgs/msg/TransformStamped"))
+            }
+        else:
+            raise ValueError(f"Currently unsupported msg_type: {msg_type}")
             
         return map
     
@@ -781,7 +781,7 @@ class Ros2BagWrapper:
         Given an input mapping of values from different ROS verions, flip it so that 
         the keys are the values and the values are the keys. This equates to converting
         a mapping from ROS2 to ROS1 into a mapping from ROS1 to ROS2. Handles special
-        cases where the value is a tuple instead of a string.
+        cases where the value is a Tuple instead of a string.
 
         Args:
             map (dict): Dictionary returned by _get_mapping_2to1() or _get_mapping_1to2()
@@ -811,8 +811,8 @@ class Ros2BagWrapper:
             dict: A mapping dictionary where:
                 keys (str): A string defining the attribute in the ros2 message.
                     Thus, a key of "header.stamp" would map to ros2_msg.header.stamp.
-                values (str or tuple): A string defining the attribute in the ros1 message,
-                    OR a tuple where the first element is the attribute in the ros1 message and
+                values (str or Tuple): A string defining the attribute in the ros1 message,
+                    OR a Tuple where the first element is the attribute in the ros1 message and
                     the second element is a mapping dictionary for mapping attributes within 
                     child message types.
         """
@@ -820,7 +820,7 @@ class Ros2BagWrapper:
         map = self._get_mapping_2to1(msg_type)
         return self._invert_map(map)
         
-    def _solve_for_all_mappings(self, map: dict[str, str | tuple] | None, msg_type: str | None) -> dict:
+    def _solve_for_all_mappings(self, map: Union[Dict[str, Union[str, Tuple]], None], msg_type: Union[str, None]) -> dict:
         """
         Helper method that will take the provided map and recursively solve for all mappings
         that are not yet resolved. Additionally, if a map isn't provided, it will generate
@@ -828,10 +828,10 @@ class Ros2BagWrapper:
 
         Args:
             map (dict | None): A mapping dictionary where:
-                keys (list of str): A list defining the attribute in the ros2 message.
+                keys (List[str]): A list defining the attribute in the ros2 message.
                     Thus, a key of "header.stamp" would map to ros2_msg.header.stamp.
-                values (list of str or tuple): A list defining the attribute in the ros1 message,
-                    OR a tuple where the first element is the attribute in the ros1 message and
+                values (List[str | Tuple]): A list defining the attribute in the ros1 message,
+                    OR a Tuple where the first element is the attribute in the ros1 message and
                     the second element is a mapping dictionary for mapping attributes within 
                     child message types.
               If None, then 'msg_type' is required to generate an initial map.
@@ -843,7 +843,7 @@ class Ros2BagWrapper:
                 keys (list of str): A list defining the attribute in the ros2 message.
                     Thus, a key of "header.stamp" would map to ros2_msg.header.stamp.
                 values (list of str): A list defining the attribute in the ros1 message. Note
-                that this can no longer be a tuple, as all mappings have been resolved.
+                that this can no longer be a Tuple, as all mappings have been resolved.
         """
         
         # Check input parameters
@@ -909,7 +909,7 @@ class Ros2BagWrapper:
         else:
             raise NotImplementedError(f"Unspecified default value: {type_str}")
 
-    def _get_ros1_msg_instance(self, msg_type: str, ros2_msg: object | None) -> object:
+    def _get_ros1_msg_instance(self, msg_type: str, ros2_msg: Union[object, None]) -> object:
         """
         Get a ROS1 message instance with all values filled with defaults.
         This allows us to easily add attributes later on, instead of needing
@@ -997,7 +997,7 @@ class Ros2BagWrapper:
             self.ros1_msg_instances[msg_type] = pickle.dumps(instance)
         return instance
 
-    def _iterate_and_assign(self, ros2_attr_list: list[str], ros1_attr_list: list[str], 
+    def _iterate_and_assign(self, ros2_attr_list: List[str], ros1_attr_list: List[str], 
                            ros2_obj: object, ros1_obj: object, msg_type: str):
         """
         Given attribute lists and corresponding ROS msg objects, isolate the 
@@ -1088,7 +1088,7 @@ class Ros2BagWrapper:
         
         return ros1_msg
 
-    def export_as_ros1(self, output_path: Path | str, external_msg_path_ros1: Path | str):
+    def export_as_ros1(self, output_path: Union[Path, str], external_msg_path_ros1: Union[Path, str]):
         """
         Export the ROS2 bag file this class is wrapping into a ROS1 bag file.
 
@@ -1157,7 +1157,7 @@ class Ros2BagWrapper:
                         ros1_msg = self._map_ros2_to_ros1(ros2_msg, conn.msgtype)
 
                         # Serialize the ROS1 message
-                        rawdata = self.typestore1.serialize_ros1(ros1_msg, conn_map[conn.topic].msgtype)
+                        rawdata = self.typestore1.serialize_ros1(ros1_msg, self.msg_mapping_ros2_to_ros1[conn.msgtype])
 
                         # Write the message to the ROS1 bag
                         writer.write(conn_map[conn.topic], timestamp, rawdata)

@@ -1,9 +1,11 @@
 from decimal import Decimal
 import numpy as np
+from numpy.typing import NDArray
 from typeguard import typechecked
+from typing import Union
 
 @typechecked
-def convert_collection_into_decimal_array(collection: np.ndarray | list) -> np.ndarray[Decimal]:
+def col_to_dec_arr(collection: Union[NDArray, list]) -> NDArray[Decimal]:
     """
     This helper method maps collections (such as arrays or lists) into 
     an np.ndarray of Decimal objects for easy operations and high-fidelity
@@ -23,3 +25,7 @@ def convert_collection_into_decimal_array(collection: np.ndarray | list) -> np.n
         return collection
     else:
         return np.vectorize(safe_decimal)(collection)
+    
+def dec_arr_to_float_arr(decimal_array: NDArray[Decimal]) -> NDArray[float]:
+    """ Converts decimal arrays into float arrays for use with external libraries. """
+    return np.vectorize(float)(decimal_array)

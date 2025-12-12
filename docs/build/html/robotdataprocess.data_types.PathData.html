@@ -1,0 +1,232 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PathData &mdash; robotdataprocess 0.1.2 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js?v=b0099a1c"></script>
+      <script src="_static/doctools.js?v=888ff710"></script>
+      <script src="_static/sphinx_highlight.js?v=4825356b"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="OdometryData" href="robotdataprocess.data_types.OdometryData.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            robotdataprocess
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="robotdataprocess.data_types.html">Data Types</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="robotdataprocess.data_types.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.Data.html">Data</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImageData.html">ImageData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.ImuData.html">ImuData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="robotdataprocess.data_types.OdometryData.html">OdometryData</a></li>
+<li class="toctree-l3 current"><a class="current reference internal" href="#">PathData</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData"><code class="docutils literal notranslate"><span class="pre">PathData</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">robotdataprocess</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="robotdataprocess.data_types.html">Data Types</a></li>
+      <li class="breadcrumb-item active">PathData</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/robotdataprocess.data_types.PathData.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-robotdataprocess.data_types.PathData">
+<span id="pathdata"></span><h1>PathData<a class="headerlink" href="#module-robotdataprocess.data_types.PathData" title="Permalink to this heading"></a></h1>
+<dl class="py class">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">robotdataprocess.data_types.PathData.</span></span><span class="sig-name descname"><span class="pre">PathData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timestamps</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">positions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">orientations</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData" title="Permalink to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.Data" title="robotdataprocess.data_types.Data.Data"><code class="xref py py-class docutils literal notranslate"><span class="pre">Data</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.calculate_trajectory_errors">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">calculate_trajectory_errors</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">gt_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">est_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_diff</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">visualize</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_interval</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1000</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">dict</span></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.calculate_trajectory_errors" title="Permalink to this definition"></a></dt>
+<dd><p>Utilizing the evo library, calculates a variety of trajectory error metrics
+and returns them in a dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>max_diff</strong> – maximum absolute time difference allowed between associated timestamps</p></li>
+<li><p><strong>visualize</strong> – If true, will show a 3D plot of the aligned trajectories.</p></li>
+<li><p><strong>axes_length</strong> – Same as in visualize() method.</p></li>
+<li><p><strong>axes_interval</strong> – Same as in visualize() method.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.concatenate_PathData">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">concatenate_PathData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path_data_objs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.concatenate_PathData" title="Permalink to this definition"></a></dt>
+<dd><p>Combines multiple PathData objects into a single PathData object. In doing so,
+will shift the timestamps of each subsequent PathData so that their data starts
+one second after the previous PathData ends. Also assumes the frame_id and frame
+of the first PathData object for final PathData object.</p>
+<p>Mimics the behavior found in ROMAN’s (<a class="reference external" href="https://github.com/lunarlab-gatech/roman">https://github.com/lunarlab-gatech/roman</a>) evaluation scripts.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.from_evo">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_evo</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pose_trajectory_3d</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">PoseTrajectory3D</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.from_evo" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a PathData object from an evo PoseTrajectory3D object.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.from_ros2_bag">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_ros2_bag</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bag_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Path</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">odom_topic</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="robotdataprocess.data_types.Data.html#robotdataprocess.data_types.Data.CoordinateFrame" title="robotdataprocess.data_types.Data.CoordinateFrame"><span class="pre">CoordinateFrame</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.from_ros2_bag" title="Permalink to this definition"></a></dt>
+<dd><p>Creates a class structure from a ROS2 bag file with a Path topic.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bag_path</strong> (<em>Union</em><em>[</em><em>Path</em><em>, </em><em>str</em><em>]</em>) – Path to the ROS2 bag file.</p></li>
+<li><p><strong>odom_topic</strong> (<em>str</em>) – Topic of the Path messages.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Instance of this class.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData">PathData</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.make_start_and_end_times_match">
+<em class="property"><span class="pre">static</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">make_start_and_end_times_match</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">est</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gt</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.make_start_and_end_times_match" title="Permalink to this definition"></a></dt>
+<dd><p>For pairs of lists of PathData objects, extract each pair by index and
+ensure that the first and last timestamps match by adding extra entries from
+the other PathData object as needed.</p>
+<p>Mimics the behavior found in ROMAN’s (<a class="reference external" href="https://github.com/lunarlab-gatech/roman">https://github.com/lunarlab-gatech/roman</a>) evaluation scripts.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>est</strong> – List of PathData objects that represent estimated paths.</p></li>
+<li><p><strong>gt</strong> – List of PathData objects that represent ground truth paths.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.to_OdometryData">
+<span class="sig-name descname"><span class="pre">to_OdometryData</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">new_frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_child_frame_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.to_OdometryData" title="Permalink to this definition"></a></dt>
+<dd><p>Returns an OdometryData object for this class.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>new_frame_id</strong> – The new frame ID to assign to the OdometryData object.</p></li>
+<li><p><strong>new_child_frame_id</strong> – The new child frame ID to assign to the OdometryData object.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.to_evo">
+<span class="sig-name descname"><span class="pre">to_evo</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">PoseTrajectory3D</span></span></span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.to_evo" title="Permalink to this definition"></a></dt>
+<dd><p>Returns an evo PoseTrajectory3D object for this class.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="robotdataprocess.data_types.PathData.PathData.visualize">
+<span class="sig-name descname"><span class="pre">visualize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">otherList</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><span class="pre">PathData</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">titles</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">10.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">axes_interval</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1000</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#robotdataprocess.data_types.PathData.PathData.visualize" title="Permalink to this definition"></a></dt>
+<dd><p>Visualizes this PathData (and all others included in otherList)
+on a single plot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>otherList</strong> (<em>list</em><em>[</em><a class="reference internal" href="#robotdataprocess.data_types.PathData.PathData" title="robotdataprocess.data_types.PathData.PathData"><em>PathData</em></a><em>]</em>) – All other PathData objects whose path should also be visualized on this plot.</p></li>
+<li><p><strong>titles</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>) – Titles for each PathData object, starting with self.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="robotdataprocess.data_types.OdometryData.html" class="btn btn-neutral float-left" title="OdometryData" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Daniel Butterfield, Sandilya Sai Garimella.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

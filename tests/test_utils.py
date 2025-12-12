@@ -1,7 +1,6 @@
 import os
 import urllib.request
 
-@staticmethod
 def safe_urlretrieve(url, dest_path):
     """
     A method that retrives a file from a url, making sure

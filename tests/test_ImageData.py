@@ -1,3 +1,4 @@
+from copy import deepcopy
 import cv2
 from decimal import Decimal
 import numpy as np
@@ -5,6 +6,7 @@ import os
 from pathlib import Path
 from robotdataprocess.data_types.ImageData import ImageData
 from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+import shutil
 from test_utils import safe_urlretrieve
 import unittest
 
@@ -17,19 +19,19 @@ class TestImageData(unittest.TestCase):
         """
 
         # Get paths to test bags & external messages
-        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3').absolute()
+        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
         self.path_external_msgs_ros2 = Path(Path('.').parent, 'external_msgs_ros2').absolute()
         self.path_external_msgs_ros1 = Path(Path('.').parent, 'external_msgs_ros1').absolute()
 
         # Get paths to files within the input bag
-        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3.db3")
+        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
         path_hercules_bag_yaml = self.path_hercules_bag / Path("metadata.yaml")
 
         # Download the test bag (as its too big for GitHub)
         if not os.path.isfile(path_hercules_bag_db3):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/r3qxkbypaiq3o277qu9ad/hercules_test_bag_pruned_3.db3?rlkey=uumrmpt80elj2gjhqls6027pm&st=4g498h35&dl=1", path_hercules_bag_db3)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
         if not os.path.isfile(path_hercules_bag_yaml):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/alze2h2e3h4l09f55uka9/metadata.yaml?rlkey=may9dvginz3bg6gsgtgcod3m7&st=ypw42mhh&dl=1", path_hercules_bag_yaml)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/vsi1tpihpar87459upyiw/metadata.yaml?rlkey=ozi4h0i4wp0kr7ckvaybz70uq&st=vxs10bqt&dl=1", path_hercules_bag_yaml)
 
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
@@ -44,7 +46,7 @@ class TestImageData(unittest.TestCase):
 
         # Convert the data into .npy (byproduct of loading ImageData from rosbag)
         save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy').absolute()
-        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Drone2/front_center_Scene/image', save_folder)
+        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Husky2/front_center_Scene/image', save_folder)
 
         # Load the .npy file
         npyData = ImageData.from_npy(save_folder)
@@ -188,5 +190,53 @@ class TestImageData(unittest.TestCase):
         np.testing.assert_equal(image_data.width, npy_data.width)
         np.testing.assert_equal(image_data.encoding, npy_data.encoding)
         
+    def test_crop_data(self):
+        """ Ensure the correct data is cropped. """
+
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_crop_data', 'images').absolute()
+        image_data = ImageData.from_image_files(files_folder, 'camera')
+
+        # Ensure cropping works correctly
+        image_data_cropped = deepcopy(image_data)
+        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.15'))
+        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:])
+        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:])
+
+        image_data_cropped = deepcopy(image_data)
+        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.125'))
+        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:2])
+        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:2])
+
+    def test_get_ros_msg(self):
+        """ Test that the ROS message is created properly for images with 32FC1 encoding. 
+            TODO: Add test for RGB8 encoding as well. """
+        
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_get_ros_msg', 'images').absolute()
+        image_data = ImageData.from_npy_files(files_folder, 'cam0')
+
+        # Write the image data to a ROS message
+        bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
+        if bag_path.exists():
+            shutil.rmtree(bag_path)
+        Ros2BagWrapper.write_data_to_rosbag(
+            bag_path,
+            [image_data], 
+            ['/cam0/depth'], 
+            [None], 
+            None)
+
+        # Load that data back from the rosbag
+        image_data_after = ImageData.from_ros2_bag(bag_path, '/cam0/depth', bag_path.parent / 'npy')
+
+        # Ensure that the data is the same
+        np.testing.assert_array_equal(image_data.images, image_data_after.images)
+        np.testing.assert_array_almost_equal(image_data.timestamps, image_data_after.timestamps, 16)
+        np.testing.assert_equal(image_data.frame_id, image_data_after.frame_id)
+        np.testing.assert_equal(image_data.height, image_data_after.height)
+        np.testing.assert_equal(image_data.width, image_data_after.width)
+        np.testing.assert_equal(image_data.encoding, image_data_after.encoding)
+
 if __name__ == "__main__":
     unittest.main()
