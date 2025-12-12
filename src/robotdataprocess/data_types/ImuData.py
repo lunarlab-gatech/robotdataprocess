@@ -12,7 +12,7 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union
+from typing import Union, Any
 import tqdm
 
 @typechecked
@@ -242,12 +242,15 @@ class ImuData(Data):
 
     @typechecked
     @staticmethod
-    def get_ros_msg_type(lib_type: ROSMsgLibType) -> str:
+    def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
         """ Return the __msgtype__ for an Imu msg. """
 
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
+        elif lib_type == ROSMsgLibType.RCLPY:
+            from sensor_msgs.msg import Imu
+            return Imu
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg_type()!")
             
@@ -259,19 +262,13 @@ class ImuData(Data):
             i (int): The index of the image message to convert.
         Raises:
             ValueError: If i is outside the data bounds.
+
+        # NOTE: Currently ignores orientation data, and doesn't set covariance values.
         """
 
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
-
-        # Get ROS2 message classes
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        Imu = typestore.types['sensor_msgs/msg/Imu']
-        Header = typestore.types['std_msgs/msg/Header']
-        Time = typestore.types['builtin_interfaces/msg/Time']
-        Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
-        Vector3 = typestore.types['geometry_msgs/msg/Vector3']
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
@@ -279,6 +276,13 @@ class ImuData(Data):
 
         # Write the data into the new msg
         if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            Imu = typestore.types['sensor_msgs/msg/Imu']
+            Header = typestore.types['std_msgs/msg/Header']
+            Time = typestore.types['builtin_interfaces/msg/Time']
+            Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
+            Vector3 = typestore.types['geometry_msgs/msg/Vector3']
+
             return Imu(Header(stamp=Time(sec=int(seconds), 
                                         nanosec=int(nanoseconds)), 
                             frame_id=self.frame_id),
@@ -295,6 +299,35 @@ class ImuData(Data):
                                                     y=self.lin_acc[i][1], 
                                                     z=self.lin_acc[i][2]),
                         linear_acceleration_covariance=np.zeros(9))
+        
+        elif lib_type == ROSMsgLibType.RCLPY:
+            from rclpy.time import Time
+            from std_msgs.msg import Header
+            from sensor_msgs.msg import Imu
+            from geometry_msgs.msg import Quaternion, Vector3
+
+            imu_msg = Imu()
+            imu_msg.header = Header()
+            imu_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            imu_msg.header.frame_id = self.frame_id
+            imu_msg.orientation = Quaternion()
+            imu_msg.orientation.x = 0.0  # NOTE: Currently ignores data in orientation
+            imu_msg.orientation.y = 0.0
+            imu_msg.orientation.z = 0.0
+            imu_msg.orientation.w = 1.0
+            imu_msg.orientation_covariance = np.zeros(9)
+            imu_msg.angular_velocity = Vector3()
+            imu_msg.angular_velocity.x = float(self.ang_vel[i][0])
+            imu_msg.angular_velocity.y = float(self.ang_vel[i][1])
+            imu_msg.angular_velocity.z = float(self.ang_vel[i][2])
+            imu_msg.angular_velocity_covariance = np.zeros(9)
+            imu_msg.linear_acceleration = Vector3()
+            imu_msg.linear_acceleration.x = float(self.lin_acc[i][0])
+            imu_msg.linear_acceleration.y = float(self.lin_acc[i][1])
+            imu_msg.linear_acceleration.z = float(self.lin_acc[i][2])
+            imu_msg.linear_acceleration_covariance = np.zeros(9)
+            return imu_msg
+
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg()!")
     

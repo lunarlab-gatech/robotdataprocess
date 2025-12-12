@@ -1,3 +1,4 @@
+import argparse
 from decimal import Decimal
 from pathlib import Path
 from robotdataprocess import ImuData, OdometryData, CoordinateFrame
@@ -12,7 +13,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract RGB and IMU from Hercules
     input_path = Path(input_dir).absolute() 
-    #imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
     #pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
     image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
 
@@ -22,33 +23,33 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
 
     # Crop the data
     if crop_data:
-        #imu_data.crop_data(Decimal('0.0'), end_time)
+        imu_data.crop_data(Decimal('0.0'), end_time)
         #pose_data.crop_data(Decimal('0.0'), end_time)
         image_data.crop_data(Decimal('0.0'), end_time)
 
     # Publish the data via ROS2 topics
-    publish_data_ROS2_multiprocess([image_data], ['/cam0/image_raw'])
+    publish_data_ROS2_multiprocess([imu_data, image_data], ['/imu', '/cam0'])
 
-def main(): 
-    # Enter desired configuration here
-    dataset_num = "V1.6"
-    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Drone1"]
-    robot_crop_end_times = [None] 
+def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 
-    # Check validity of inputs
-    assert len(robot_names) == len(robot_crop_end_times)
-    num_robots = len(robot_names)
+    # Publish data for each robot
+    if crop_end_time == None: 
+        crop_data = False
+        crop_end_time = None
+    else: 
+        crop_data = True
+        crop_end_time = Decimal(crop_end_time)
 
-    # Run extraction for each robot
-    for i in range(num_robots):
-        if robot_crop_end_times[i] == None: crop_data = False
-        else: crop_data = True
-
-        publish_data(input_dir=input_dir,
-                     robot_name=robot_names[i],
-                     crop_data=crop_data,
-                     end_time=robot_crop_end_times[i])
+    publish_data(input_dir='/home/dbutterfield3/data/Hercules_datasets/' + dataset_num + '/data',
+                    robot_name=robot_name,
+                    crop_data=crop_data,
+                    end_time=crop_end_time)
         
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Publish Hercules data via ROS2 topics for VINS-Mono.")
+    parser.add_argument('--dataset_num', type=str, default=None, help="Dataset version number (e.g., V1.6).")
+    parser.add_argument('--robot_name', type=str, default=None, help="Name of the robot (e.g., Drone1).")
+    parser.add_argument('--crop_end_time', type=float, default=None, help="Optional end time (in seconds) to crop the data.")
+    args = parser.parse_args()
+
+    main(dataset_num=args.dataset_num, robot_name=args.robot_name, crop_end_time=args.crop_end_time)

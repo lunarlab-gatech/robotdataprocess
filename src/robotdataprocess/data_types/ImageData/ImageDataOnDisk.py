@@ -1,13 +1,15 @@
 from __future__ import annotations
 from turtle import shape
 
-from ...conversion_utils import col_to_dec_arr
+from copy import copy
+from decimal import Decimal
+from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .ImageData import ImageData
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, List
+from typing import Union, List, Tuple
 
 @typechecked
 class ImageDataOnDisk(ImageData):
@@ -48,6 +50,8 @@ class ImageDataOnDisk(ImageData):
         def dtype(self):
             dtype_val, _ = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
             return dtype_val
+        
+    images: ImageDataOnDisk.LazyImageArray # Not initalized here, but put here for visual code highlighting
 
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], images: ImageDataOnDisk.LazyImageArray):
         super().__init__(frame_id, timestamps, images.height, images.width, images.encoding, images)

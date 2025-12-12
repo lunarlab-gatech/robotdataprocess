@@ -114,7 +114,7 @@ class ImageData(Data):
     # ========================================================================= 
 
     @staticmethod
-    def get_ros_msg_type(lib_type: ROSMsgLibType) -> str:
+    def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
         """ Return the __msgtype__ for an Image msg. """
 
         if lib_type == ROSMsgLibType.ROSBAGS:
@@ -122,7 +122,7 @@ class ImageData(Data):
             return typestore.types['sensor_msgs/msg/Image'].__msgtype__
         elif lib_type == ROSMsgLibType.RCLPY:
             from sensor_msgs.msg import Image
-            return Image.__msgtype__
+            return Image
         else:
             raise NotImplementedError(f"Unsupported ROS_MSG_LIBRARY_TYPE {lib_type} for ImageData.get_ros_msg_type!")
 
@@ -141,10 +141,6 @@ class ImageData(Data):
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
 
-        # Get ROS2  message classes
-        typestore = get_typestore(Stores.ROS2_HUMBLE)
-        Image, Header, Time = typestore.types['sensor_msgs/msg/Image'], typestore.types['std_msgs/msg/Header'], typestore.types['builtin_interfaces/msg/Time']
-
         # Calculate the step
         if self.encoding == ImageData.ImageEncoding.RGB8:
             step = 3 * self.width
@@ -162,11 +158,15 @@ class ImageData(Data):
             data = self.images[i].flatten()
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             data = self.images[i].flatten().view(np.uint8)
+            # TODO: Check endianness for _32FC1
         else:
             raise NotImplementedError(f"Unsupported encoding {self.encoding} for rosbag_get_ros_msg!")
 
         # Write the data into the new class
         if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            Image, Header, Time = typestore.types['sensor_msgs/msg/Image'], typestore.types['std_msgs/msg/Header'], typestore.types['builtin_interfaces/msg/Time']
+
             return Image(Header(stamp=Time(sec=int(seconds), 
                                         nanosec=int(nanoseconds)), 
                                 frame_id=self.frame_id),
@@ -178,12 +178,9 @@ class ImageData(Data):
                         data=data)
         
         elif lib_type == ROSMsgLibType.RCLPY:
-            import rclpy
             from rclpy.time import Time
             from std_msgs.msg import Header
             from sensor_msgs.msg import Image
-
-            print("NUMPY ARRAY OF DATA IS IT BIG ENDIAN? ", data.dtype.byteorder)
 
             img_msg = Image()
             img_msg.header = Header()
@@ -194,7 +191,7 @@ class ImageData(Data):
             img_msg.encoding = ImageData.ImageEncoding.to_ros_str(self.encoding)
             img_msg.is_bigendian = 0
             img_msg.step = step
-            img_msg.data = data
+            img_msg.data = data.tolist()
             return img_msg
         
         else:
