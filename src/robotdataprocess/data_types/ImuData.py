@@ -98,41 +98,6 @@ class ImuData(Data):
 
         # Create an ImageData class
         return cls(frame_id, CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, orientation)
-
-    @classmethod
-    @typechecked
-    def from_TartanAir(cls, folder_path: Union[Path, str], frame_id: str):
-        """
-        Creates a class structure from the TartanAir dataset format, which includes
-        various .txt files with IMU data.
-
-        Args:
-            folder_path (Path | str): Path to the folder containing the IMU data.
-            frame_id (str): The frame where this IMU data was collected.
-        Returns:
-            ImuData: Instance of this class.
-        """
-
-        # Get paths to all necessary files
-        ts_folder_path = Path(folder_path) / 'imu_time.npy'
-        lin_acc_folder_path = Path(folder_path) / 'acc_nograv_body.npy'
-        ang_vel_folder_path =  Path(folder_path) / 'gyro.npy'
-        orientation_folder_path = Path(folder_path) / 'ori_global.npy'
-
-        # Load the data
-        timestamps = col_to_dec_arr(np.load(ts_folder_path))
-        lin_acc = np.load(lin_acc_folder_path)
-        ang_vel = np.load(ang_vel_folder_path)
-
-        # Currently unsure of format of TartanAir Orientation data
-        # (whether it's extrinsic or intrinsic euler rotations, etc.)
-        # Thus, for now fill with zeros.
-        orientation = np.zeros_like(ang_vel)
-
-        # Create the ImuData class
-        raise NotImplementedError("Need to know coordiante frame of TartanAir.")
-        frame = None
-        return cls(frame_id, frame, timestamps, lin_acc, ang_vel, orientation)
     
     @classmethod
     @typechecked
@@ -193,37 +158,6 @@ class ImuData(Data):
         self.lin_acc = self.lin_acc[mask]
         self.ang_vel = self.ang_vel[mask]
         self.orientations = self.orientations[mask]
-
-    # =========================================================================
-    # =========================== Frame Conversions =========================== 
-    # ========================================================================= 
-    def to_FLU_frame(self):
-        # If we are already in the FLU frame, return
-        if self.frame == CoordinateFrame.FLU:
-            print("Data already in FLU coordinate frame, returning...")
-            return
-
-        # If in NED, run the conversion
-        elif self.frame == CoordinateFrame.NED:
-            # Define the rotation matrix
-            R_NED = np.array([[1,  0,  0],
-                              [0, -1,  0],
-                              [0,  0, -1]])
-            R_NED_Q = R.from_matrix(R_NED)
-
-            # Do a change of basis 
-            raise NotImplementedError("Not sure if this should be a pose transformation or change of basis")
-            self.lin_acc = (R_NED @ self.lin_acc.T).T
-            self.ang_vel = (R_NED @ self.ang_vel.T).T
-            for i in range(self.len()):
-                self.orientations[i] = (R_NED_Q * R.from_quat(self.orientations[i]) * R_NED_Q.inv()).as_quat()
-
-            # Update frame
-            self.frame = CoordinateFrame.FLU
-
-        # Otherwise, throw an error
-        else:
-            raise RuntimeError(f"ImuData class is in an unexpected frame: {self.frame}!")
         
     # =========================================================================
     # ============================ Export Methods ============================= 

@@ -107,8 +107,6 @@ class PathData(Data):
     @classmethod
     def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame) -> PathData:
         """ Creates a PathData object from an evo PoseTrajectory3D object. """
-        
-        print("Warning! This code has not been unit tested yet!")
 
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
@@ -245,8 +243,6 @@ class PathData(Data):
     def to_evo(self) -> PoseTrajectory3D:
         """ Returns an evo PoseTrajectory3D object for this class. """
 
-        print("Warning! This code has not been unit tested yet!")
-
         orientations_wxyz = dec_arr_to_float_arr(self.orientations[:, [3, 0, 1, 2]])
         return PoseTrajectory3D(positions_xyz=dec_arr_to_float_arr(self.positions), 
                                 orientations_quat_wxyz=orientations_wxyz,
@@ -270,6 +266,10 @@ class PathData(Data):
             est: List of PathData objects that represent estimated paths.
             gt: List of PathData objects that represent ground truth paths.
         """
+
+        # Copy the PathData objects so we don't modify the originals
+        est = copy.deepcopy(est)
+        gt = copy.deepcopy(gt)
 
         # Check that the lists are the same length
         if len(est) == 0 or len(gt) == 0 or len(est) != len(gt):
@@ -338,9 +338,9 @@ class PathData(Data):
                 shifted_timestamps = path_data.timestamps - path_data.timestamps[0] + all_timestamps[-1] + 1
 
             # Concatentate data
-            all_timestamps =  np.concatenate((all_timestamps, shifted_timestamps), axis=0)
-            all_positions =  np.concatenate((all_positions, path_data.positions), axis=0)
-            all_orientations =  np.concatenate((all_orientations, path_data.orientations), axis=0)
+            all_timestamps = np.concatenate((all_timestamps, shifted_timestamps), axis=0)
+            all_positions = np.concatenate((all_positions, path_data.positions), axis=0)
+            all_orientations = np.concatenate((all_orientations, path_data.orientations), axis=0)
 
         return PathData(frame_id, all_timestamps, all_positions, all_orientations, frame)
 
