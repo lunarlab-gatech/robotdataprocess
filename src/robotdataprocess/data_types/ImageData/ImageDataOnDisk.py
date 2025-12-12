@@ -49,7 +49,7 @@ class ImageDataOnDisk(ImageData):
             dtype_val, _ = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
             return dtype_val
 
-    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], images: LazyImageArray):
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], images: ImageDataOnDisk.LazyImageArray):
         super().__init__(frame_id, timestamps, images.height, images.width, images.encoding, images)
 
     # =========================================================================

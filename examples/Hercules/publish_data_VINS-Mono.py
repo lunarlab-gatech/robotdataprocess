@@ -1,6 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
-from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
+from robotdataprocess import ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 from robotdataprocess.ros.Ros2Publisher import publish_data_ROS2_multiprocess
 from typing import Union
 
@@ -13,7 +14,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     input_path = Path(input_dir).absolute() 
     #imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
     #pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
-    image_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
+    image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
 
     # Convert data from NED frame to ROS frame (and make sure it is at the identity)
     # pose_data.to_FLU_frame()
