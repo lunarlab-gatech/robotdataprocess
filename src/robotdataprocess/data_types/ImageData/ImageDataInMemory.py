@@ -157,7 +157,7 @@ class ImageDataInMemory(ImageData):
             ImageData: Instance of this class.
         """
 
-        # Get all png files in the designated folder (sorted)
+        # Get all npy files in the designated folder (sorted)
         all_image_files = [str(p) for p in Path(npy_folder_path).glob("*.npy")]
 
         # Extract the timestamps and sort them

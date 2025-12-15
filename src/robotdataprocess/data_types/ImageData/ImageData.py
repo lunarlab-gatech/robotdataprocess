@@ -120,7 +120,7 @@ class ImageData(Data):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Image'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLP or lib_type == ROSMsgLibType.RCLPY:
             from sensor_msgs.msg import Image
             return Image
         else:
@@ -177,14 +177,21 @@ class ImageData(Data):
                         step=step, 
                         data=data)
         
-        elif lib_type == ROSMsgLibType.RCLPY:
-            from rclpy.time import Time
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             from std_msgs.msg import Header
             from sensor_msgs.msg import Image
 
+            # Create the messages
             img_msg = Image()
             img_msg.header = Header()
-            img_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            if lib_type == ROSMsgLibType.RCLPY:
+                from rclpy.time import Time
+                img_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            else:
+                import rospy
+                img_msg.header.stamp = rospy.Time(secs=int(seconds), nsecs=int(nanoseconds))
+
+            # Populate the rest of the data
             img_msg.header.frame_id = self.frame_id 
             img_msg.height = self.height
             img_msg.width = self.width
@@ -193,6 +200,6 @@ class ImageData(Data):
             img_msg.step = step
             img_msg.data = data.tolist()
             return img_msg
-        
+
         else:
             raise NotImplementedError(f"Unsupported ROS_MSG_LIBRARY_TYPE {lib_type} for ImageData.get_ros_msg()!")

@@ -106,7 +106,7 @@ class ImuData(Data):
         """
         Creates a class structure from the TartanAir dataset format, which includes
         various .txt files with IMU data. It expects the timestamp, the linear
-        acceleration, and the angular velocity, seperated by spaced in that order.
+        acceleration, and the angular velocity, seperated by spaces in that order.
 
         Args:
             file_path (Path | str): Path to the file containing the IMU data.
@@ -203,7 +203,7 @@ class ImuData(Data):
         # Integrate the IMU data
         for i in range(1, self.len()):
             # Get time difference
-            dt: float = dec_arr_to_float_arr(self.timestamps[i] - self.timestamps[i-1])
+            dt: float = dec_arr_to_float_arr(self.timestamps[i] - self.timestamps[i-1]).item()
 
             # Calculate orientation
             if use_ang_vel:
@@ -248,7 +248,7 @@ class ImuData(Data):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             from sensor_msgs.msg import Imu
             return Imu
         else:
@@ -300,15 +300,22 @@ class ImuData(Data):
                                                     z=self.lin_acc[i][2]),
                         linear_acceleration_covariance=np.zeros(9))
         
-        elif lib_type == ROSMsgLibType.RCLPY:
-            from rclpy.time import Time
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             from std_msgs.msg import Header
             from sensor_msgs.msg import Imu
             from geometry_msgs.msg import Quaternion, Vector3
 
+            # Create the message objects
             imu_msg = Imu()
             imu_msg.header = Header()
-            imu_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            if lib_type == ROSMsgLibType.RCLPY: 
+                from rclpy.time import Time
+                imu_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            else:
+                import rospy
+                imu_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
+
+            # Populate the rest of the data
             imu_msg.header.frame_id = self.frame_id
             imu_msg.orientation = Quaternion()
             imu_msg.orientation.x = 0.0  # NOTE: Currently ignores data in orientation

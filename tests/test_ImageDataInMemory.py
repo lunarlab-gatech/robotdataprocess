@@ -10,7 +10,7 @@ import shutil
 from test_utils import safe_urlretrieve
 import unittest
 
-class TestImageData(unittest.TestCase):
+class TestImageDataInMemory(unittest.TestCase):
     
     def setUp(self):
         """ 

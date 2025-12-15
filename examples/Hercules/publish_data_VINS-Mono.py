@@ -2,8 +2,9 @@ import argparse
 from decimal import Decimal
 from pathlib import Path
 from robotdataprocess import ImuData, OdometryData, CoordinateFrame
+from robotdataprocess.data_types.Data import ROSMsgLibType
 from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
-from robotdataprocess.ros.Ros2Publisher import publish_data_ROS2_multiprocess
+from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 from typing import Union
 
 def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None]):
@@ -28,7 +29,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
         image_data.crop_data(Decimal('0.0'), end_time)
 
     # Publish the data via ROS2 topics
-    publish_data_ROS2_multiprocess([imu_data, image_data], ['/imu', '/cam0'])
+    publish_data_ROS_multiprocess([imu_data, image_data], ['/imu', '/cam0'], ROSMsgLibType.RCLPY)
 
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 

@@ -29,10 +29,12 @@ class ROSMsgLibType(Enum):
     Attributes:
         ROSBAGS: Use ROS messages from the rosbags library (Pure Python library).
         RCLPY: Use ROS messages from the rclpy library (ROS2 Python client library).
+        ROSPY: Use ROS messages from the rospy library (ROS1 Python client library).
     """
 
     ROSBAGS = 0
     RCLPY = 1
+    ROSPY = 2
 
 class Data:
     """
