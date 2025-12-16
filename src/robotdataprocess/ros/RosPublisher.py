@@ -147,13 +147,11 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int,
                     inst_hz = 1.0 / interval if interval > 0 else 0.0
 
                     # Print single-line summary
-                    if deviation > 0.001: warning_msg = f" | WARNING: Deviation above 1 ms! Assign more workers!"
-                    else: warning_msg = ""
-                    print(f"\033[{self.print_line_num + 2};0H", end='')  # ANSI escape to move cursor
+                    print(f"\033[{self.print_line_num + 2};0H\033[2K", end='')  # move + clear line
                     print(
                         f"\rTopic: {self.topic} | Published: {msgs_published}/{self.data.len()} | "
                         f"Avg Hz: {avg_hz:.2f} | "
-                        f"Inst Hz: {inst_hz:.2f} | Deviation: {deviation*1:.6f} s" + warning_msg,
+                        f"Inst Hz: {inst_hz:.2f} | Deviation: {deviation*1:.6f} s",
                         end='\n',
                         flush=False
                     )
@@ -169,6 +167,8 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int,
                         self.next_msg = None
 
                     # Calculate target publish time for the next message
+                    if self.index >= self.data.len():
+                        break
                     now = Decimal(time.monotonic())
                     target: Decimal = (self.data.timestamps[self.index] - self.first_ts + self.start_time)
         
@@ -308,13 +308,11 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
                     inst_hz = 1.0 / interval if interval > 0 else 0.0
 
                     # Print single-line summary
-                    if deviation > 0.001: warning_msg = f" | WARNING: Deviation above 1 ms! Assign more workers!"
-                    else: warning_msg = ""
-                    print(f"\033[{self.print_line_num + 2};0H", end='')  # ANSI escape to move cursor
+                    print(f"\033[{self.print_line_num + 2};0H\033[2K", end='')  # move + clear line
                     print(
                         f"\rTopic: {self.topic} | Published: {msgs_published}/{self.data.len()} | "
                         f"Avg Hz: {avg_hz:.2f} | "
-                        f"Inst Hz: {inst_hz:.2f} | Deviation: {deviation*1:.6f} s" + warning_msg,
+                        f"Inst Hz: {inst_hz:.2f} | Deviation: {deviation*1:.6f} s",
                         end='\n',
                         flush=False
                     )
@@ -330,6 +328,8 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
                         self.next_msg = None
 
                     # Calculate target publish time for the next message
+                    if self.index >= self.data.len():
+                        break
                     now = Decimal(time.monotonic())
                     target: Decimal = (self.data.timestamps[self.index] - self.first_ts + self.start_time)
 
