@@ -2,8 +2,9 @@ from decimal import Decimal
 from pathlib import Path
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from typing import Union
 
-def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None, skip_depth: bool = False, skip_rgb: bool = False):
+def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None], skip_depth: bool = False, skip_rgb: bool = False):
     # Check paramters
     if crop_data and end_time is None:
         raise ValueError("end_time required if crop_data is True!")
@@ -39,9 +40,9 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V1.6"
-    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Drone1"]
+    dataset_num = "V2.0.1"
+    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
+    robot_names = ["Drone2"]
     robot_crop_end_times = [None] 
 
     # Check validity of inputs

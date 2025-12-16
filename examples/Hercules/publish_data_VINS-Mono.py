@@ -29,7 +29,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
         image_data.crop_data(Decimal('0.0'), end_time)
 
     # Publish the data via ROS2 topics
-    publish_data_ROS_multiprocess([imu_data, image_data], ['/imu', '/cam0'], ROSMsgLibType.RCLPY)
+    publish_data_ROS_multiprocess([imu_data, image_data], ['/imu0', '/cam0/image_raw'], ROSMsgLibType.RCLPY)
 
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 

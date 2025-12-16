@@ -2,8 +2,9 @@ from decimal import Decimal
 from pathlib import Path
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from typing import Union
 
-def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal | None):
+def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None]):
     # Check parameters
     if crop_data and end_time is None:
         raise ValueError("end_time required if crop_data is True!")
@@ -15,14 +16,11 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal |
     # Extract RGB and IMU from Hercules v1.5
     imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
-    image_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
+    image_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
 
     # Convert data from NED frame to ROS frame (and make sure it is at the identity)
     pose_data.to_FLU_frame()
     pose_data.shift_to_start_at_identity()
-
-    # Leave the IMU data in the NED frame (I believe that VINS-Mono actually adjusts internally)
-    imu_data.frame = CoordinateFrame.FLU # This lets us write it into a ROS bag without an error, without actually changing data
 
     # Crop the data
     if crop_data:
@@ -39,9 +37,9 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Decimal |
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V1.6"
-    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Drone1"]
+    dataset_num = "V2.0.1"
+    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
+    robot_names = ["Drone2"]
     robot_crop_end_times = [None] 
 
     # Check validity of inputs

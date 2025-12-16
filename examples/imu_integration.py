@@ -6,9 +6,9 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 
 def main():
     # Enter desired configuration here
-    dataset_num = "V2.0.0"
+    dataset_num = "V2.0.1"
     input_dir = '/media/dbutterfield3/T74/Hercules_Datasets/Archive/' + dataset_num + '/data'
-    robot_name = "Drone1"
+    robot_name = "Drone2"
 
     # Make directory paths
     input_path = Path(input_dir).absolute()

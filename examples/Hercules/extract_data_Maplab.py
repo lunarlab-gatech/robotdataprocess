@@ -46,28 +46,28 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print(f"   Loaded {imu_data.len()} IMU measurements")
 
     # Load images from folder
-    print("\n2. Loading images...")
-    image_data = ImageDataInMemory.from_image_files(
-        input_path / 'rgb',
+    print("\n2. Loading left images...")
+    left_image_data = ImageDataInMemory.from_image_files(
+        input_path / 'rgb_stereo_left',
         f'{robot_name}/cam0'
     )
-    print(f"   Loaded {image_data.len()} images")
+    print(f"   Loaded {left_image_data.len()} images")
 
-    # Set IMU frame to FLU (ROS standard) without transforming the data
-    # Note: The IMU data remains in NED frame, but we label it as FLU
-    # to allow writing to ROS bag without errors. Many applications
-    # like VINS-Mono handle the coordinate frame conversion internally.
-    # FIXME: this is not implemented yet!
-    # imu_data.to_FLU_frame() 
-    imu_data.frame = CoordinateFrame.FLU
+    # Loading right images
+    print("\n2.b Loading right images...")
+    right_image_data = ImageDataInMemory.from_image_files(
+        input_path / 'rgb_stereo_right',
+        f'{robot_name}/cam1'
+    )
+    print(f"   Loaded {right_image_data.len()} images")
 
     print("\n3. Writing to temporary ROS2 bag...")
     # Write data to temporary ROS2 bag (required intermediate step)
     Ros2BagWrapper.write_data_to_rosbag(
         temp_ros2_bag,
-        [imu_data, image_data],          # Data to write
-        ['/imu0', '/cam0/image_raw'],    # Topic names
-        [None, None],                     # Use default message types
+        [imu_data, left_image_data, right_image_data],    # Data to write
+        ['/imu0', '/cam0/image_raw', '/cam1/image_raw'],  # Topic names
+        [None, None, None],                     # Use default message types
         None                              # No external message definitions
     )
 
@@ -87,21 +87,21 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
 
     print(f"\n✓ Successfully created ROS1 bag at: {output_path}")
     print(f"  - IMU topic: /imu0 ({imu_data.len()} messages)")
-    print(f"  - Image topic: /cam0/image_raw ({image_data.len()} messages)")
-
+    print(f"  - Image topic: /cam0/image_raw ({left_image_data.len()} messages)")
+    print(f"  - Image topic: /cam1/image_raw ({right_image_data.len()} messages)")
 
 def main():
     # ========== CONFIGURE THESE PATHS ==========
 
     # Robot name (used for frame IDs in the bag)
-    robot_name = 'Drone1'
-    dataset_num = "V1.5"
+    robot_name = 'Husky1'
+    dataset_num = "V2.0.1"
 
     # Input directory containing your data
-    input_dir = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/media/dbutterfield3/T731/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 
