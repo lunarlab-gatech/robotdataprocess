@@ -613,6 +613,7 @@ class Ros2BagWrapper:
         "builtin_interfaces/msg/Time": "builtin_interfaces/msg/Time",
         "geometry_msgs/msg/Point": "geometry_msgs/msg/Point",
         "geometry_msgs/msg/Pose": "geometry_msgs/msg/Pose",
+        "geometry_msgs/msg/PoseStamped": "geometry_msgs/msg/PoseStamped",
         "geometry_msgs/msg/PoseWithCovariance": "geometry_msgs/msg/PoseWithCovariance",
         "geometry_msgs/msg/Quaternion": "geometry_msgs/msg/Quaternion",
         "geometry_msgs/msg/Transform": "geometry_msgs/msg/Transform",
@@ -621,6 +622,7 @@ class Ros2BagWrapper:
         "geometry_msgs/msg/TwistWithCovariance": "geometry_msgs/msg/TwistWithCovariance",
         "geometry_msgs/msg/Vector3": "geometry_msgs/msg/Vector3",
         "nav_msgs/msg/Odometry": "nav_msgs/msg/Odometry",
+        "nav_msgs/msg/Path": "nav_msgs/msg/Path",
         "rosgraph_msgs/msg/Clock": "rosgraph_msgs/msg/Clock",
         "sensor_msgs/msg/Image": "sensor_msgs/msg/Image",
         "sensor_msgs/msg/Imu": "sensor_msgs/msg/Imu",
@@ -668,6 +670,11 @@ class Ros2BagWrapper:
                 "position": ("position", self._get_mapping_2to1("geometry_msgs/msg/Point")),
                 "orientation": ("orientation", self._get_mapping_2to1("geometry_msgs/msg/Quaternion"))
             }
+        elif msg_type == "geometry_msgs/msg/PoseStamped":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/Pose"))
+            }
         elif msg_type == "geometry_msgs/msg/PoseWithCovariance":
             map = {
                 "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/Pose")),
@@ -713,6 +720,11 @@ class Ros2BagWrapper:
                 "child_frame_id": "child_frame_id",
                 "pose": ("pose", self._get_mapping_2to1("geometry_msgs/msg/PoseWithCovariance")),
                 "twist": ("twist", self._get_mapping_2to1("geometry_msgs/msg/TwistWithCovariance"))
+            }
+        elif msg_type == "nav_msgs/msg/Path":
+            map = { # TODO: This is broken, as it can't handle if non-final mapping is a list
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "poses": ("poses", self._get_mapping_2to1("geometry_msgs/msg/PoseStamped"))
             }
         elif msg_type == "rosgraph_msgs/msg/Clock":
             map = {
@@ -768,7 +780,7 @@ class Ros2BagWrapper:
                 # Thus, default value in self._get_ros1_msg_instance is used.
             }
         elif msg_type == "tf2_msgs/msg/TFMessage":
-            map = {
+            map = { # TODO: This is broken, as it can't handle if non-final mapping is a list
                 "transforms": ("transforms", self._get_mapping_2to1("geometry_msgs/msg/TransformStamped"))
             }
         else:
@@ -1038,6 +1050,7 @@ class Ros2BagWrapper:
 
         # If a list was found, see if we can still assign
         if list_found_2 or list_found_1:
+
             # Double check both objects are currently lists
             if type(ros1_obj) != list or type(ros2_obj) != list:
                 raise RuntimeError("Attempting to assign list object to single object (or visa versa). Double check mappings in _get_mapping_2to1().")
@@ -1082,7 +1095,7 @@ class Ros2BagWrapper:
             # Map each message to temporary objects
             ros2_obj = ros2_msg
             ros1_obj = ros1_msg
-            
+
             # Iterate through this attribute and any child messages and assign values
             self._iterate_and_assign(ros2_attr_list, ros1_attr_list, ros2_obj, ros1_obj, msg_type)
         
@@ -1096,6 +1109,10 @@ class Ros2BagWrapper:
             output_path (Path | str): Path to the output ROS1 bag file.
             external_msgs_path_ros2 (Path | str): Path to the directory containing external 
                 message definitions.
+
+        Warning:
+            Known bug that nav_msgs/Path messages are not properly written to the ROS1 bag, as
+            well as tf2_msgs/TFMessage messages.
         """
 
         # Convert to pathlib paths
