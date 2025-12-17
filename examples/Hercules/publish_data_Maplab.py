@@ -15,26 +15,23 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     # Extract RGB and IMU from Hercules
     input_path = Path(input_dir).absolute() 
     imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    #pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
+    odom_data = OdometryData.from_csv(input_path.parent / 'results' / 'vins_mono' / robot_name / 'vins_result_no_loop.csv', 'world', 'body', CoordinateFrame.NED, False, None)
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_right_Scene')
-
-    # Convert data from NED frame to ROS frame (and make sure it is at the identity)
-    # pose_data.to_FLU_frame()
-    # pose_data.shift_to_start_at_identity()
 
     # Crop the data
     if crop_data:
         imu_data.crop_data(Decimal('0.0'), end_time)
-        #pose_data.crop_data(Decimal('0.0'), end_time)
+        odom_data.crop_data(Decimal('0.0'), end_time)
         left_image_data.crop_data(Decimal('0.0'), end_time)
 
-
     # Publish the data via ROS2 topics
-    publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data], 
+    publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
                                   ['/'+robot_name+'/imu0', 
                                    '/'+robot_name+'/cam0/image_raw', 
-                                   '/'+robot_name+'/cam1/image_raw'], ROSMsgLibType.ROSPY)
+                                   '/'+robot_name+'/cam1/image_raw',
+                                   '/'+robot_name+'/rovioli/maplab_odom_T_M_I'],
+                                    [None, None, None, "maplab_msg/OdometryWithImuBiases"], ROSMsgLibType.ROSPY)
 
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 

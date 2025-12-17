@@ -14,13 +14,14 @@ TIMER_FREQ = 2000  # Hz
 MSG_BUFFER_MAX_VAL = 100
 
 @typechecked
-def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int, num_workers: int = 1) -> None:
+def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], print_line_num: int, num_workers: int = 1) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker.
 
     Args:
         data: The Data object to publish.
         topic_name: The ROS topic to publish on.
+        type: The ROS message type for data that can be published as multiple types.
         print_line_num: The line number in the terminal to print status updates on.
         num_workers: Number of worker processes to pre-build messages.
     """
@@ -30,10 +31,11 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int,
         import rospy
 
         class SingleDataPublisherROS1():
-            def __init__(self, data: Data, topic_name: str, print_line_num: int, num_workers: int = 1):
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], print_line_num: int, num_workers: int = 1):
                 # Save parameters
                 self.data = data
                 self.topic = topic_name
+                self.type = type
                 self.print_line_num = print_line_num
                 self.num_workers = num_workers
 
@@ -82,7 +84,10 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int,
 
                 # Load messages
                 for idx in range(worker_id, self.data.len(), self.num_workers):
-                    msg = self.data.get_ros_msg(ROSMsgLibType.ROSPY, idx)
+                    if self.type is not None:
+                        msg = self.data.get_ros_msg(ROSMsgLibType.ROSPY, idx, self.type)
+                    else:
+                        msg = self.data.get_ros_msg(ROSMsgLibType.ROSPY, idx)
                     timestamp = Decimal(self.data.timestamps[idx])
 
                     while True:
@@ -172,20 +177,21 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, print_line_num: int,
                     now = Decimal(time.monotonic())
                     target: Decimal = (self.data.timestamps[self.index] - self.first_ts + self.start_time)
         
-        publisher = SingleDataPublisherROS1(data, topic_name, print_line_num, num_workers)
+        publisher = SingleDataPublisherROS1(data, topic_name, type, print_line_num, num_workers)
 
     except Exception:
         print(f"Exception in publisher for topic '{topic_name}':")
         print(traceback.format_exc())
 
 @typechecked
-def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int, num_workers: int = 1) -> None:
+def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], print_line_num: int, num_workers: int = 1) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
 
     Args:
         data: The Data object to publish.
         topic_name: The ROS2 topic to publish on.
+        type: The ROS message type for data that can be published as multiple types.
         print_line_num: The line number in the terminal to print status updates on.
         num_workers: Number of worker processes to pre-build messages.
     """
@@ -201,10 +207,11 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
             honoring timestamps using a high-frequency timer.
             """
 
-            def __init__(self, data: Data, topic_name: str, print_line_num: int, num_workers: int = 1):
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], print_line_num: int, num_workers: int = 1):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
                 self.data = data
                 self.topic = topic_name
+                self.type = type
                 self.print_line_num = print_line_num
                 self.num_workers = num_workers
 
@@ -242,7 +249,10 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
                 """
 
                 for idx in range(worker_id, self.data.len(), self.num_workers):
-                    msg = self.data.get_ros_msg(ROSMsgLibType.RCLPY, idx)
+                    if self.type is not None:
+                        msg = self.data.get_ros_msg(ROSMsgLibType.RCLPY, idx, self.type)
+                    else:
+                        msg = self.data.get_ros_msg(ROSMsgLibType.RCLPY, idx)
                     timestamp = Decimal(self.data.timestamps[idx])
 
                     while True:
@@ -335,7 +345,7 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
 
         # Start ROS2 node
         rclpy.init()
-        node = SingleDataPublisherROS2(data, topic_name, print_line_num, num_workers)
+        node = SingleDataPublisherROS2(data, topic_name, type, print_line_num, num_workers)
         rclpy.spin(node)
 
     except Exception:
@@ -343,18 +353,19 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, print_line_num: int
         print(traceback.format_exc())
 
 @typechecked
-def publish_data_ROS_multiprocess(data_list: List[Data], topics: List[str], libtype: ROSMsgLibType) -> None:
+def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]], libtype: ROSMsgLibType) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
     Args:
         data_list: list of Data objects
-        topics: list of ROS topic names
+        data_topics: list of ROS topic names
+        data_msg_type: list of ROS message types for data that can be published as multiple types.
         libtype: ROSMsgLibType indicating whether to use rospy (ROS1) or rclpy (ROS2).
     """
 
     # Ensure we have matching data and topics
-    assert len(data_list) == len(topics)
+    assert len(data_list) == len(data_topics)
 
     # Clear the screen for status output
     print("\033[2J") 
@@ -364,7 +375,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], topics: List[str], libt
 
     # Launch the appropriate publisher processes
     processes: List[Process] = []
-    for data, topic, print_line_num in zip(data_list, topics, print_line_nums):
+    for data, topic, type, print_line_num in zip(data_list, data_topics, data_msg_type, print_line_nums):
         if isinstance(data, ImageData): num_workers = 2
         else: num_workers = 1
 
@@ -373,7 +384,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], topics: List[str], libt
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, print_line_num, num_workers))
+        p = Process(target=pub_proc_func, args=(data, topic, type, print_line_num, num_workers))
         p.start()
         processes.append(p)
 
