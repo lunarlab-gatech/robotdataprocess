@@ -120,7 +120,7 @@ class ImageData(Data):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Image'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLP or lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             from sensor_msgs.msg import Image
             return Image
         else:
