@@ -15,7 +15,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
     temp_ros2_bag = output_path.parent / (output_path.stem + "_temp_ros2")
 
     # Extract RGB and IMU from Hercules v1.5
-    odom_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
+    odom_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 'world', robot_name+"/odom", CoordinateFrame.NED)
     seg_data = ImageDataInMemory.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageDataInMemory.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')
 
@@ -37,7 +37,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
         None)
 
     # Get the repository root path (where external_msgs_ros1 is located)
-    repo_root = Path(__file__).parent.parent.parent
+    # repo_root = Path(__file__).parent.parent.parent
     #external_msgs_ros1_path = repo_root / "external_msgs_ros1"
 
     # Create wrapper for the temp ROS2 bag and convert to ROS1
@@ -48,11 +48,11 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
     # if temp_ros2_bag.exists():
     #     shutil.rmtree(temp_ros2_bag)
 
-    print(f"\n✓ Successfully created ROS1 bag at: {output_path}")
+    # print(f"\n✓ Successfully created ROS1 bag at: {output_path}")
 
 def main():
-    robot_name = 'Husky1'
-    dataset_num = "V2.0.0"
+    robot_name = 'Drone1'
+    dataset_num = "V2.1.0"
     crop_data = False
     end_time = None
 

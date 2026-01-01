@@ -1,4 +1,5 @@
 from decimal import Decimal
+import os
 from pathlib import Path
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
@@ -36,14 +37,15 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
         pose_data.crop_data(Decimal('0.0'), end_time)
 
     # Save back to a csv file
+    os.makedirs(output_path / robot_name, exist_ok=True)
     pose_data.to_csv(output_path / robot_name / 'poseGT.csv')
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.0.1"
+    dataset_num = "V2.1.0"
     input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Drone2"]
-    robot_crop_end_times = [None] 
+    robot_names = ["Husky1", "Drone1"]
+    robot_crop_end_times = [None, None] 
 
     # Check validity of inputs
     assert len(robot_names) == len(robot_crop_end_times)

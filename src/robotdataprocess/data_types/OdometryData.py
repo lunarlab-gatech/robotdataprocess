@@ -110,7 +110,7 @@ class OdometryData(PathData):
     def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
                  header_included: bool, column_to_data: Union[List[int], None] = None, 
                  separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None,
-                 ts_in_ns: bool = False):
+                 ts_in_ns: bool = False, reorder_data: bool = False):
         """
         Creates a class structure from a csv file.
 
@@ -129,6 +129,8 @@ class OdometryData(PathData):
                 csv file has no headers, then `column_name` should be the index of the column as a string.
             ts_in_ns (bool): If True, assumes timestamps are in nanoseconds and converts to seconds. Otherwise,
                 assumes timestamps are already in seconds.
+            reorder_data (bool): If True, reorders the data to be in order of timestamps. If False, 
+                assumes data is already ordered by timestamp.
 
         Returns:
             OdometryData: Instance of this class.
@@ -167,6 +169,14 @@ class OdometryData(PathData):
         # If timestamps are in ns, convert to s
         if ts_in_ns:
             timestamps_np = timestamps_np / Decimal('1e9')
+
+        # Reorder the data if needed
+        if reorder_data:
+            print("Warning: This code is not tested yet!")
+            sort_indices = np.argsort(timestamps_np)
+            timestamps_np = timestamps_np[sort_indices]
+            positions_np = positions_np[sort_indices]
+            orientations_np = orientations_np[sort_indices]
 
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
