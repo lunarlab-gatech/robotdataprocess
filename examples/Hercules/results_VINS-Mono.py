@@ -4,9 +4,9 @@ from pprint import pprint
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Drone2"]
-    dataset_version = "V2.0.1"
-    file_names = ['vins_result_loop_reformatted.csv', 'vins_result_no_loop_reformatted.csv']
+    robot_names = ["Drone1"]
+    dataset_version = "V2.1.1"
+    file_names = ['vins_result_no_loop_reformatted.csv', 'vins_result_loop_reformatted.csv']
 
     for robot_name in robot_names:
         for file_name in file_names:

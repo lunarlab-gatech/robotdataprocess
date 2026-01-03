@@ -15,12 +15,12 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
     temp_ros2_bag = output_path.parent / (output_path.stem + "_temp_ros2")
 
     # Extract RGB and IMU from Hercules v1.5
-    odom_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 'world', robot_name+"/odom", CoordinateFrame.NED)
+    odom_data = OdometryData.from_csv(input_path.parent.parent / 'extract' / 'files_for_roman_baseline' 
+                                      / robot_name / 'vins_result_no_loop_reformatted.csv', 
+                                      'world', robot_name+"/odom", 
+                                      CoordinateFrame.FLU, True)
     seg_data = ImageDataInMemory.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageDataInMemory.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')
-
-    # Convert data from NED frame to FLU frame
-    odom_data.to_FLU_frame()
 
     # Crop the data
     if crop_data:
@@ -35,23 +35,12 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
         ['/odom_gt', '/odom_gt/path', '/cam0/seg', '/cam0/depth'], 
         [None, "Path", None, None], 
         None)
-
-    # Get the repository root path (where external_msgs_ros1 is located)
-    # repo_root = Path(__file__).parent.parent.parent
-    #external_msgs_ros1_path = repo_root / "external_msgs_ros1"
-
-    # Create wrapper for the temp ROS2 bag and convert to ROS1
-    # bag_wrapper = Ros2BagWrapper(temp_ros2_bag, None)
-    # bag_wrapper.export_as_ros1(output_path, external_msgs_ros1_path)
-
-    # Remove the temporary ROS2 bag directory
-    # if temp_ros2_bag.exists():
-    #     shutil.rmtree(temp_ros2_bag)
-
-    # print(f"\n✓ Successfully created ROS1 bag at: {output_path}")
+    
+    # Inform the user how to finish
+    print("To finish, use the rosbags-convert command line tool to convert from a ROS2 bag to a ROS1 bag.")
 
 def main():
-    robot_name = 'Drone1'
+    robot_name = 'Husky2'
     dataset_num = "V2.1.0"
     crop_data = False
     end_time = None

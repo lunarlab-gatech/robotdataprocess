@@ -23,7 +23,7 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
 
     # Extract image data from Hercules V1.5 to .npy
     if not skip_rgb:
-        rgb_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb', 'front_center_Scene')
+        rgb_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb_stereo_left', 'front_center_Scene')
         if crop_data: 
             rgb_data.crop_data(Decimal('0.0'), end_time)
         rgb_data.to_npy(output_path / robot_name / 'rgb')
@@ -37,15 +37,18 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
         pose_data.crop_data(Decimal('0.0'), end_time)
 
     # Save back to a csv file
+    if os.path.exists(output_path / robot_name / 'poseGT.csv'):
+                print("Deleting CSV file at this location previously...")
+                os.remove(output_path / robot_name / 'poseGT.csv')
     os.makedirs(output_path / robot_name, exist_ok=True)
     pose_data.to_csv(output_path / robot_name / 'poseGT.csv')
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.1.0"
+    dataset_num = "V2.1.1"
     input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky1", "Drone1"]
-    robot_crop_end_times = [None, None] 
+    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_crop_end_times = [None, None, None, None] 
 
     # Check validity of inputs
     assert len(robot_names) == len(robot_crop_end_times)
@@ -60,7 +63,7 @@ def main():
                         robot_name=robot_names[i],
                         crop_data=crop_data,
                         end_time=robot_crop_end_times[i],
-                        skip_depth=True,
+                        skip_depth=False,
                         skip_rgb=True)
         
 if __name__ == "__main__":

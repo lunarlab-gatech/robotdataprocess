@@ -47,7 +47,7 @@ class Data:
     timestamps: np.ndarray[Decimal]
 
     @typechecked
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, ):
+    def __init__(self, frame_id: str, timestamps: np.ndarray | list):
         
         # Copy initial values into attributes
         self.frame_id = frame_id
