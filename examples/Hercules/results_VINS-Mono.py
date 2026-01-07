@@ -4,12 +4,13 @@ from pprint import pprint
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Drone1"]
-    dataset_version = "V2.1.1"
+    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    dataset_version = "V2.1.2"
     file_names = ['vins_result_no_loop_reformatted.csv', 'vins_result_loop_reformatted.csv']
 
     for robot_name in robot_names:
         for file_name in file_names:
+            print("\n=== Processing results for robot:", robot_name)
             robot_folder = "/media/dbutterfield3/T73/Hercules_datasets/" + dataset_version + \
                         "/extract/files_for_roman_baseline/" + robot_name
             est_data = OdometryData.from_csv(robot_folder + '/' + file_name, 

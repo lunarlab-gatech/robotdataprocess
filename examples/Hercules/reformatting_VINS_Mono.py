@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_names = ["V2.1.1"]
+    dataset_names = ["V2.1.2"]
     file_names = ['vins_result_loop.csv', 'vins_result_no_loop.csv']
 
     # Do it for all files, robots, and datasets

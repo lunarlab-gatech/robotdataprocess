@@ -37,9 +37,9 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.1.1"
+    dataset_num = "V2.1.2"
     input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Drone2"]
+    robot_names = ["Drone1"]
     robot_crop_end_times = [None] 
 
     # Check validity of inputs

@@ -10,6 +10,7 @@ from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestOdometryData(unittest.TestCase):
 
     def test_from_csv(self):
@@ -67,7 +68,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU, False)
         bag_path = Path(Path('.'), 'tests', 'test_bags', 'test_from_txt_file', 'odom_bag').absolute()
         if os.path.isdir(bag_path):
             os.remove(bag_path / 'odom_bag.db3')
@@ -96,6 +97,16 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(ros_data.positions[30], path_data.positions[3])
         np.testing.assert_array_equal(ros_data.orientations[30], path_data.orientations[3])
 
+        # Check that the new arguments work properly
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom_openvins.txt').absolute()
+        odom_data_test = OdometryData.from_txt_file(file_path, 'frame', 'child_frame', CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
+        np.testing.assert_equal(odom_data_test.len(), 3)
+        np.testing.assert_equal(odom_data_test.frame_id, 'frame')
+        np.testing.assert_equal(odom_data_test.child_frame_id, 'child_frame')
+        np.testing.assert_array_equal(odom_data_test.timestamps.astype(np.float64), np.array([1403715278.86375, 1403715278.91222, 1403715278.96200], dtype=np.float64))
+        np.testing.assert_array_equal(odom_data_test.positions[1].astype(np.float64), [0.047673, 0.008781, 0.078044])
+        np.testing.assert_array_equal(odom_data_test.orientations[2].astype(np.float64), [0.810142, -0.007347, 0.586184, 0.001775])
+
     def test_to_FLU_frame(self):
         """ 
         Makes sure that the conversion from NED to ROS functions properly.
@@ -112,7 +123,7 @@ class TestOdometryData(unittest.TestCase):
         # ===  Test NED to FLU ===
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Converts it into the FLU coordinate system
         odom_data.to_FLU_frame()
@@ -135,7 +146,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data and convert into the ROS frame
         file_path = Path(Path('.'), 'tests', 'test_outputs', 'test_from_txt_file', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
         odom_data.to_FLU_frame()
 
         # Shift it so that it starts at the origin
@@ -152,7 +163,7 @@ class TestOdometryData(unittest.TestCase):
     def test_crop_data(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_crop_data', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Test cropping out some data
         odom_data_cropped = deepcopy(odom_data)
@@ -164,7 +175,7 @@ class TestOdometryData(unittest.TestCase):
     def test_ori_apply_rotation(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Ensure the rotation functions properly
         odom_data_rotated = deepcopy(odom_data)

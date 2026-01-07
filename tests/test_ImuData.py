@@ -8,6 +8,7 @@ from robotdataprocess.data_types.ImuData import ImuData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImuData(unittest.TestCase):
     
     # TODO: Write test cases for: 

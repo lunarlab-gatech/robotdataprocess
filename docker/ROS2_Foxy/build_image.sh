@@ -1,0 +1,1 @@
+docker build -t robotdataprocess_ros2_foxy .

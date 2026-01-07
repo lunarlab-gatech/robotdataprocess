@@ -10,6 +10,7 @@ from rosbags.typesys import Stores
 from test_utils import safe_urlretrieve
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestCmdLineInterface(unittest.TestCase):
     """
     Test the functionality of the command line interface.

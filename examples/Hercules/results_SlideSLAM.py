@@ -7,7 +7,8 @@ from scipy.spatial.transform import Rotation as R
 
 def main():  
     dataset_names = ["V2.1.0"]
-    robot_names = ["Husky1", "Drone1"] # NOTE: [0] must be hostRobot_ID==0, and [1] must be hostRobot_ID==1 (from SlideSLAM)
+    robot_names = ["Husky1", "Husky2"] # NOTE: [0] must be hostRobot_ID==0, and [1] must be hostRobot_ID==1 (from SlideSLAM)
+    robot_names_merged = robot_names[0] + "_" + robot_names[1]
 
     # Do it for all datasets and robots
     for dataset_name in dataset_names:
@@ -20,8 +21,8 @@ def main():
             robot1_name = robot_names[1]
             
             # Load the odometry data
-            est_data_robot0 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_name + '/trajectory_0.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
-            est_data_robot1 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_name + '/trajectory_1.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
+            est_data_robot0 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_0.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
+            est_data_robot1 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_1.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
             est_data_lst: list[OdometryData] = [est_data_robot0, est_data_robot1]
             est_data_robot0.visualize([est_data_robot1], [robot0_name + " Results", robot1_name + " Results"], 10, 40)
 

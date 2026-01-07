@@ -10,6 +10,7 @@ import shutil
 from test_utils import safe_urlretrieve
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImageDataInMemory(unittest.TestCase):
     
     def setUp(self):

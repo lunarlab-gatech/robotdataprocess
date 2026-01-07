@@ -1,0 +1,93 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: "Build & Test Pure Python Code"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SKIP_ROS2_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.8"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python -m pip install -e .
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest
+      run: |
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+    - name: Coveralls GitHub Action (Upload Coverage Report)
+      uses: coverallsapp/github-action@v2.3.6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  ros2-tests:
+    name: "Build & Test ROS2 Python Code"
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: dlittleman/robotdataprocess_ros2_foxy:0.1.2
+      options: --user root  # optional, helps avoid permission issues
+    env:
+      SKIP_PURE_PYTHON_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python3 -m pip install -e .
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest & evaluate test coverage
+      run: |
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+        coverage xml -o coverage.xml
+    - name: Save coverage
+      run: |
+        coverage xml -o coverage.xml
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ github.job }}
+        path: coverage.xml
+      
+  coverage:
+    name: "Merge & Upload Coverage Reports"
+    needs: [python-tests, ros2-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v4
+        with:
+          path: coverage-files
+      - name: Merge coverage
+        run: |
+          pip install coverage
+          coverage combine coverage-files/**/coverage.xml
+          coverage xml
+      - name: Coveralls GitHub Action (Upload Coverage Report)
+        uses: coverallsapp/github-action@v2.3.6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

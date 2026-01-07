@@ -19,28 +19,35 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
                                       / robot_name / 'vins_result_no_loop_reformatted.csv', 
                                       'world', robot_name+"/odom", 
                                       CoordinateFrame.FLU, True)
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 
+                                           'world', robot_name + '/ground_truth/odom', CoordinateFrame.NED)
     seg_data = ImageDataInMemory.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageDataInMemory.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')
+
+    # Convert pose data to FLU frame
+    pose_data.to_FLU_frame()
 
     # Crop the data
     if crop_data:
         odom_data.crop_data(Decimal('0.0'), end_time)
+        pose_data.crop_data(Decimal('0.0'), end_time)
         seg_data.crop_data(Decimal('0.0'), end_time)
         depth_data.crop_data(Decimal('0.0'), end_time)
 
     # Write data to temporary ROS2 bag (required intermediate step)
     Ros2BagWrapper.write_data_to_rosbag(
         temp_ros2_bag,
-        [odom_data, odom_data, seg_data, depth_data], 
-        ['/odom_gt', '/odom_gt/path', '/cam0/seg', '/cam0/depth'], 
+        [odom_data, pose_data, seg_data, depth_data], 
+        ['/odom', '/odom_gt/path', '/cam0/seg', '/cam0/depth'], 
         [None, "Path", None, None], 
         None)
     
     # Inform the user how to finish
     print("To finish, use the rosbags-convert command line tool to convert from a ROS2 bag to a ROS1 bag.")
+    print("Ex: rosbags-convert --src <robot_name>_temp_ros2/ --dst <robot_name>.bag")
 
 def main():
-    robot_name = 'Husky2'
+    robot_name = 'Drone2'
     dataset_num = "V2.1.0"
     crop_data = False
     end_time = None

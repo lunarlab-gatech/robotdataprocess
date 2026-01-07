@@ -183,7 +183,8 @@ class OdometryData(PathData):
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame):
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
+                      header_included: bool, column_to_data: Union[List[int], None] = None):
         """
         Creates a class structure from a text file, where the order of values
         in the files follows ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'].
@@ -193,10 +194,23 @@ class OdometryData(PathData):
             frame_id (str): The frame where this odometry is relative to.
             child_frame_id (str): The frame whose pose is represented by this odometry.
             frame (CoordinateFrame): The coordinate system convention of this data.
+            header_included (bool): If this text file has a header, so we can remove it.
+            column_to_data (list[int]): Tells the algorithms which columns in the text file contain which
+                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
+                index 0 of column_to_data should be the column that timestamp data is found in the 
+                text file. Set to None to use [0,1,2,3,4,5,6,7].
         Returns:
             OdometryData: Instance of this class.
         """
         
+        # If column_to_data is None, assume default
+        if column_to_data is None:
+            column_to_data = [0,1,2,3,4,5,6,7]
+        else:
+            # Check column_to_data values are valid
+            assert np.all(np.array(column_to_data) >= 0)
+            assert len(column_to_data) == 8
+
         # Count the number of lines in the file
         line_count = 0
         with open(str(file_path), 'r') as file:
@@ -212,9 +226,15 @@ class OdometryData(PathData):
         with open(str(file_path), 'r') as file:
             for i, line in enumerate(file):
                 line_split = line.split(' ')
-                timestamps_np[i] = line_split[0]
-                positions_np[i] = line_split[1:4]
-                orientations_np[i] =  line_split[5:8] + [line_split[4]]
+                timestamps_np[i] = line_split[column_to_data[0]]
+                positions_np[i] = np.array([line_split[column_to_data[1]], line_split[column_to_data[2]], line_split[column_to_data[3]]])
+                orientations_np[i] =  np.array([line_split[column_to_data[5]], line_split[column_to_data[6]], line_split[column_to_data[7]], line_split[column_to_data[4]]])
+
+        # Remove the header
+        if header_included:
+            timestamps_np = timestamps_np[1:]
+            positions_np = positions_np[1:]
+            orientations_np = orientations_np[1:]
         
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)

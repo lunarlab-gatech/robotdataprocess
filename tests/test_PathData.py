@@ -1,10 +1,12 @@
 import numpy as np
+import os
 from pathlib import Path
 from robotdataprocess.conversion_utils import col_to_dec_arr
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
 from robotdataprocess.data_types.PathData import PathData
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestPathData(unittest.TestCase):
 
     def test_calculate_trajectory_errors(self):
