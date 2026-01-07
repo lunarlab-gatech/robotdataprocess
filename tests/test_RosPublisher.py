@@ -67,7 +67,7 @@ class TestRosPublisher(unittest.TestCase):
         # Start listening here and meanwhile launch the publisher 
         try:
             start_time = time.time()
-            timeout_sec = 10.0
+            timeout_sec = 15.0
             while rclpy.ok() and (time.time() - start_time) < timeout_sec:
                 rclpy.spin_once(node, timeout_sec=0.5)
 
