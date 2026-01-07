@@ -35,12 +35,11 @@ jobs:
     - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-        coverage xml -o coverage.xml
-    - name: Save coverage report for this job
+    - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: coverage.xml
+        path: .coverage
 
   ros2-tests:
     name: "Build & Test ROS2 Python Code"
@@ -68,12 +67,11 @@ jobs:
       run: |
         source /opt/ros/foxy/setup.bash
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-        coverage xml -o coverage.xml
-    - name: Save coverage report for this job
+    - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: coverage.xml
+        path: .coverage
       
   coverage:
     name: "Merge & Upload Coverage Reports"
