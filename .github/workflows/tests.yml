@@ -40,7 +40,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: ./.coverage
+        path: .coverage
+        include-hidden-files: true
 
   ros2-tests:
     name: "Build & Test ROS2 Python Code"
@@ -73,7 +74,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: ./.coverage
+        path: .coverage
+        include-hidden-files: true
       
   coverage:
     name: "Merge & Upload Coverage Reports"
