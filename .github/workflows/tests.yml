@@ -35,6 +35,7 @@ jobs:
     - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
+        ls -al
     - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
@@ -67,6 +68,7 @@ jobs:
       run: |
         source /opt/ros/foxy/setup.bash
         coverage run --source robotdataprocess -m unittest discover tests/ -v
+        ls -al
     - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
