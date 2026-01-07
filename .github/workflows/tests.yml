@@ -85,7 +85,7 @@ jobs:
       - name: Merge coverage
         run: |
           pip install coverage
-          coverage combine coverage-files/**/.coverage
+          coverage combine coverage-files/coverage-python-tests/.coverage coverage-files/coverage-ros2-tests/.coverage
           coverage xml
       - name: Coveralls GitHub Action (Upload Coverage Report)
         uses: coverallsapp/github-action@v2.3.6
