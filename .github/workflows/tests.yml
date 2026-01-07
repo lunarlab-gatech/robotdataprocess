@@ -32,6 +32,9 @@ jobs:
         python -m pip install -e .
     - name: Import external message types
       uses: snickerbockers/submodules-init@v4
+    - name: Check environment variables
+      run: |
+        echo "SKIP_ROS2_TESTS=$SKIP_ROS2_TESTS"
     - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
