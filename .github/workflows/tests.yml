@@ -65,6 +65,7 @@ jobs:
       uses: snickerbockers/submodules-init@v4
     - name: Test with unittest & evaluate test coverage
       run: |
+        source /opt/ros/foxy/setup.bash
         coverage run --source robotdataprocess -m unittest discover tests/ -v
         coverage xml -o coverage.xml
     - name: Save coverage report for this job
