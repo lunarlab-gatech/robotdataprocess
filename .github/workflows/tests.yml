@@ -32,16 +32,15 @@ jobs:
         python -m pip install -e .
     - name: Import external message types
       uses: snickerbockers/submodules-init@v4
-    - name: Check environment variables
-      run: |
-        echo "SKIP_ROS2_TESTS=$SKIP_ROS2_TESTS"
     - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-    - name: Coveralls GitHub Action (Upload Coverage Report)
-      uses: coverallsapp/github-action@v2.3.6
+        coverage xml -o coverage.xml
+    - name: Save coverage report for this job
+      uses: actions/upload-artifact@v4
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        name: coverage-${{ github.job }}
+        path: coverage.xml
 
   ros2-tests:
     name: "Build & Test ROS2 Python Code"
@@ -68,10 +67,8 @@ jobs:
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
         coverage xml -o coverage.xml
-    - name: Save coverage
-      run: |
-        coverage xml -o coverage.xml
-    - uses: actions/upload-artifact@v4
+    - name: Save coverage report for this job
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
         path: coverage.xml
