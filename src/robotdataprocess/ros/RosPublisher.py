@@ -328,7 +328,8 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
 
 @typechecked
 def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]], 
-                                  libtype: ROSMsgLibType, shutdown_ros: bool, verbose: bool = True, delay_seconds: float = 0.0) -> None:
+                                  data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
+                                  verbose: bool = True, delay_seconds: float = 0.0) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
@@ -336,6 +337,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         data_list: list of Data objects
         data_topics: list of ROS topic names
         data_msg_type: list of ROS message types for data that can be published as multiple types.
+        data_workers: Each topic will have one publisher process and X number of worker processes to pull data.
         libtype: ROSMsgLibType indicating whether to use rospy (ROS1) or rclpy (ROS2).
         shutdown_ros: Whether to shutdown ROS after publishing is complete.
         verbose: Whether to print topic publishing status to the console.
@@ -362,16 +364,13 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
     # Launch the appropriate publisher processes
     processes: List[Process] = []
     topic_to_proc: dict = {}
-    for data, topic, type in zip(data_list, data_topics, data_msg_type):
-        if isinstance(data, ImageData): num_workers = 3
-        else: num_workers = 1
-
+    for data, topic, type, workers in zip(data_list, data_topics, data_msg_type, data_workers):
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, type, num_workers, verbose, stats_dict))
+        p = Process(target=pub_proc_func, args=(data, topic, type, workers, verbose, stats_dict))
         p.start()
         processes.append(p)
         topic_to_proc[topic] = p

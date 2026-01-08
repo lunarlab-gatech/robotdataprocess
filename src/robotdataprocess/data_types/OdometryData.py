@@ -521,7 +521,7 @@ class OdometryData(PathData):
                 return Path(Header(stamp=Time(sec=int(seconds), 
                                             nanosec=int(nanoseconds)),
                                 frame_id=self.frame_id),
-                                poses=self.poses[0:i+1:10])
+                                poses=self.poses[0:i+1:40])
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSBAGS")
             
@@ -607,7 +607,7 @@ class OdometryData(PathData):
                 msg.header = Header()
                 msg.header.stamp = Time(sec=int(seconds), nanosec=int(nanoseconds))
                 msg.header.frame_id = self.frame_id
-                msg.poses = self.poses_rclpy[0:i+1:10]
+                msg.poses = self.poses_rclpy[0:i+1:40]
                 return msg
             
             else:

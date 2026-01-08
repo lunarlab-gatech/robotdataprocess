@@ -34,6 +34,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     publish_data_ROS_multiprocess([imu_data, pose_data, left_image_data, right_image_data], 
                                   ['/imu0', '/odom_gt', '/cam0/image_raw', '/cam1/image_raw'],
                                   [None, "Path", None, None],
+                                  [1, 1, 3, 3],
                                    ROSMsgLibType.RCLPY, True, verbose=True)
     
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
