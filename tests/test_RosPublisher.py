@@ -69,7 +69,7 @@ class TestRosPublisher(unittest.TestCase):
             start_time = time.time()
             timeout_sec = 15.0
             while rclpy.ok() and (time.time() - start_time) < timeout_sec:
-                rclpy.spin_once(node, timeout_sec=0.5)
+                rclpy.spin_once(node, timeout_sec=0.1)
 
             # Extract the recieved images for comparison
             np.testing.assert_equal(image_data.len(), len(node.received))

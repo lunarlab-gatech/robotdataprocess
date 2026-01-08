@@ -4,6 +4,7 @@ source = robotdataprocess
 
 [paths]
 source =
-    robotdataprocess
-    /__w/robotdataprocess/robotdataprocess
-    /home/runner/work/robotdataprocess/robotdataprocess
+    src/robotdataprocess
+    */robotdataprocess/src/robotdataprocess
+    */src/robotdataprocess
+    /usr/local/lib/python3.8/dist-packages/robotdataprocess
