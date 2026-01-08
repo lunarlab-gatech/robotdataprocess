@@ -5,6 +5,7 @@ from decimal import Decimal
 from enum import Enum
 import numpy as np
 from typeguard import typechecked
+from typing import Any
 
 class CoordinateFrame(Enum):
     """ 
@@ -63,7 +64,7 @@ class Data:
         return len(self.timestamps)
     
     @staticmethod
-    def get_ros_msg_type(self, libtype: ROSMsgLibType):
+    def get_ros_msg_type(self, libtype: ROSMsgLibType) -> Any:
         """ Will return the msgtype for the ROS message for this Data object. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     

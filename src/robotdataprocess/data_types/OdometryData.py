@@ -19,7 +19,7 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Any
 import tqdm
 
 @typechecked
@@ -420,7 +420,7 @@ class OdometryData(PathData):
     # ========================================================================= 
 
     @staticmethod
-    def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> str:
+    def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> Any:
         """ Return the __msgtype__ for an Imu msg. """
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
@@ -428,6 +428,12 @@ class OdometryData(PathData):
                 return typestore.types['nav_msgs/msg/Odometry'].__msgtype__
             elif msg_type == "Path":
                 return typestore.types['nav_msgs/msg/Path'].__msgtype__
+            else:
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
+        elif lib_type == ROSMsgLibType.RCLPY:
+            if msg_type == "Path":
+                from nav_msgs.msg import Path
+                return Path
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
@@ -500,9 +506,9 @@ class OdometryData(PathData):
                     PoseStamped = typestore.types['geometry_msgs/msg/PoseStamped']
 
                     for j in range(self.len()):
-                        seconds, nanoseconds = self._extract_seconds_and_nanoseconds(j)
-                        self.poses.append(PoseStamped(Header(stamp=Time(sec=int(seconds), 
-                                                                        nanosec=int(nanoseconds)),
+                        sec, nanosec = self._extract_seconds_and_nanoseconds(j)
+                        self.poses.append(PoseStamped(Header(stamp=Time(sec=int(sec), 
+                                                                        nanosec=int(nanosec)),
                                                             frame_id=self.frame_id),
                                                     pose=Pose(position=Point(x=self.positions[j][0],
                                                                             y=self.positions[j][1],
@@ -571,6 +577,7 @@ class OdometryData(PathData):
             if msg_type == "Path":
                 
                 from builtin_interfaces.msg import Time
+                from nav_msgs.msg import Path
                 from std_msgs.msg import Header
 
                 # Pre-calculate all the poses
@@ -579,22 +586,30 @@ class OdometryData(PathData):
                     from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
 
                     for j in range(self.len()):
-                        seconds, nanoseconds = self._extract_seconds_and_nanoseconds(j)
-                        self.poses_rclpy.append(PoseStamped(Header(stamp=Time(sec=int(seconds), 
-                                                                        nanosec=int(nanoseconds)),
-                                                            frame_id=self.frame_id),
-                                                    pose=Pose(position=Point(x=self.positions[j][0],
-                                                                            y=self.positions[j][1],
-                                                                            z=self.positions[j][2]),
-                                    orientation=Quaternion(x=self.orientations[j][0],
-                                                            y=self.orientations[j][1],
-                                                            z=self.orientations[j][2],
-                                                            w=self.orientations[j][3]))))
+                        sec, nanosec = self._extract_seconds_and_nanoseconds(j)
+                        pose_msg = PoseStamped()
+                        pose_msg.header = Header()
+                        pose_msg.header.stamp = Time(sec=int(sec), nanosec=int(nanosec))
+                        pose_msg.header.frame_id = self.frame_id
+                        pose_msg.pose = Pose()
+                        pose_msg.pose.position = Point()
+                        pose_msg.pose.position.x = float(self.positions[j][0])
+                        pose_msg.pose.position.y = float(self.positions[j][1])
+                        pose_msg.pose.position.z = float(self.positions[j][2])
+                        pose_msg.pose.orientation = Quaternion()
+                        pose_msg.pose.orientation.x = float(self.orientations[j][0])
+                        pose_msg.pose.orientation.y = float(self.orientations[j][1])
+                        pose_msg.pose.orientation.z = float(self.orientations[j][2])
+                        pose_msg.pose.orientation.w = float(self.orientations[j][3])
+                        self.poses_rclpy.append(pose_msg)
 
-                return Path(Header(stamp=Time(sec=int(seconds), 
-                                            nanosec=int(nanoseconds)),
-                                frame_id=self.frame_id),
-                                poses=self.poses_rclpy[0:i+1:10])
+                msg = Path()
+                msg.header = Header()
+                msg.header.stamp = Time(sec=int(seconds), nanosec=int(nanoseconds))
+                msg.header.frame_id = self.frame_id
+                msg.poses = self.poses_rclpy[0:i+1:10]
+                return msg
+            
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.RCLPY")
         else:
