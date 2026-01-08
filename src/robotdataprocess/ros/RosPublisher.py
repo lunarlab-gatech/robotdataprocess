@@ -15,7 +15,8 @@ from typing import List, Union, Any, Tuple
 
 QUEUE_SIZE = 10
 TIMER_FREQ = 2000 # Hz
-MSG_BUFFER_MAX_VAL = 100
+MSG_BUFFER_MAX_VAL = 100 # entries
+RESTART_JUMP_MSGS = 5 # msgs
 
 class _SingleDataPublisher():
     """ 
@@ -45,14 +46,12 @@ class _SingleDataPublisher():
         self.num_workers = num_workers
         self.verbose = verbose
         self.stats_dict = stats_dict
+        self.skipped_msgs = 0
         self._is_finished = False
-
-        # Wait a couple of seconds for connections to be established
-        time.sleep(2.0)
+        self.restart_when_behind = False
 
         # Timing setup
-        self.index = 0
-        self.start_time = Decimal(time.monotonic())
+        self.start_time = Decimal(time.monotonic()) + Decimal('1.0')
         self.first_ts = Decimal(self.data.timestamps[0])
         self.prev_time = self.start_time
         self.total_intervals = []
@@ -61,6 +60,7 @@ class _SingleDataPublisher():
         self.manager = Manager()
         self.msg_buf = self.manager.dict()
         self.buf_size = self.manager.Value('i', 0)
+        self.index = self.manager.Value("i", 0)
         self.next_msg = None
         self._last_pub = None
 
@@ -109,18 +109,26 @@ class _SingleDataPublisher():
             import rospy
             rospy.init_node(f"robotdataprocess_worker_{self.topic.replace('/', '_')}_{worker_id}", anonymous=True)
 
-        # Load messages
+        # Iterature though entries assigned to this worker
         for idx in range(worker_id, self.data.len(), self.num_workers):
+            # Skip messages that the main thread has skipped
+            if idx < self.index.value:
+                continue
+            
+            # Load the message
             if self.type is not None:
                 msg = self.data.get_ros_msg(self.libtype, idx, self.type)
             else:
                 msg = self.data.get_ros_msg(self.libtype, idx)
             timestamp = Decimal(self.data.timestamps[idx])
 
+            # Put the message into the buffer
             while True:
                 if self.buf_size.value < MSG_BUFFER_MAX_VAL: 
                     self.msg_buf[idx] = (float(timestamp), msg)
                     self.buf_size.value += 1
+                    break
+                elif idx < self.index.value:
                     break
                 else:
                     time.sleep(1 / float(TIMER_FREQ))
@@ -128,10 +136,16 @@ class _SingleDataPublisher():
     def _pop_msg_with_index(self, target_index: int) -> Union[Tuple, None]:
         """
         Search queue for (idx, ts, msg) where idx == target_index.
-        Returns the item or None if not found.
-        Preserves the ordering of all other items.
+        Returns the item or None if not found. Additionally clears stale messages.
         """
 
+        # Clear out any stale messages that were skipped
+        keys_to_delete = [k for k in self.msg_buf.keys() if k < target_index]
+        for k in keys_to_delete:
+            self.msg_buf.pop(k)
+            self.buf_size.value -= 1
+
+        # Get the actual target we're looking for
         if target_index in self.msg_buf:
             item = self.msg_buf.pop(target_index)
             self.buf_size.value -= 1
@@ -142,7 +156,7 @@ class _SingleDataPublisher():
     
     def _timer_callback(self):
         # Check if we have no more messages to publish
-        if self.index >= self.data.len():
+        if self.index.value >= self.data.len():
             # Shut down cleanly
             if self.libtype == ROSMsgLibType.ROSPY:
                 import rospy
@@ -167,18 +181,56 @@ class _SingleDataPublisher():
         
         # Get the next message from the queue if we don't have one ready
         if self.next_msg is None:
-            result = self._pop_msg_with_index(self.index)
+            result = self._pop_msg_with_index(self.index.value)
             if result is None: return
             self.next_msg: Tuple[int, float, Any] = result
 
         # Calculate target publish time for the current message
         now = Decimal(time.monotonic())
-        target: Decimal = (self.data.timestamps[self.index] - self.first_ts + self.start_time)
+        target: Decimal = (self.data.timestamps[self.index.value] - self.first_ts + self.start_time)
 
         # Publish when time has arrived
-        while now >= target:
+        if now >= target:
+
+            # Check if we are behind
+            behind: bool = False
+            next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time)
+            if now > next_target:
+                behind = True
+            
+            # If behind...
+            if behind:
+                # We either plan a restart
+                if self.restart_when_behind:
+
+                    # Calculate the next message to publish (skipping some)
+                    prev_skipped_msgs = self.skipped_msgs
+                    while self.index.value < self.data.len() - 1 and self.skipped_msgs - prev_skipped_msgs < RESTART_JUMP_MSGS:
+                        self.index.value += 1
+                        self.skipped_msgs += 1
+
+                    # We don't want to publish before its time, so empty next_msg and return
+                    self.next_msg = None
+                    return
+                
+                # Or just skip to the next message that isn't behind
+                else:
+                    # Find the next index
+                    while self.index.value < self.data.len() - 1: 
+                        next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time) 
+                        if now < next_target: 
+                            break 
+                        self.index.value += 1 
+                        self.skipped_msgs += 1
+
+                    # Load the next message for it (if available)
+                    result = self._pop_msg_with_index(self.index.value)
+                    if result is None: return
+                    self.next_msg: Tuple[int, float, Any] = result
+
+            # Publish the message
             self.publisher.publish(self.next_msg[2])
-            self.index += 1
+            self.index.value += 1
 
             # Check if we've published timestamps out of order
             if self._last_pub is not None and self._last_pub[1] >= self.next_msg[1]:
@@ -187,39 +239,37 @@ class _SingleDataPublisher():
             
             # Stats calculation
             elapsed = now - self.start_time
-            msgs_published = self.index + 1
+            msgs_published = self.index.value + 1 - self.skipped_msgs
             deviation = float(now - target)
-            interval = float(now - self.prev_time) if self.index > 0 else 0.0
-            self.prev_time = now
+            interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
             self.total_intervals.append(interval)
             avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
             inst_hz = 1.0 / interval if interval > 0 else 0.0
+            self.prev_time = now
 
             # Update statistics
             if self.verbose and self.stats_dict is not None:
                 self.stats_dict[self.topic] = {
-                    "published": msgs_published,
+                    "last_update_time": now,
+                    "progress": self.index.value + 1,
                     "total": self.data.len(),
                     "avg_hz": avg_hz,
                     "inst_hz": inst_hz,
-                    "deviation": deviation
+                    "deviation": deviation,
+                    "prev_time": self.prev_time,
+                    "interval": interval,
+                    "skipped": self.skipped_msgs
                 }
 
             # Prepare the next message
-            if self.index < self.data.len():
-                result = self._pop_msg_with_index(self.index)
+            if self.index.value < self.data.len():
+                result = self._pop_msg_with_index(self.index.value)
                 if result is None: 
                     self.next_msg = None
                     return
                 self.next_msg = result
             else:
                 self.next_msg = None
-
-            # Calculate target publish time for the next message
-            if self.index >= self.data.len():
-                break
-            now = Decimal(time.monotonic())
-            target: Decimal = (self.data.timestamps[self.index] - self.first_ts + self.start_time)
 
 @typechecked
 def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], num_workers: int = 1, 
@@ -305,13 +355,15 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
 
     # Initialize stats_dict for each topic
     for topic in data_topics:
-        stats_dict[topic] = {"published": 0, "total": 0, "avg_hz": 0, "inst_hz": 0, "deviation": 0}
+        stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0, 
+                             "inst_hz": 0, "deviation": 0,
+                             "prev_time": 0, "interval": 0, "skipped": 0}
 
     # Launch the appropriate publisher processes
     processes: List[Process] = []
     topic_to_proc: dict = {}
     for data, topic, type in zip(data_list, data_topics, data_msg_type):
-        if isinstance(data, ImageData): num_workers = 2
+        if isinstance(data, ImageData): num_workers = 3
         else: num_workers = 1
 
         if libtype == ROSMsgLibType.RCLPY:
@@ -327,18 +379,24 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
     # Helper to build the table with a Status column
     def generate_table() -> Table:
         table = Table(title="ROS Publisher Dashboard", show_header=True, header_style="bold magenta")
-        table.add_column("Status", justify="center")
+        table.add_column("Status", justify="center", min_width=14)
         table.add_column("Topic", style="cyan")
         table.add_column("Progress", justify="right")
         table.add_column("Avg Hz", justify="right")
         table.add_column("Inst Hz", justify="right")
+        table.add_column("Skipped Msgs", justify="right")
         
         for topic, s in stats_dict.items():
             proc = topic_to_proc[topic]
-            # Determine status label and color
+            row_style = None
+
             if proc.is_alive():
-                status = "[bold green]RUNNING[/bold green]"
-            elif s['published'] >= s['total'] and s['total'] > 0:
+                if time.monotonic() - float(s["last_update_time"]) < 0.1:
+                    status = "[bold green]RUNNING[/bold green]"
+                else:
+                    status = "[bold yellow]UNRESPONSIVE[/bold yellow]"
+                    row_style = "grey50"
+            elif s['progress'] >= s['total'] and s['total'] > 0:
                 status = "[bold blue]FINISHED[/bold blue]"
             else:
                 status = "[bold red]STOPPED[/bold red]"
@@ -346,15 +404,17 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
             table.add_row(
                 status,
                 topic, 
-                f"{s['published']}/{s['total']}", 
+                f"{s['progress']}/{s['total']}", 
                 f"{s['avg_hz']:.1f}", 
-                f"{s['inst_hz']:.1f}"
+                f"{s['inst_hz']:.1f}",
+                f"{s['skipped']}",
+                style=row_style
             )
         return table
 
     # Wait for all publishers to finish (and provide updates if requested)
     if verbose:
-        with Live(generate_table(), refresh_per_second=10, screen=True) as live:
+        with Live(generate_table(), refresh_per_second=10, screen=False) as live:
             while any(p.is_alive() for p in processes):
                 live.update(generate_table())
                 time.sleep(0.1)
