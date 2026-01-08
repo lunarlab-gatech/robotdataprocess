@@ -27,7 +27,8 @@ class OdometryData(PathData):
 
     # Define odometry-specific data attributes
     child_frame_id: str
-    poses: list # Saved nav_msgs/msg/Pose
+    poses: list # Saved nav_msgs/msg/Pose for rosbags
+    poses_rclpy: list # Saved nav_msgs/msg/Pose for rclpy
 
     @typechecked
     def __init__(self, frame_id: str, child_frame_id: str, timestamps: Union[np.ndarray, list], 
@@ -37,6 +38,7 @@ class OdometryData(PathData):
         super().__init__(frame_id, timestamps, positions, orientations, frame)
         self.child_frame_id: str = child_frame_id
         self.poses: list = []
+        self.poses_rclpy: list = []
 
         # Check to ensure that all arrays have same length
         if len(self.timestamps) != len(self.positions) or len(self.positions) != len(self.orientations):
@@ -325,6 +327,7 @@ class OdometryData(PathData):
 
         # Empty poses as they might need to be recalculated
         self.poses = []
+        self.poses_rclpy = []
 
     # =========================================================================
     # ============================ Export Methods ============================= 
@@ -563,5 +566,36 @@ class OdometryData(PathData):
 
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSPY")
+        
+        elif lib_type == ROSMsgLibType.RCLPY:
+            if msg_type == "Path":
+                
+                from builtin_interfaces.msg import Time
+                from std_msgs.msg import Header
+
+                # Pre-calculate all the poses
+                if len(self.poses_rclpy) != self.len():
+
+                    from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
+
+                    for j in range(self.len()):
+                        seconds, nanoseconds = self._extract_seconds_and_nanoseconds(j)
+                        self.poses_rclpy.append(PoseStamped(Header(stamp=Time(sec=int(seconds), 
+                                                                        nanosec=int(nanoseconds)),
+                                                            frame_id=self.frame_id),
+                                                    pose=Pose(position=Point(x=self.positions[j][0],
+                                                                            y=self.positions[j][1],
+                                                                            z=self.positions[j][2]),
+                                    orientation=Quaternion(x=self.orientations[j][0],
+                                                            y=self.orientations[j][1],
+                                                            z=self.orientations[j][2],
+                                                            w=self.orientations[j][3]))))
+
+                return Path(Header(stamp=Time(sec=int(seconds), 
+                                            nanosec=int(nanoseconds)),
+                                frame_id=self.frame_id),
+                                poses=self.poses_rclpy[0:i+1:10])
+            else:
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.RCLPY")
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg()!")
