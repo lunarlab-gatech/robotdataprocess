@@ -86,10 +86,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: coverage-files
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install the package
+        run: |
+          python3 -m pip install -e .
       - name: Merge coverage
         run: |
           pip install coverage
           ls -al
+          pwd
           coverage combine coverage-files/coverage-python-tests/.coverage coverage-files/coverage-ros2-tests/.coverage
           coverage xml
       - name: Coveralls GitHub Action (Upload Coverage Report)
