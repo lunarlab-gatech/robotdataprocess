@@ -57,8 +57,8 @@ def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]):
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Publish Hercules data via ROS topics for LIO-SAM.")
-    parser.add_argument('--dataset_num', type=str, default=None, help="Dataset version number (e.g., V1.6).")
-    parser.add_argument('--robot_name', type=str, default=None, help="Name of the robot (e.g., Drone1).")
+    parser.add_argument('--dataset_num', type=str, default=None, required=True, help="Dataset version number (e.g., V1.6).")
+    parser.add_argument('--robot_name', type=str, default=None, required=True, help="Name of the robot (e.g., Drone1).")
     parser.add_argument('--crop_end_time', type=float, default=None, help="Optional end time (in seconds) to crop the data.")
     args = parser.parse_args()
 

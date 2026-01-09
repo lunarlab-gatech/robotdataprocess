@@ -35,12 +35,12 @@ class LiDARData(Data):
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str, frame: CoordinateFrame) -> LiDARData:
         """
         Load LiDAR data from a series of .npy files in a specified folder,
-        where the file names correspond to timestamps.
+        where file names correspond to timestamps.
 
         Args:
             npy_folder_path: Path to the folder.
             frame_id: The frame ID for the LiDAR data.
-            frame: The Coordinate frame of the LiDAR data.
+            frame: The coordinate frame of the LiDAR data.
         Returns:
             LiDARData: An instance of LiDARData populated with the loaded data.
         """
@@ -69,8 +69,6 @@ class LiDARData(Data):
             point_clouds[i] = np.load(path, 'r')
             assert point_clouds[i].shape[0] == first_pc.shape[0]
             pbar.update()
-
-        print("SHAPE OF point clouds: ", point_clouds.shape)
 
         # Return an LiDARData class
         return cls(frame_id, timestamps_sorted, point_clouds, frame)
@@ -101,39 +99,39 @@ class LiDARData(Data):
     # =========================================================================  
 
     @typechecked
-    def visualize(self, interval_ms: int = 1000, xlim: Tuple[float, float] = (-50.0, 50.0), ylim: Tuple[float, float] = (-50.0, 50.0), 
-                  zlim: Tuple[float, float] = (-50.0, 50.0)):
+    def visualize(self, interval_ms: int = 100, plot_lims: Tuple[float, float] = (-50.0, 50.0), testing: bool = False):
         """
-        Visualizes the raw LiDAR data over time.
+        Visualizes the raw LiDAR data over time using Matplotlib FuncAnimation.
+
+        Parameters:
+            interval_ms: The time between plotted frames.
+            plot_lims: The axes limits of the 3D plot.
+            testing: Only used for test cases, disables blocking in plt.show()
         """
 
-        T, N, _ = self.point_clouds.shape
-
-        fig = plt.figure()
+        # Create the plot
+        fig = plt.figure(figsize=(16, 16))
         ax = fig.add_subplot(111, projection="3d")
+        ax.set_xlim(*plot_lims)
+        ax.set_ylim(*plot_lims)
+        ax.set_zlim(*plot_lims)
+        ax.set_xlabel("X", fontsize=20)
+        ax.set_ylabel("Y", fontsize=20)
+        ax.set_zlabel("Z", fontsize=20)
+        title = ax.set_title(f"", fontsize=24)
 
-        scatter = ax.scatter([], [], [], s=2)
-
-        ax.set_xlim(*xlim)
-        ax.set_ylim(*ylim)
-        ax.set_zlim(*zlim)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-
+        # Create the update function
+        scatter = ax.scatter([], [], [], s=4, cmap='viridis')
         def update(frame: int):
-            pts = np.asarray(self.point_clouds[frame], dtype=float)
-            scatter._offsets3d = (pts[:, 0], pts[:, 1], pts[:, 2])
-            ax.set_title(f"LiDAR Frame {frame}/{T-1}")
-            return scatter,
-
-        ani = FuncAnimation(
-            fig,
-            update,
-            frames=T,
-            interval=interval_ms,
-            blit=False,
-            repeat=True,
-        )
-
-        plt.show()
+            pts = self.point_clouds[frame].astype(float)
+            x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+            scatter.set_offsets(np.c_[x, y])  # update X and Y
+            scatter.set_3d_properties(z, zdir='z')  # update Z
+            scatter.set_array(z)  # Set color based on Z
+            title.set_text(f"LiDAR Frame {frame+1}/{self.len()-1}")
+            return scatter, title
+    
+        # Start the animation
+        ani = FuncAnimation(fig, update, frames=self.len(), interval=interval_ms, blit=False, repeat=False)
+        if not testing:
+            plt.show()
