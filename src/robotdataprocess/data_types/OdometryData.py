@@ -22,6 +22,8 @@ from typeguard import typechecked
 from typing import Union, List, Tuple, Any
 import tqdm
 
+PATH_SLICE_STEP = 40
+
 @typechecked
 class OdometryData(PathData):
 
@@ -521,7 +523,7 @@ class OdometryData(PathData):
                 return Path(Header(stamp=Time(sec=int(seconds), 
                                             nanosec=int(nanoseconds)),
                                 frame_id=self.frame_id),
-                                poses=self.poses[0:i+1:40])
+                                poses=self.poses[0:i+1:PATH_SLICE_STEP])
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSBAGS")
             
@@ -607,7 +609,7 @@ class OdometryData(PathData):
                 msg.header = Header()
                 msg.header.stamp = Time(sec=int(seconds), nanosec=int(nanoseconds))
                 msg.header.frame_id = self.frame_id
-                msg.poses = self.poses_rclpy[0:i+1:40]
+                msg.poses = self.poses_rclpy[0:i+1:PATH_SLICE_STEP]
                 return msg
             
             else:

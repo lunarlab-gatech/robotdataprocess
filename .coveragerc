@@ -1,10 +1,12 @@
 [run]
-branch = True
+branch = False
 source = robotdataprocess
+concurrency = multiprocessing
 
 [paths]
 source =
     src/robotdataprocess
+    */site-packages/robotdataprocess
     */robotdataprocess/src/robotdataprocess
     */src/robotdataprocess
-    /usr/local/lib/python3.8/dist-packages/robotdataprocess
+    /usr/local/lib/python3.10/dist-packages/robotdataprocess

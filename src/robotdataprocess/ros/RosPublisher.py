@@ -194,9 +194,10 @@ class _SingleDataPublisher():
 
             # Check if we are behind
             behind: bool = False
-            next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time)
-            if now > next_target:
-                behind = True
+            if self.index.value < self.data.len() - 1:
+                next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time)
+                if now > next_target:
+                    behind = True
             
             # If behind...
             if behind:
@@ -239,7 +240,7 @@ class _SingleDataPublisher():
             
             # Stats calculation
             elapsed = now - self.start_time
-            msgs_published = self.index.value + 1 - self.skipped_msgs
+            msgs_published = self.index.value - self.skipped_msgs
             deviation = float(now - target)
             interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
             self.total_intervals.append(interval)
@@ -251,7 +252,7 @@ class _SingleDataPublisher():
             if self.verbose and self.stats_dict is not None:
                 self.stats_dict[self.topic] = {
                     "last_update_time": now,
-                    "progress": self.index.value + 1,
+                    "progress": self.index.value,
                     "total": self.data.len(),
                     "avg_hz": avg_hz,
                     "inst_hz": inst_hz,

@@ -1,10 +1,11 @@
 from copy import deepcopy
 from decimal import Decimal
+import math
 import numpy as np
 import os
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
-from robotdataprocess.data_types.OdometryData import OdometryData
+from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
@@ -93,11 +94,11 @@ class TestOdometryData(unittest.TestCase):
 
         # Make sure the Odometry and Path options match in their data. 
         path_data = PathData.from_ros2_bag(bag_path, '/odom/path', CoordinateFrame.FLU)
-        np.testing.assert_equal(ros_data.len(), path_data.len() * 10)
+        np.testing.assert_equal(math.ceil(ros_data.len() / PATH_SLICE_STEP), path_data.len())
         np.testing.assert_equal(ros_data.frame_id, path_data.frame_id)
-        np.testing.assert_equal(ros_data.timestamps[30], path_data.timestamps[3])
-        np.testing.assert_array_equal(ros_data.positions[30], path_data.positions[3])
-        np.testing.assert_array_equal(ros_data.orientations[30], path_data.orientations[3])
+        np.testing.assert_equal(ros_data.timestamps[PATH_SLICE_STEP], path_data.timestamps[1])
+        np.testing.assert_array_equal(ros_data.positions[PATH_SLICE_STEP], path_data.positions[1])
+        np.testing.assert_array_equal(ros_data.orientations[PATH_SLICE_STEP], path_data.orientations[1])
 
         # Check that the new arguments work properly
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom_openvins.txt').absolute()

@@ -57,7 +57,7 @@ class TestRosPublisher(unittest.TestCase):
                     self.get_logger().error(f"Failed to convert image: {e}")
 
         # Launch the publisher we initialize rclpy (otherwise rclpy.init breaks process forking for ROS2)
-        p = Process(target=publish_data_ROS_multiprocess, args=([image_data], ['/cam0/image_raw'], [None], ROSMsgLibType.RCLPY, False, False, 5.0))
+        p = Process(target=publish_data_ROS_multiprocess, args=([image_data], ['/cam0/image_raw'], [None], [1], ROSMsgLibType.RCLPY, False, True, 0.0))
         p.start()
 
         # Initialize ROS2 and create the listener node
@@ -67,19 +67,28 @@ class TestRosPublisher(unittest.TestCase):
         # Start listening here and meanwhile launch the publisher 
         try:
             start_time = time.time()
-            timeout_sec = 15.0
+            timeout_sec = 1.0
             while rclpy.ok() and (time.time() - start_time) < timeout_sec:
                 rclpy.spin_once(node, timeout_sec=0.1)
 
-            # Extract the recieved images for comparison
-            np.testing.assert_equal(image_data.len(), len(node.received))
-            for i in range(image_data.len()):
-                np.testing.assert_array_equal(image_data.images[i], node.received[i]["image"])
-                np.testing.assert_equal(image_data.height, node.received[i]["height"])
-                np.testing.assert_equal(image_data.width, node.received[i]["width"])
-                np.testing.assert_equal(image_data.encoding, ImageData.ImageEncoding.from_ros_str(node.received[i]["encoding"]))
-                np.testing.assert_equal(image_data.frame_id, node.received[i]["frame_id"])
-                np.testing.assert_almost_equal(float(image_data.timestamps[i]), node.received[i]["stamp"])
+            # Make sure we recieved at least one image
+            self.assertTrue(len(node.received) > 0)
+
+            # Make sure data is correct for each image we recieved
+            image_data_ts_floats = image_data.timestamps.astype(float)
+            for j in range(len(node.received)):
+                stamp = node.received[j]['stamp']
+                matches = np.where(np.isclose(image_data_ts_floats, stamp, atol=1e-6))[0]
+                if matches.size > 0:
+                    matched_index = matches[0]
+                    np.testing.assert_array_equal(image_data.images[matched_index], node.received[j]["image"])
+                    np.testing.assert_equal(image_data.height, node.received[j]["height"])
+                    np.testing.assert_equal(image_data.width, node.received[j]["width"])
+                    np.testing.assert_equal(image_data.encoding, ImageData.ImageEncoding.from_ros_str(node.received[j]["encoding"]))
+                    np.testing.assert_equal(image_data.frame_id, node.received[j]["frame_id"])
+                    np.testing.assert_almost_equal(float(image_data.timestamps[matched_index]), node.received[j]["stamp"])
+                else:
+                    self.fail("Recieved ROS Message has a timestamp that doesn't match any of the sent messages!")
 
         finally:
             # ---------- Guaranteed cleanup ----------

@@ -46,6 +46,7 @@ class PathData(Data):
         Args:
             bag_path (Union[Path, str]): Path to the ROS2 bag file.
             odom_topic (str): Topic of the Path messages.
+            frame: The coordinate frame of this data.
         Returns:
             PathData: Instance of this class.
         """

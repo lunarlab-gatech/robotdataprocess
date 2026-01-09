@@ -35,12 +35,11 @@ jobs:
     - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-        ls -al
     - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: .coverage
+        path: .coverage.*
         include-hidden-files: true
 
   ros2-tests:
@@ -48,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     container:
-      image: dlittleman/robotdataprocess_ros2_foxy:0.1.2
+      image: dlittleman/robotdataprocess_ros2_humble:0.2
       options: --user root  # optional, helps avoid permission issues
     env:
       SKIP_PURE_PYTHON_TESTS: "True"
@@ -61,20 +60,20 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Install the package
       run: |
-        python3 -m pip install -e .
+        python3 -m pip install -e . "numpy<1.25"
+        pip install --upgrade pydantic typeguard
     - name: Import external message types
       uses: snickerbockers/submodules-init@v4
     - name: Test with unittest & evaluate test coverage
       shell: bash
       run: |
-        source /opt/ros/foxy/setup.bash
+        source /opt/ros/humble/setup.bash
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-        ls -al
     - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ github.job }}
-        path: .coverage
+        path: .coverage.*
         include-hidden-files: true
       
   coverage:
@@ -98,7 +97,7 @@ jobs:
           pip install coverage
           ls -al
           pwd
-          coverage combine coverage-files/coverage-python-tests/.coverage coverage-files/coverage-ros2-tests/.coverage
+          coverage combine coverage-files/coverage-python-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.*
           coverage xml
       - name: Coveralls GitHub Action (Upload Coverage Report)
         uses: coverallsapp/github-action@v2.3.6
