@@ -1,15 +1,12 @@
 from __future__ import annotations
-from turtle import shape
 
-from copy import copy
-from decimal import Decimal
-from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ...conversion_utils import col_to_dec_arr
 from .ImageData import ImageData
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, List, Tuple
+from typing import Union, List
 
 @typechecked
 class ImageDataOnDisk(ImageData):
