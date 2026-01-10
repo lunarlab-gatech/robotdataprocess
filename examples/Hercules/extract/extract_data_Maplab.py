@@ -10,18 +10,19 @@ Configure the paths in the main() function below.
 
 from pathlib import Path
 import shutil
-from robotdataprocess import ImageDataInMemory, ImuData, CoordinateFrame
+from robotdataprocess import ImageDataInMemory, ImuData, LiDARData, CoordinateFrame
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 
 
 def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     """
-    Extract images and IMU data from a folder and save to a ROS1 bag.
+    Extract images, IMU data, and LiDAR data from a folder and save to a ROS1 bag.
 
     Args:
         input_dir (str): Path to the input directory containing:
             - rgb/ folder with PNG/JPG images (filenames are timestamps)
             - synthetic_imu.txt file (format: timestamp lin_acc_x lin_acc_y lin_acc_z ang_vel_x ang_vel_y ang_vel_z)
+            - lidar/ folder with .npy files (filenames are timestamps)
         output_bag (str): Path where the output ROS1 bag will be saved (should end in .bag)
         robot_name (str): Name of the robot (used for frame IDs)
     """
@@ -49,7 +50,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print("\n2. Loading left images...")
     left_image_data = ImageDataInMemory.from_image_files(
         input_path / 'rgb_stereo_left',
-        f'{robot_name}/cam0'
+        f'camera_0.0'
     )
     print(f"   Loaded {left_image_data.len()} images")
 
@@ -57,17 +58,25 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print("\n2.b Loading right images...")
     right_image_data = ImageDataInMemory.from_image_files(
         input_path / 'rgb_stereo_right',
-        f'{robot_name}/cam1'
+        f'camera_1.0'
     )
     print(f"   Loaded {right_image_data.len()} images")
+
+    # Load LiDAR data from .npy files
+    print("\n2.c Loading LiDAR data...")
+    lidar_data = LiDARData.from_npy_files(
+        input_path / 'lidar',
+        'lidar_sensor_0' #change this for more robots
+    )
+    print(f"   Loaded {lidar_data.len()} point clouds")
 
     print("\n3. Writing to temporary ROS2 bag...")
     # Write data to temporary ROS2 bag (required intermediate step)
     Ros2BagWrapper.write_data_to_rosbag(
         temp_ros2_bag,
-        [imu_data, left_image_data, right_image_data],    # Data to write
-        ['/imu0', '/cam0/image_raw', '/cam1/image_raw'],  # Topic names
-        [None, None, None],                     # Use default message types
+        [imu_data, left_image_data, right_image_data, lidar_data],    # Data to write
+        ['/imu0', '/cam0/image_raw', '/cam1/image_raw', '/lidar'],  # Topic names
+        [None, None, None, None],                     # Use default message types
         None                              # No external message definitions
     )
 
@@ -89,19 +98,20 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print(f"  - IMU topic: /imu0 ({imu_data.len()} messages)")
     print(f"  - Image topic: /cam0/image_raw ({left_image_data.len()} messages)")
     print(f"  - Image topic: /cam1/image_raw ({right_image_data.len()} messages)")
+    print(f"  - LiDAR topic: /lidar ({lidar_data.len()} messages)")
 
 def main():
     # ========== CONFIGURE THESE PATHS ==========
 
     # Robot name (used for frame IDs in the bag)
     robot_name = 'Husky1'
-    dataset_num = "V2.0.1"
+    dataset_num = "v2.1.0"
 
     # Input directory containing your data
-    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    input_dir = '/media/nisemono/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/nisemono/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 

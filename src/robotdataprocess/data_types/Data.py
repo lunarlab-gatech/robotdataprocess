@@ -64,7 +64,7 @@ class Data:
         return len(self.timestamps)
     
     @staticmethod
-    def get_ros_msg_type(self, libtype: ROSMsgLibType) -> Any:
+    def get_ros_msg_type(libtype: ROSMsgLibType):
         """ Will return the msgtype for the ROS message for this Data object. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
