@@ -1,4 +1,5 @@
 from decimal import Decimal
+import getpass
 from pathlib import Path
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
@@ -38,7 +39,8 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
 def main(): 
     # Enter desired configuration here
     dataset_num = "V2.1.2"
-    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
+    user = getpass.getuser()
+    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Drone1"]
     robot_crop_end_times = [None] 
 

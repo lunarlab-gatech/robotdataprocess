@@ -1,4 +1,5 @@
 from decimal import Decimal
+import getpass
 import numpy as np
 from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess import CoordinateFrame
@@ -6,9 +7,10 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
 
-    maplab = OdometryData.from_csv('/home/dbutterfield3/Desktop/data/vertex_poses_velocities_biases.csv', 
+    user = getpass.getuser()
+    maplab = OdometryData.from_csv('/home/' + user + '/Desktop/data/vertex_poses_velocities_biases.csv', 
             "world", "robot", CoordinateFrame.ENU, True, [0, 3, 4, 5, 6, 7, 8, 9])
-    vicon = OdometryData.from_csv('/home/dbutterfield3/Desktop/data/vicon_trajectory.csv', 
+    vicon = OdometryData.from_csv('/home/' + user + '/Desktop/data/vicon_trajectory.csv', 
             "odom", 'base_link', CoordinateFrame.FLU, True, [0, 1, 2, 3, 7, 4, 5, 6])
     vicon.shift_to_start_at_identity()
 

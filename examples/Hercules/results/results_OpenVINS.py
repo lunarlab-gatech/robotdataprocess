@@ -1,7 +1,6 @@
-from decimal import Decimal
+import getpass
 import numpy as np
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
-from pprint import pprint
 from scipy.spatial.transform import Rotation as R
 
 def main():
@@ -12,7 +11,8 @@ def main():
 
     for robot_name in robot_names:
         # Load Estimated data from OpenVINS
-        est_data = OdometryData.from_txt_file("/media/dbutterfield3/T73/Hercules_datasets/" + dataset_version 
+        user = getpass.getuser()
+        est_data = OdometryData.from_txt_file('/media/' + user + '/T73/Hercules_datasets/' + dataset_version 
                                               + "/results/openvins/" + robot_name+ '/' + file_name, "world", "robot", 
                                               CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
 
@@ -25,7 +25,7 @@ def main():
         est_data._ori_change_of_basis(R_NED_Q)
 
         # Load the GT Data
-        gt_data = OdometryData.from_csv("/media/dbutterfield3/T73/Hercules_datasets/" + dataset_version + \
+        gt_data = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_version + \
                                         "/extract/files_for_roman_baseline/" + robot_name +'/poseGT.csv', 
                                         "world", "robot", CoordinateFrame.FLU, True, None)
 
