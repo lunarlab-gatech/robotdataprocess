@@ -438,6 +438,12 @@ class OdometryData(PathData):
                 return Path
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
+        elif lib_type == ROSMsgLibType.ROSPY:
+            if msg_type == "maplab_msg/OdometryWithImuBiases":
+                from maplab_msgs.msg import OdometryWithImuBiases
+                return OdometryWithImuBiases
+            else:
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg_type()!")
     
@@ -531,7 +537,7 @@ class OdometryData(PathData):
             if msg_type == "maplab_msg/OdometryWithImuBiases":
 
                 import rospy
-                from maplab_msg.msg import OdometryWithImuBiases
+                from maplab_msgs.msg import OdometryWithImuBiases
                 from geometry_msgs.msg import PoseWithCovariance, TwistWithCovariance, Point, Quaternion, Vector3
                 from std_msgs.msg import Header
 
