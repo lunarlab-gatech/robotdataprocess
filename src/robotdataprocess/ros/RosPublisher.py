@@ -93,11 +93,7 @@ class _SingleDataPublisher():
         # High-resolution timer for triggering publishes
         if self.libtype == ROSMsgLibType.ROSPY:
             import rospy
-            #rospy.Timer(rospy.Duration(1.0 / float(TIMER_FREQ)), self._timer_callback)
-            self.rate = rospy.Rate(TIMER_FREQ)
-            while not rospy.is_shutdown() and not self._is_finished:
-                self._timer_callback()
-                self.rate.sleep()
+            rospy.Timer(rospy.Duration(1.0 / float(TIMER_FREQ)), self._timer_callback)
 
         elif self.libtype == ROSMsgLibType.RCLPY:
             self.timer = self.ros2_node_class.create_timer(1.0 / float(TIMER_FREQ), self._timer_callback)
@@ -168,7 +164,7 @@ class _SingleDataPublisher():
             return (idx, ts, msg)
         return None
     
-    def _timer_callback(self):
+    def _timer_callback(self, event=None):
         # Check if we have no more messages to publish or we get a StopEvent:
         if self.index.value >= self.data.len() or self.stop_event.is_set():
 
@@ -297,13 +293,17 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
     Entry point for each ROS1 publishing multiprocessing worker. 
     NOTE: This function feels useless, but follows similar structure to the ROS2 version, which is more complex.
     """
-
+    
     try:
+        import rospy
         class SingleDataPublisherROS1():
             def __init__(self, data: Data, topic_name: str, type: Union[str, None], stop_event, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
                 self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
         node = SingleDataPublisherROS1(data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
+        while not rospy.is_shutdown() and not node._pub._is_finished:
+            time.sleep(0.1)
+
     except Exception:
         print(f"Exception in publisher for topic '{topic_name}':")
         print(traceback.format_exc())
@@ -368,7 +368,9 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         time.sleep(delay_seconds)
 
     # Ensure we have matching data and topics
-    assert len(data_list) == len(data_topics)
+    assert len(data_list) == len(data_topics), "First four arguments need to have the same length!"
+    assert len(data_list) == len(data_msg_type), "First four arguments need to have the same length!"
+    assert len(data_list) == len(data_workers), "First four arguments need to have the same length!"
 
     # Create a shared dictionary across processes for statistics
     manager = Manager()

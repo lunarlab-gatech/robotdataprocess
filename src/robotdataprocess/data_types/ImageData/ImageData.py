@@ -108,7 +108,21 @@ class ImageData(Data):
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageData:
         """ Creates a class structure from a folder with .png files. """
         NotImplementedError("This method needs to be overwritten by the child Data class!")
-        
+    
+    # =========================================================================
+    # ========================= Manipulation Methods ========================== 
+    # =========================================================================  
+
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep
+        mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask
+        self.timestamps = self.timestamps[mask]
+        self.images = self.images[mask]
+
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
     # ========================================================================= 
