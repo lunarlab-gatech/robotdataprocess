@@ -26,6 +26,16 @@ class ImageDataOnDisk(ImageData):
             self.image_paths = image_paths
 
         def __getitem__(self, idx) -> np.ndarray:
+            # Handle boolean masking (used by your crop_data function)
+            if isinstance(idx, np.ndarray) and idx.dtype == bool:
+                new_paths = [p for p, keep in zip(self.image_paths, idx) if keep]
+                return self.__class__(self.height, self.width, self.encoding, new_paths)
+
+            # Handle slicing (e.g., images[0:10])
+            if isinstance(idx, slice):
+                return self.__class__(self.height, self.width, self.encoding, self.image_paths[idx])
+
+            # Handle single integer indexing (loading the actual image)
             path: Path = self.image_paths[idx]
             return np.array(Image.open(str(path)), dtype=self.dtype)
 

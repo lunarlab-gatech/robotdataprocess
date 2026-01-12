@@ -283,16 +283,6 @@ class ImageDataInMemory(ImageData):
             rescaled_images[i] = cv2.resize(self.images[i], (self.width, self.height), interpolation=cv2.INTER_LINEAR)
         self.images = rescaled_images
 
-    def crop_data(self, start: Decimal, end: Decimal):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
-
-        # Create boolean mask of data to keep
-        mask = (self.timestamps >= start) & (self.timestamps <= end)
-
-        # Apply mask
-        self.timestamps = self.timestamps[mask]
-        self.images = self.images[mask]
-
     # =========================================================================
     # ============================ Export Methods ============================= 
     # ========================================================================= 
