@@ -1,10 +1,12 @@
+import getpass
 from robotdataprocess.data_types.OdometryData import OdometryData
 from robotdataprocess import CoordinateFrame
 
 def main():
     robot_names = ["Drone2"]
     dataset_name = "V1.4.1"
-    file_path = '/home/dbutterfield3/Desktop/data/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/'
+    user = getpass.getuser()
+    file_path = '/home/' + user + '/Desktop/data/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/'
 
     # Load csv files
     data: list[OdometryData] = []

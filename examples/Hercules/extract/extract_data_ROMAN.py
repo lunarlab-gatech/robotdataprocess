@@ -1,4 +1,5 @@
 from decimal import Decimal
+import getpass
 import os
 from pathlib import Path
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
@@ -46,7 +47,8 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
 def main(): 
     # Enter desired configuration here
     dataset_num = "V2.1.2"
-    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data'
+    user = getpass.getuser()
+    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
     robot_crop_end_times = [None, None, None, None] 
 

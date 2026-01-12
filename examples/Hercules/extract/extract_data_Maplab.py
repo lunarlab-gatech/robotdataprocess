@@ -8,6 +8,7 @@ Usage:
 Configure the paths in the main() function below.
 """
 
+import getpass
 from pathlib import Path
 import shutil
 from robotdataprocess import ImageDataInMemory, ImuData, CoordinateFrame
@@ -95,13 +96,14 @@ def main():
 
     # Robot name (used for frame IDs in the bag)
     robot_name = 'Husky1'
-    dataset_num = "V2.0.1"
+    dataset_num = "V2.1.0"
 
     # Input directory containing your data
-    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    user = getpass.getuser()
+    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 

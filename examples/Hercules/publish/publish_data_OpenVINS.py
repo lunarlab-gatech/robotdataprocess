@@ -1,5 +1,6 @@
 import argparse
 from decimal import Decimal
+import getpass
 from pathlib import Path
 from robotdataprocess import ImuData, OdometryData, CoordinateFrame
 from robotdataprocess.data_types.Data import ROSMsgLibType
@@ -48,7 +49,8 @@ def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]):
         crop_end_time = Decimal(crop_end_time)
     
     # Publish the data for the specified robot
-    publish_data(input_dir='/home/dbutterfield3/data/Hercules_datasets/' + dataset_num + '/data',
+    user = getpass.getuser()
+    publish_data(input_dir='/home/' + user + '/data/Hercules_datasets/' + dataset_num + '/data',
                     robot_name=robot_name,
                     crop_data=crop_data,
                     end_time=crop_end_time)

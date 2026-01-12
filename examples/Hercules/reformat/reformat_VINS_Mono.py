@@ -1,4 +1,5 @@
 from decimal import Decimal
+import getpass
 import numpy as np
 import os
 from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame
@@ -16,7 +17,8 @@ def main():
             for file_name in file_names:
                 
                 # Load the odometry data
-                odom_data = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/'+dataset_name+'/results/vins_mono/'+robot_name+'/'+file_name, "odom", 'base_link', CoordinateFrame.FLU, False, None)
+                user = getpass.getuser()
+                odom_data = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/'+dataset_name+'/results/vins_mono/'+robot_name+'/'+file_name, "odom", 'base_link', CoordinateFrame.FLU, False, None)
 
                 # Since positions are in FLU but orientations are in NED rotated to FLU, lets fix that
                 R_NED = np.array([[1,  0,  0],
@@ -31,7 +33,7 @@ def main():
                     odom_data.timestamps = odom_data.timestamps / Decimal('1e9')
 
                 # Save the csv in a ROMAN friendly format
-                output_path = '/media/dbutterfield3/T73/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/' \
+                output_path = '/media/' + user + '/T73/Hercules_datasets/'+dataset_name+'/extract/files_for_roman_baseline/' \
                               + robot_name + '/' + file_name.replace('.csv', '_reformatted.csv')
                 if os.path.exists(output_path):
                     print("Deleting CSV file at this location previously...")

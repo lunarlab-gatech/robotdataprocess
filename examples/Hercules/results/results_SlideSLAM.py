@@ -1,8 +1,5 @@
-from decimal import Decimal
-import numpy as np
-import os
-from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame, PathData
-from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+import getpass
+from robotdataprocess import OdometryData, CoordinateFrame, PathData
 from scipy.spatial.transform import Rotation as R
 
 def main():  
@@ -21,14 +18,15 @@ def main():
             robot1_name = robot_names[1]
             
             # Load the odometry data
-            est_data_robot0 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_0.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
-            est_data_robot1 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_1.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
+            user = getpass.getuser()
+            est_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_0.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
+            est_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_1.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
             est_data_lst: list[OdometryData] = [est_data_robot0, est_data_robot1]
             est_data_robot0.visualize([est_data_robot1], [robot0_name + " Results", robot1_name + " Results"], 10, 40)
 
             # Load the ground truth data
-            gt_data_robot0 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot0_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
-            gt_data_robot1 = OdometryData.from_csv('/media/dbutterfield3/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot1_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
+            gt_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot0_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
+            gt_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot1_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
             gt_data_lst: list[OdometryData] = [gt_data_robot0, gt_data_robot1]
 
             # # Make the timestamps match and then concatenate

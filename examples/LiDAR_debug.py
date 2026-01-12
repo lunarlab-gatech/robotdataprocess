@@ -1,9 +1,12 @@
+import getpass
 from robotdataprocess.data_types.LiDARData import LiDARData
 
 # Example usage of LiDARData class
 if __name__ == "__main__":
+
     # Path to the folder containing .npy files
-    npy_folder_path = "/media/dbutterfield3/hercules-collect/raw_data_hercules/ausenv_stereo3center_2ugvuav_calib_752x480/Drone1/lidar"
+    user = getpass.getuser()
+    npy_folder_path = '/media/' + user + '/hercules-collect/raw_data_hercules/ausenv_stereo3center_2ugvuav_calib_752x480/Drone1/lidar'
     frame_id = "lidar_frame"
 
     # Load LiDAR data from .npy files

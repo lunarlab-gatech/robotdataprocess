@@ -1,6 +1,5 @@
-from decimal import Decimal
+import getpass
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
-from pprint import pprint
 
 def main():
     # Load the GT and estimated path data
@@ -11,7 +10,8 @@ def main():
     for robot_name in robot_names:
         for file_name in file_names:
             print("\n=== Processing results for robot:", robot_name)
-            robot_folder = "/media/dbutterfield3/T73/Hercules_datasets/" + dataset_version + \
+            user = getpass.getuser()
+            robot_folder = '/media/' + user + '/T73/Hercules_datasets/' + dataset_version + \
                         "/extract/files_for_roman_baseline/" + robot_name
             est_data = OdometryData.from_csv(robot_folder + '/' + file_name, 
                                             "world", "robot", CoordinateFrame.FLU, True, None)

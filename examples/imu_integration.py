@@ -1,5 +1,4 @@
-from decimal import Decimal
-import numpy as np
+import getpass
 from pathlib import Path
 from robotdataprocess.data_types.ImuData import ImuData, CoordinateFrame
 from robotdataprocess.data_types.OdometryData import OdometryData
@@ -7,7 +6,8 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 def main():
     # Enter desired configuration here
     dataset_num = "V2.1.0"
-    input_dir = '/media/dbutterfield3/T73/Hercules_Datasets/' + dataset_num + '/data'
+    user = getpass.getuser()
+    input_dir = '/media/' + user + '/T73/Hercules_Datasets/' + dataset_num + '/data'
     robot_name = "Drone2"
 
     # Make directory paths

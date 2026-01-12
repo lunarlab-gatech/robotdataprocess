@@ -1,4 +1,5 @@
 from decimal import Decimal
+import getpass
 from pathlib import Path
 import shutil
 from robotdataprocess import ImageDataInMemory, OdometryData, CoordinateFrame
@@ -52,8 +53,9 @@ def main():
     crop_data = False
     end_time = None
 
-    input_dir = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
-    output_bag = '/media/dbutterfield3/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_slideslam/' + robot_name + '.bag'
+    user = getpass.getuser()
+    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    output_bag = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_slideslam/' + robot_name + '.bag'
 
     extract_to_bag(input_dir, output_bag, robot_name, crop_data, end_time)
 
