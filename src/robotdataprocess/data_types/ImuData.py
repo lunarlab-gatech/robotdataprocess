@@ -2,6 +2,7 @@ from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .Data import Data, CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
+from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
@@ -249,8 +250,7 @@ class ImuData(Data):
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from sensor_msgs.msg import Imu
-            return Imu
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg_type()!")
             
@@ -301,18 +301,19 @@ class ImuData(Data):
                         linear_acceleration_covariance=np.zeros(9))
         
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from std_msgs.msg import Header
-            from sensor_msgs.msg import Imu
-            from geometry_msgs.msg import Quaternion, Vector3
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            Imu = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
+            Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+            Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
 
             # Create the message objects
             imu_msg = Imu()
             imu_msg.header = Header()
             if lib_type == ROSMsgLibType.RCLPY: 
-                from rclpy.time import Time
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
                 imu_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
             else:
-                import rospy
+                rospy = ModuleImporter.get_module('rospy')
                 imu_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
 
             # Populate the rest of the data

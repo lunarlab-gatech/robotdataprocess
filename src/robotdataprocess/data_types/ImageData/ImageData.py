@@ -4,6 +4,7 @@ from ..Data import Data, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from enum import Enum
+from ...ModuleImporter import ModuleImporter
 import numpy as np
 from pathlib import Path
 from typeguard import typechecked
@@ -135,8 +136,7 @@ class ImageData(Data):
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Image'].__msgtype__
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from sensor_msgs.msg import Image
-            return Image
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
         else:
             raise NotImplementedError(f"Unsupported ROS_MSG_LIBRARY_TYPE {lib_type} for ImageData.get_ros_msg_type!")
 
@@ -192,17 +192,17 @@ class ImageData(Data):
                         data=data)
         
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from std_msgs.msg import Header
-            from sensor_msgs.msg import Image
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            Image = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
 
             # Create the messages
             img_msg = Image()
             img_msg.header = Header()
             if lib_type == ROSMsgLibType.RCLPY:
-                from rclpy.time import Time
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
                 img_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
             else:
-                import rospy
+                rospy = ModuleImporter.get_module('rospy')
                 img_msg.header.stamp = rospy.Time(secs=int(seconds), nsecs=int(nanoseconds))
 
             # Populate the rest of the data
