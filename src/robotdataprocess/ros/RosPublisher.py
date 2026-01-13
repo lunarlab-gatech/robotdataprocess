@@ -1,6 +1,5 @@
 from ..data_types.Data import Data, ROSMsgLibType
 from ..data_types.ImageData.ImageData import ImageData
-from decimal import Decimal
 from multiprocessing import Process, Manager, Event
 from multiprocessing.managers import DictProxy
 import queue as queue_module
@@ -14,7 +13,7 @@ from typeguard import typechecked
 from typing import List, Union, Any, Tuple
 
 QUEUE_SIZE = 10
-TIMER_FREQ = 2000 # Hz
+TIMER_FREQ = 200 # Hz
 MSG_BUFFER_MAX_VAL = 100 # entries
 RESTART_JUMP_MSGS = 5 # msgs
 
@@ -53,8 +52,8 @@ class _SingleDataPublisher():
         self.restart_when_behind = False
 
         # Timing setup
-        self.start_time = Decimal(time.monotonic()) + Decimal('1.0')
-        self.first_ts = Decimal(self.data.timestamps[0])
+        self.start_time = time.monotonic() + 1.0
+        self.first_ts = float(self.data.timestamps[0])
         self.prev_time = self.start_time
         self.total_intervals = []
 
@@ -125,7 +124,7 @@ class _SingleDataPublisher():
                     msg = self.data.get_ros_msg(self.libtype, idx, self.type)
                 else:
                     msg = self.data.get_ros_msg(self.libtype, idx)
-                timestamp = Decimal(self.data.timestamps[idx])
+                timestamp = float(self.data.timestamps[idx])
 
                 # Put the message into the buffer
                 while True:
@@ -200,8 +199,8 @@ class _SingleDataPublisher():
             self.next_msg: Tuple[int, float, Any] = result
 
         # Calculate target publish time for the current message
-        now = Decimal(time.monotonic())
-        target: Decimal = (self.data.timestamps[self.index.value] - self.first_ts + self.start_time)
+        now = time.monotonic()
+        target: float = float(self.data.timestamps[self.index.value]) - self.first_ts + self.start_time
 
         # Publish when time has arrived
         if now >= target:
@@ -209,7 +208,7 @@ class _SingleDataPublisher():
             # Check if we are behind
             behind: bool = False
             if self.index.value < self.data.len() - 1:
-                next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time)
+                next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
                 if now > next_target:
                     behind = True
             
@@ -232,7 +231,7 @@ class _SingleDataPublisher():
                 else:
                     # Find the next index
                     while self.index.value < self.data.len() - 1: 
-                        next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time) 
+                        next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
                         if now < next_target: 
                             break 
                         self.index.value += 1 

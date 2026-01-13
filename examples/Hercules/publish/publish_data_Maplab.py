@@ -28,13 +28,18 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
         right_image_data.crop_data(Decimal('0.0'), end_time)
 
     # Publish the data via ROS2 topics
-    publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
+    publish_data_ROS_multiprocess([imu_data, left_image_data], 
                                   ['/'+robot_name+'/imu0', 
-                                   '/'+robot_name+'/cam0/image_raw', 
-                                   '/'+robot_name+'/cam1/image_raw',
-                                   '/'+robot_name+'/rovioli/maplab_odom_T_M_I'],
-                                    [None, None, None, "maplab_msg/OdometryWithImuBiases"], 
-                                    [1, 3, 3, 1], ROSMsgLibType.ROSPY, True, verbose=True)
+                                   '/'+robot_name+'/cam0/image_raw'],
+                                    [None, None], 
+                                    [2, 3], ROSMsgLibType.ROSPY, True, verbose=True)
+    # publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
+    #                               ['/'+robot_name+'/imu0', 
+    #                                '/'+robot_name+'/cam0/image_raw', 
+    #                                '/'+robot_name+'/cam1/image_raw',
+    #                                '/'+robot_name+'/rovioli/maplab_odom_T_M_I'],
+    #                                 [None, None, None, "maplab_msg/OdometryWithImuBiases"], 
+    #                                 [1, 3, 3, 1], ROSMsgLibType.ROSPY, True, verbose=True)
 
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 
