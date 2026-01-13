@@ -16,7 +16,8 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis.txt', '' + robot_name + '/base_link', 
+                                     CoordinateFrame.NED, nine_axis=True)
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'global', 'body', CoordinateFrame.NED, False)
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "body", CoordinateFrame.NED)
 
