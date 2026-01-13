@@ -24,20 +24,22 @@ TIMER_FREQ = 400 # Hz
 MSG_BUFFER_MAX_VAL = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
 
-def remove_shm_from_resource_tracker():
-    # Neutralize the communication methods globally
-    multiprocessing.resource_tracker.register = lambda *args, **kwargs: None
-    multiprocessing.resource_tracker.unregister = lambda *args, **kwargs: None
+def neutralize_resource_tracker():
+    # Create a dummy tracker class that won't crash
+    class DummyTracker:
+        def register(self, *args, **kwargs): pass
+        def unregister(self, *args, **kwargs): pass
+        def ensure_running(self, *args, **kwargs): pass
 
-    # Lobotomize the tracker's internal "ensure_running" 
-    if hasattr(multiprocessing.resource_tracker, '_resource_tracker'):
-        multiprocessing.resource_tracker._resource_tracker.ensure_running = lambda *args, **kwargs: None
+    # 2. Globally neutralize the actual resource_tracker
+    resource_tracker.register = lambda *args, **kwargs: None
+    resource_tracker.unregister = lambda *args, **kwargs: None
 
-    # Some versions of Python 3.8 check this specific attribute to decide whether to use the tracker. 
-    if hasattr(multiprocessing.shared_memory, 'resource_tracker'):
-        multiprocessing.shared_memory.resource_tracker = None
+    # 3. Specifically for Python 3.10+, replace the module reference 
+    # instead of setting it to None
+    multiprocessing.shared_memory.resource_tracker = DummyTracker()
 
-remove_shm_from_resource_tracker()
+neutralize_resource_tracker()
 
 class _SingleDataPublisher():
     """ 
@@ -134,13 +136,12 @@ class _SingleDataPublisher():
             topic_info['log_queue'].append(msg)
             self.stats_dict[self.topic] = topic_info
 
-    def _message_worker(self, worker_id: int, stop_event, stats_dict: Union[DictProxy, None] = None):
+    def _message_worker(self, worker_id: int, stop_event, stats_dict: Union[DictProxy, None] = None, use_shared_mem: bool = True):
         """
         Worker process: prebuild ROS messages and put them into the queue.
         Each worker handles every nth message starting at worker_id.
         """
-        remove_shm_from_resource_tracker()
-        USE_SHARED_MEM = True
+        neutralize_resource_tracker()
 
         # For ROS1, initialize this worker's rospy node
         if self.libtype == ROSMsgLibType.ROSPY:
@@ -167,12 +168,12 @@ class _SingleDataPublisher():
 
                 # If message has data field, use shared memory to transfer to publishing process efficiently
                 shm_name = None
-                if USE_SHARED_MEM and hasattr(msg, 'data') and len(msg.data) > 0:
+                if use_shared_mem and hasattr(msg, 'data') and len(msg.data) > 0:
 
                     # Write a handler to disable SharedMemory usage if we run out
                     def handler(signum, frame):
-                        nonlocal USE_SHARED_MEM
-                        USE_SHARED_MEM = False
+                        nonlocal use_shared_mem
+                        use_shared_mem = False
                         raise TimeoutError("Calls to SharedMemory freezing! Switching to Process-to-Process Serialization, which will run slower. If in a Docker container, this can be avoided by increasing the shared memory (docker run --shm-size=2gb).")
 
                     # Set an alarm for 0.2 seconds
@@ -225,7 +226,7 @@ class _SingleDataPublisher():
         Returns the item or None if not found. Additionally clears stale messages.
         """
 
-        remove_shm_from_resource_tracker()
+        neutralize_resource_tracker()
 
         # Clear out any stale messages that were skipped
         keys_to_delete = [k for k in self.msg_buf.keys() if k < target_index]
