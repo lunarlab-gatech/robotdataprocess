@@ -19,9 +19,9 @@ import traceback
 from typeguard import typechecked
 from typing import List, Union, Any, Tuple
 
-QUEUE_SIZE = 10
+ROS_PUB_QUEUE_SIZE = 10
 TIMER_FREQ = 400 # Hz
-MSG_BUFFER_MAX_VAL = 20 # entries
+MSG_QUEUE_MAX_SIZE = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
 
 def neutralize_resource_tracker():
@@ -82,9 +82,9 @@ class _SingleDataPublisher():
         self.prev_console_update_time = self.start_time
 
         # Message queue to hold build messages from workers
+        self.worker_queue = multiprocessing.Queue(maxsize=MSG_QUEUE_MAX_SIZE)
+        self.local_buf: dict = {}
         self.manager = Manager()
-        self.msg_buf = self.manager.dict()
-        self.buf_size = self.manager.Value('i', 0)
         self.index = self.manager.Value("i", 0)
         self.next_msg = None
         self._last_pub = None
@@ -108,10 +108,10 @@ class _SingleDataPublisher():
             # For ROS1, we have to intialize rospy AFTER forking processes
             import rospy
             rospy.init_node(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}", anonymous=True)
-            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=QUEUE_SIZE)
+            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=ROS_PUB_QUEUE_SIZE)
 
         elif self.libtype == ROSMsgLibType.RCLPY:
-            self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, QUEUE_SIZE)
+            self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, ROS_PUB_QUEUE_SIZE)
 
         # High-resolution timer for triggering publishes
         if self.libtype == ROSMsgLibType.ROSPY:
@@ -204,17 +204,20 @@ class _SingleDataPublisher():
 
                 # Put the message into the buffer
                 while True:
-                    if self.buf_size.value < MSG_BUFFER_MAX_VAL: 
-                        self.msg_buf[idx] = (float(timestamp), msg, shm_name)
-                        self.buf_size.value += 1
-                        break
-                    elif stop_event.is_set() or idx < self.index.value:
+                    if stop_event.is_set() or idx < self.index.value:
                         if shm_name:
                             temp_shm = SharedMemory(name=shm_name)
+                            temp_shm.close()
                             temp_shm.unlink()
                         break
                     else:
-                        time.sleep(1 / float(TIMER_FREQ))
+                        try:
+                            payload = (idx, float(timestamp), msg, shm_name)
+                            self.worker_queue.put(payload, timeout=1.0 / float(TIMER_FREQ))
+                            break
+                        except queue_module.Full:
+                            time.sleep(1.0 / float(TIMER_FREQ))
+
 
         except BrokenPipeError:
             # Manager must have died from KeyboardInterrupt
@@ -228,23 +231,39 @@ class _SingleDataPublisher():
 
         neutralize_resource_tracker()
 
-        # Clear out any stale messages that were skipped
-        keys_to_delete = [k for k in self.msg_buf.keys() if k < target_index]
-        for k in keys_to_delete:
-            _, _, stale_shm_name = self.msg_buf.pop(k)
-            if stale_shm_name:
+        # Drain the Queue into the local reorder buffer if we don't have the msg we want
+        if not target_index in self.local_buf:
+            while not self.worker_queue.empty():
                 try:
-                    temp_shm = SharedMemory(name=stale_shm_name)
-                    temp_shm.close()
-                    temp_shm.unlink()
-                except (FileNotFoundError, BufferError): 
-                    pass
-            self.buf_size.value -= 1
+                    idx, ts, msg, shm_name = self.worker_queue.get_nowait()
+                    if idx < target_index:
+                        if shm_name:
+                            try:
+                                temp_shm = SharedMemory(name=shm_name)
+                                temp_shm.close()
+                                temp_shm.unlink()
+                            except (FileNotFoundError, BufferError):
+                                pass
+                    else:
+                        self.local_buf[idx] = (ts, msg, shm_name)
+                except queue_module.Empty:
+                    break
+        
+            # Clear out any stale messages that were skipped
+            keys_to_delete = [k for k in self.local_buf.keys() if k < target_index]
+            for k in keys_to_delete:
+                _, _, stale_shm_name = self.local_buf.pop(k)
+                if stale_shm_name:
+                    try:
+                        temp_shm = SharedMemory(name=stale_shm_name)
+                        temp_shm.close()
+                        temp_shm.unlink()
+                    except (FileNotFoundError, BufferError): 
+                        pass
 
         # Get the actual target we're looking for
-        if target_index in self.msg_buf:
-            ts, msg, shm_name = self.msg_buf.pop(target_index)
-            self.buf_size.value -= 1
+        if target_index in self.local_buf:
+            ts, msg, shm_name = self.local_buf.pop(target_index)
             
             # Load data from shared memory if shm_name exists
             if shm_name:
@@ -263,7 +282,7 @@ class _SingleDataPublisher():
         
         # Otherwise, we don't have the target yet...
         return None
-    
+
     def _timer_callback(self, event=None):
         # Check if we have no more messages to publish or we get a StopEvent:
         if self.index.value >= self.data.len() or self.stop_event.is_set():
@@ -355,7 +374,6 @@ class _SingleDataPublisher():
             # Stats calculation
             elapsed = now - self.start_time
             msgs_published = self.index.value - self.skipped_msgs
-            deviation = float(now - target)
             interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
             avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
             inst_hz = 1.0 / interval if interval > 0 else 0.0
@@ -370,11 +388,10 @@ class _SingleDataPublisher():
                     "total": self.data.len(),
                     "avg_hz": avg_hz,
                     "inst_hz": inst_hz,
-                    "deviation": deviation,
-                    "prev_time": self.prev_time,
-                    "interval": interval,
                     "skipped": self.skipped_msgs,
-                    "log_queue": self.stats_dict[self.topic]['log_queue']
+                    "log_queue": self.stats_dict[self.topic]['log_queue'],
+                    'local_buf_size': len(self.local_buf),
+                    'worker_queue_size': self.worker_queue.qsize()
                 }
                 self.prev_console_update_time = now
 
@@ -481,9 +498,8 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
     # Initialize stats_dict for each topic
     for topic in data_topics:
         stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0, 
-                             "inst_hz": 0, "deviation": 0,
-                             "prev_time": 0, "interval": 0, "skipped": 0,
-                             "log_queue": manager.list()}
+                             "inst_hz": 0, "skipped": 0, "log_queue": manager.list(),
+                             'local_buf_size': 0, 'worker_queue_size': 0}
 
     # Launch the appropriate publisher processes
     processes: List[Process] = []
@@ -509,6 +525,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         table.add_column("Avg Hz", justify="right")
         table.add_column("Inst Hz", justify="right")
         table.add_column("Skipped Msgs", justify="right")
+        table.add_column("Buffer Sizes", justify="right")
         
         for topic, s in stats_dict.items():
             proc = topic_to_proc[topic]
@@ -532,6 +549,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
                 f"{s['avg_hz']:.1f}", 
                 f"{s['inst_hz']:.1f}",
                 f"{s['skipped']}",
+                f"{s['local_buf_size']}/∞ | {s['worker_queue_size']}/{MSG_QUEUE_MAX_SIZE}",
                 style=row_style
             )
         return table
