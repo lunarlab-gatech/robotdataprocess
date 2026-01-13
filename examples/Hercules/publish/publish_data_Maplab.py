@@ -35,7 +35,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
                                    '/'+robot_name+'/cam1/image_raw',
                                    '/'+robot_name+'/odom_gt'],
                                     [None, None, None, "Path"], 
-                                    [3, 1, 1, 1], ROSMsgLibType.ROSPY, True, verbose=True)
+                                    [2, 1, 1, 1], ROSMsgLibType.ROSPY, True, verbose=True)
     # publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
     #                               ['/'+robot_name+'/imu0', 
     #                                '/'+robot_name+'/cam0/image_raw', 

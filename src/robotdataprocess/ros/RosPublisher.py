@@ -21,7 +21,7 @@ from typing import List, Union, Any, Tuple
 
 QUEUE_SIZE = 10
 TIMER_FREQ = 400 # Hz
-MSG_BUFFER_MAX_VAL = 100 # entries
+MSG_BUFFER_MAX_VAL = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
 
 def remove_shm_from_resource_tracker():
@@ -77,7 +77,7 @@ class _SingleDataPublisher():
         self.start_time = time.monotonic() + 1.0
         self.first_ts = float(self.data.timestamps[0])
         self.prev_time = self.start_time
-        self.total_intervals = []
+        self.prev_console_update_time = self.start_time
 
         # Message queue to hold build messages from workers
         self.manager = Manager()
@@ -356,13 +356,13 @@ class _SingleDataPublisher():
             msgs_published = self.index.value - self.skipped_msgs
             deviation = float(now - target)
             interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
-            self.total_intervals.append(interval)
             avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
             inst_hz = 1.0 / interval if interval > 0 else 0.0
             self.prev_time = now
 
-            # Update statistics
-            if self.verbose and self.stats_dict is not None:
+            # Update statistics (at most 10Hz)
+            elapsed_console_update = now - self.prev_console_update_time
+            if self.verbose and self.stats_dict is not None and elapsed_console_update > 0.1:
                 self.stats_dict[self.topic] = {
                     "last_update_time": now,
                     "progress": self.index.value,
@@ -375,6 +375,7 @@ class _SingleDataPublisher():
                     "skipped": self.skipped_msgs,
                     "log_queue": self.stats_dict[self.topic]['log_queue']
                 }
+                self.prev_console_update_time = now
 
             # Prepare the next message
             if self.index.value < self.data.len():
@@ -513,7 +514,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
             row_style = None
 
             if proc.is_alive():
-                if time.monotonic() - float(s["last_update_time"]) < 0.1:
+                if time.monotonic() - float(s["last_update_time"]) < 0.3:
                     status = "[bold green]RUNNING[/bold green]"
                 else:
                     status = "[bold yellow]UNRESPONSIVE[/bold yellow]"
