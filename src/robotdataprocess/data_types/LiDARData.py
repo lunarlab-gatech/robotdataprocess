@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ..conversion_utils import col_to_dec_arr
-from .Data import Data, CoordinateFrame
+from .Data import Data, CoordinateFrame, ROSMsgLibType
+import decimal
 from decimal import Decimal
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
@@ -9,9 +10,10 @@ from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+import struct
 import sys
 from typeguard import typechecked
-from typing import Union, List, Tuple, Optional
+from typing import Union, List, Tuple, Optional, Any
 import tqdm
 
 @typechecked
@@ -24,14 +26,14 @@ class LiDARData(Data):
     Thus, all other points are assumed to be valid.
     """
 
-    point_clouds: NDArray[Decimal] # (T, N, 3) array of point clouds, with assumed (x, y, z) ordering
-    rings: Optional[NDArray] # (T, N)
+    point_clouds: NDArray # (T, N, 3) array of point clouds, with assumed (x, y, z) ordering
+    channels: Optional[NDArray] # (T, N) array with channel number for each point
     frame: CoordinateFrame
 
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, rings: Optional[NDArray], frame: CoordinateFrame) -> None:
+    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, channels: Optional[NDArray], frame: CoordinateFrame) -> None:
         super().__init__(frame_id, timestamps)
         self.point_clouds = point_clouds
-        self.rings = rings
+        self.channels = channels
         self.frame = frame
 
         # Set points at the origin to NaNs
@@ -82,7 +84,35 @@ class LiDARData(Data):
             pbar.update()
 
         # Return an LiDARData class
-        return cls(frame_id, timestamps_sorted, point_clouds, frame)
+        return cls(frame_id, timestamps_sorted, point_clouds, None, frame)
+    
+    # =========================================================================
+    # ========================= Manipulation Methods ========================== 
+    # =========================================================================  
+
+    def calculate_point_channels(self, num_channels: int, v_max_angle: float,
+                                 v_min_angle: float) -> None:
+        """ Calculate channel numbers for each point """
+
+        if self.channels is not None:
+            raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
+
+        x = self.point_clouds[..., 0]
+        y = self.point_clouds[..., 1]
+        z = self.point_clouds[..., 2]
+
+        # Compute vertical angle in degrees
+        horiz_dist = np.sqrt(x**2 + y**2)
+        vertical_angle = np.arctan2(z, horiz_dist) * 180.0 / np.pi
+
+        # Map angle to channel index
+        angle_range = v_max_angle - v_min_angle
+        channels = (vertical_angle - v_min_angle) / angle_range * (num_channels - 1)
+
+        # Round and clip to valid channel numbers
+        channels = np.round(channels).astype(int)
+        channels = np.clip(channels, 0, num_channels - 1)
+        self.channels = channels
 
     # =========================================================================
     # =========================== Frame Conversions =========================== 
@@ -134,11 +164,20 @@ class LiDARData(Data):
         # Create the update function
         scatter = ax.scatter([], [], [], s=4, cmap='viridis')
         def update(frame: int):
+            # Get only valid points
             pts = self.point_clouds[frame].astype(float)
+            valid_pts_mask = ~np.isnan(pts).any(axis=1)
+            pts = pts[valid_pts_mask]
+            channels = self.channels[frame][valid_pts_mask]
+
+            # Update the plot
             x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
             scatter.set_offsets(np.c_[x, y])  # update X and Y
             scatter.set_3d_properties(z, zdir='z')  # update Z
-            scatter.set_array(z)  # Set color based on Z
+            if self.channels is not None:
+                scatter.set_array(channels)
+            else:
+                scatter.set_array(z)  # Set color based on Z
             title.set_text(f"LiDAR Frame {frame+1}/{self.len()-1}")
             return scatter, title
     
@@ -172,6 +211,7 @@ class LiDARData(Data):
 
         NOTE: Currently uses an unordered point cloud.
         NOTE: Does not publish intensity, and assumes all points collected at same time (only holds true for simulation)
+        NOTE: Assumes channels data is provided
         """
 
         # Check to make sure index is within data bounds
@@ -218,19 +258,20 @@ class LiDARData(Data):
 
             # Fill in the remaining data
             pc_msg.is_bigendian = True if sys.byteorder == "big" else False
-            pc_msg.is_dense = not np.isnan(points).any()
+            pc_msg.is_dense = not np.isnan(self.point_clouds[i]).any()
 
-            # Calculate ring and time (NOTE: Time assumed to be zero for all points)
+            # Calculate time (NOTE: Time assumed to be zero for all points)
             time = np.zeros((num_points, 1), dtype=np.float32)
 
-            # Append ring and time onto our point cloud to get (T, N, 5)
-            point_cloud_augmented = self.point_clouds[i]
-
+            # Append channel and time onto our point cloud to get (T, N, 5)
+            if self.channels is not None:
+                pc_aug = np.concatenate([self.point_clouds[i], self.channels[i][:, np.newaxis], time], axis=-1)
+            else:
+                raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
 
             # Pack points into binary
             fmt = "<fffff" if not pc_msg.is_bigendian else ">fffff"
-            msg.data = b"".join(struct.pack(fmt, *p) for p in points)
-
+            pc_msg.data = b"".join(struct.pack(fmt, *p) for p in pc_aug)
             return pc_msg
 
         else:
