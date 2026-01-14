@@ -5,11 +5,13 @@ from .Data import Data, CoordinateFrame
 from decimal import Decimal
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
+from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+import sys
 from typeguard import typechecked
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Optional
 import tqdm
 
 @typechecked
@@ -17,15 +19,24 @@ class LiDARData(Data):
     """
     LiDAR Data class that contains LiDAR-specific attributes and methods.
     Inherits from the generic Data class.
+
+    NOTE: Assumes points at [0,0,0] are invalid and sets them to NaNs. 
+    Thus, all other points are assumed to be valid.
     """
 
     point_clouds: NDArray[Decimal] # (T, N, 3) array of point clouds, with assumed (x, y, z) ordering
+    rings: Optional[NDArray] # (T, N)
     frame: CoordinateFrame
 
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, frame: CoordinateFrame) -> None:
+    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, rings: Optional[NDArray], frame: CoordinateFrame) -> None:
         super().__init__(frame_id, timestamps)
         self.point_clouds = point_clouds
+        self.rings = rings
         self.frame = frame
+
+        # Set points at the origin to NaNs
+        mask = (point_clouds == 0).all(axis=-1) 
+        point_clouds[mask] = np.nan
 
     # =========================================================================
     # ============================ Class Methods ============================== 
@@ -135,3 +146,92 @@ class LiDARData(Data):
         ani = FuncAnimation(fig, update, frames=self.len(), interval=interval_ms, blit=False, repeat=False)
         if not testing:
             plt.show()
+
+    # =========================================================================
+    # =========================== Conversion to ROS =========================== 
+    # ========================================================================= 
+
+    @staticmethod
+    def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
+        """ Return the __msgtype__ for an LiDAR (Point Cloud) msg. """
+
+        if lib_type == ROSMsgLibType.RCLPY:
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
+        else:
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg_type()!")
+            
+    def get_ros_msg(self, lib_type: ROSMsgLibType, i: int):
+        """
+        Gets an Image ROS2 message corresponding to the LiDAR scan.
+        
+        Args:
+            lib_type: The ROS library we're getting the message for.
+            i (int): The index of the image message to convert.
+        Raises:
+            ValueError: If i is outside the data bounds.
+
+        NOTE: Currently uses an unordered point cloud.
+        NOTE: Does not publish intensity, and assumes all points collected at same time (only holds true for simulation)
+        """
+
+        # Check to make sure index is within data bounds
+        if i < 0 or i >= self.len():
+            raise ValueError(f"Index {i} is out of bounds!")
+
+        # Get the seconds and nanoseconds
+        seconds = int(self.timestamps[i])
+        nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) \
+                       * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
+
+        # Write the data into the new msg
+        if lib_type == ROSMsgLibType.RCLPY:
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
+            PointField = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointField')
+
+            # Create the message object
+            pc_msg = PointCloud2()
+            pc_msg.header = Header()
+            if lib_type == ROSMsgLibType.RCLPY: 
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                pc_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            else:
+                rospy = ModuleImporter.get_module('rospy')
+                pc_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
+            pc_msg.header.frame_id = self.frame_id
+
+            # Set the height and width assuming an unordered point cloud
+            num_points = self.point_clouds[i].shape[0]
+            pc_msg.height = 1
+            pc_msg.width = num_points
+
+            # Set the point fields
+            pc_msg.fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name="ring", offset=12, datatype=PointField.FLOAT32, count=1),
+                PointField(name="time", offset=16, datatype=PointField.FLOAT32, count=1)
+            ]
+            pc_msg.point_step = 20
+            pc_msg.row_step = pc_msg.point_step * num_points
+
+            # Fill in the remaining data
+            pc_msg.is_bigendian = True if sys.byteorder == "big" else False
+            pc_msg.is_dense = not np.isnan(points).any()
+
+            # Calculate ring and time (NOTE: Time assumed to be zero for all points)
+            time = np.zeros((num_points, 1), dtype=np.float32)
+
+            # Append ring and time onto our point cloud to get (T, N, 5)
+            point_cloud_augmented = self.point_clouds[i]
+
+
+            # Pack points into binary
+            fmt = "<fffff" if not pc_msg.is_bigendian else ">fffff"
+            msg.data = b"".join(struct.pack(fmt, *p) for p in points)
+
+            return pc_msg
+
+        else:
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg()!")

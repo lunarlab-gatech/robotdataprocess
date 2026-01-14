@@ -21,25 +21,25 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'global', 'body', CoordinateFrame.NED, False)
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "body", CoordinateFrame.NED)
 
-    lidar_data.to_FLU_frame()
-    lidar_data.visualize()
+    # lidar_data.to_FLU_frame()
+    # lidar_data.visualize()
 
     # # Convert data from NED frame to ROS frame (and make sure it is at the identity)
     # pose_data.to_FLU_frame()
     # pose_data.shift_to_start_at_identity()
 
-    # # Crop the data
-    # if crop_data:
-    #     imu_data.crop_data(Decimal('0.0'), end_time)
-    #     pose_data.crop_data(Decimal('0.0'), end_time)
-    #     lidar_data.crop_data(Decimal('0.0'), end_time)
+    # Crop the data
+    if crop_data:
+        imu_data.crop_data(Decimal('0.0'), end_time)
+        pose_data.crop_data(Decimal('0.0'), end_time)
+        lidar_data.crop_data(Decimal('0.0'), end_time)
 
-    # # Publish the data via ROS topics 
-    # publish_data_ROS_multiprocess([imu_data, pose_data], 
-    #                               ['/imu0', '/odom_gt'],
-    #                               [None, "Path"],
-    #                               [1, 1],
-    #                                ROSMsgLibType.ROSPY, True, verbose=True)
+    # Publish the data via ROS topics 
+    publish_data_ROS_multiprocess([imu_data, pose_data, lidar_data], 
+                                  ['/imu_raw', '/odom_gt', '/points_raw'],
+                                  [None, "Path", None],
+                                  [1, 1, 1],
+                                   ROSMsgLibType.RCLPY, True, verbose=False)
     
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 

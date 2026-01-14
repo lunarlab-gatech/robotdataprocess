@@ -424,7 +424,7 @@ class OdometryData(PathData):
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> Any:
-        """ Return the __msgtype__ for an Imu msg. """
+        """ Return the __msgtype__ for an Odometry msg. """
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             if msg_type == "Odometry":

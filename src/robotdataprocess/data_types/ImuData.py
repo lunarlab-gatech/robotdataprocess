@@ -253,7 +253,6 @@ class ImuData(Data):
     # =========================== Conversion to ROS =========================== 
     # ========================================================================= 
 
-    @typechecked
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
         """ Return the __msgtype__ for an Imu msg. """
