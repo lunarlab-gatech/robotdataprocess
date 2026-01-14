@@ -23,6 +23,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
 
     # lidar_data.to_FLU_frame()
     # lidar_data.visualize()
+    lidar_data.calculate_point_channels(32, -25, 25)
 
     # # Convert data from NED frame to ROS frame (and make sure it is at the identity)
     # pose_data.to_FLU_frame()
@@ -39,7 +40,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
                                   ['/imu_raw', '/odom_gt', '/points_raw'],
                                   [None, "Path", None],
                                   [1, 1, 1],
-                                   ROSMsgLibType.RCLPY, True, verbose=False)
+                                   ROSMsgLibType.RCLPY, True, verbose=True)
     
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 

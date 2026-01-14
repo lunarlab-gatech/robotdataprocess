@@ -337,16 +337,16 @@ class ImuData(Data):
             imu_msg.header.frame_id = self.frame_id
             imu_msg.orientation = Quaternion()
             if self.orientations is not None:
-                imu_msg.orientation.x = self.orientations[i][0]  
-                imu_msg.orientation.y = self.orientations[i][1]
-                imu_msg.orientation.z = self.orientations[i][2]
-                imu_msg.orientation.w = self.orientations[i][3]
+                imu_msg.orientation.x = float(self.orientations[i][0])  
+                imu_msg.orientation.y = float(self.orientations[i][1])
+                imu_msg.orientation.z = float(self.orientations[i][2])
+                imu_msg.orientation.w = float(self.orientations[i][3])
                 imu_msg.orientation_covariance = np.zeros(9, dtype=np.float64)
             else:
-                imu_msg.orientation.x = 0
-                imu_msg.orientation.y = 0
-                imu_msg.orientation.z = 0
-                imu_msg.orientation.w = 1
+                imu_msg.orientation.x = 0.0
+                imu_msg.orientation.y = 0.0
+                imu_msg.orientation.z = 0.0
+                imu_msg.orientation.w = 1.0
                 covariance = np.zeros(9, dtype=np.float64)
                 covariance[0] = -1
                 imu_msg.orientation_covariance = covariance

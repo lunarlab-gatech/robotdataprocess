@@ -90,8 +90,7 @@ class LiDARData(Data):
     # ========================= Manipulation Methods ========================== 
     # =========================================================================  
 
-    def calculate_point_channels(self, num_channels: int, v_max_angle: float,
-                                 v_min_angle: float) -> None:
+    def calculate_point_channels(self, num_channels: int, v_min_angle: float, v_max_angle: float) -> None:
         """ Calculate channel numbers for each point """
 
         if self.channels is not None:
