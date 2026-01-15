@@ -32,13 +32,13 @@ class LiDARData(Data):
 
     def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, channels: Optional[NDArray], frame: CoordinateFrame) -> None:
         super().__init__(frame_id, timestamps)
-        self.point_clouds = point_clouds
+        self.point_clouds = point_clouds.astype(np.float32)
         self.channels = channels
         self.frame = frame
 
         # Set points at the origin to NaNs
-        mask = (point_clouds == 0).all(axis=-1) 
-        point_clouds[mask] = np.nan
+        mask = (self.point_clouds == 0.0).all(axis=-1) 
+        self.point_clouds[mask] = np.nan
 
     # =========================================================================
     # ============================ Class Methods ============================== 

@@ -19,7 +19,7 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(lidar_data.timestamps.astype(float), [0.1, 0.6, 1.1])
         np.testing.assert_equal(lidar_data.frame, CoordinateFrame.NED)
         np.testing.assert_equal(lidar_data.frame_id, "robot")
-        np.testing.assert_array_equal(lidar_data.point_clouds[0,3], [0, 0, 0])
+        np.testing.assert_array_equal(lidar_data.point_clouds[0,3], [np.nan, np.nan, np.nan])
         np.testing.assert_array_equal(lidar_data.point_clouds[0,35], [26.67838478088379, 0.3280501961708069, -9.796014785766602])
         np.testing.assert_array_equal(lidar_data.point_clouds[2,-1], [5.671111583709717, 9.91832280305971e-7, 2.6444828510284424])
         np.testing.assert_equal(lidar_data.point_clouds.shape[0], 3)
@@ -29,7 +29,7 @@ class TestLiDARData(unittest.TestCase):
 
         point_cloud_simple = np.array([[[ 0,  1, 2],
                                         [-1, -3, 4]]])
-        lidar_data = LiDARData("robot", [0], point_cloud_simple, CoordinateFrame.NED)
+        lidar_data = LiDARData("robot", [0], point_cloud_simple, None, CoordinateFrame.NED)
         lidar_data.to_FLU_frame()
 
         # Assert that the transformation completed successfully
