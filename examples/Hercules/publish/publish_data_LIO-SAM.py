@@ -22,11 +22,10 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Convert LiDAR data to FLU frame
-    lidar_data.to_FLU_frame()
+    # lidar_data.to_FLU_frame()
     lidar_data.calculate_point_channels(32, -25, 25)
 
-    # Convert GT Pose to FLU frame as well
-    pose_data.to_FLU_frame()
+    # Convert GT Pose to Identity for visualization
     pose_data.shift_to_start_at_identity()
 
     # Crop the data
