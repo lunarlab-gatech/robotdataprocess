@@ -210,7 +210,8 @@ class LiDARData(Data):
 
         NOTE: Currently uses an unordered point cloud.
         NOTE: Does not publish intensity, and assumes all points collected at same time (only holds true for simulation)
-        NOTE: Assumes channels data is provided
+        NOTE: Assumes channels data is provided.
+        NOTE: Assumes intensity of 255 for all points.
         """
 
         # Check to make sure index is within data bounds
@@ -250,26 +251,28 @@ class LiDARData(Data):
                 PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
                 PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
                 PointField(name="ring", offset=12, datatype=PointField.FLOAT32, count=1),
-                PointField(name="time", offset=16, datatype=PointField.FLOAT32, count=1)
+                PointField(name="time", offset=16, datatype=PointField.FLOAT32, count=1),
+                PointField(name="intensity", offset=20, datatype=PointField.FLOAT32, count=1)
             ]
-            pc_msg.point_step = 20
+            pc_msg.point_step = 24
             pc_msg.row_step = pc_msg.point_step * num_points
 
             # Fill in the remaining data
             pc_msg.is_bigendian = True if sys.byteorder == "big" else False
             pc_msg.is_dense = not np.isnan(self.point_clouds[i]).any()
 
-            # Calculate time (NOTE: Time assumed to be zero for all points)
+            # Calculate time and intensity (NOTE: Time is assumed to be zero & intensity assumed to be 255 for all points)
             time = np.zeros((num_points, 1), dtype=np.float32)
+            intensity = np.ones((num_points, 1), dtype=np.float32) * 255
 
             # Append channel and time onto our point cloud to get (T, N, 5)
             if self.channels is not None:
-                pc_aug = np.concatenate([self.point_clouds[i], self.channels[i][:, np.newaxis], time], axis=-1)
+                pc_aug = np.concatenate([self.point_clouds[i], self.channels[i][:, np.newaxis], time, intensity], axis=-1)
             else:
                 raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
 
             # Pack points into binary
-            fmt = "<fffff" if not pc_msg.is_bigendian else ">fffff"
+            fmt = "<ffffff" if not pc_msg.is_bigendian else ">ffffff"
             pc_msg.data = b"".join(struct.pack(fmt, *p) for p in pc_aug)
             return pc_msg
 

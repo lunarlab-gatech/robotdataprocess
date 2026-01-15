@@ -16,18 +16,18 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis.txt', '' + robot_name + '/base_link', 
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis.txt', 'base_link', 
                                      CoordinateFrame.NED, nine_axis=True)
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'global', 'body', CoordinateFrame.NED, False)
-    lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "body", CoordinateFrame.NED)
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
+    lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
-    # lidar_data.to_FLU_frame()
-    # lidar_data.visualize()
+    # Convert LiDAR data to FLU frame
+    lidar_data.to_FLU_frame()
     lidar_data.calculate_point_channels(32, -25, 25)
 
-    # # Convert data from NED frame to ROS frame (and make sure it is at the identity)
-    # pose_data.to_FLU_frame()
-    # pose_data.shift_to_start_at_identity()
+    # Convert GT Pose to FLU frame as well
+    pose_data.to_FLU_frame()
+    pose_data.shift_to_start_at_identity()
 
     # Crop the data
     if crop_data:
