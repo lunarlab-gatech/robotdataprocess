@@ -67,7 +67,8 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
     print("\n2.c Loading LiDAR data...")
     lidar_data = LiDARData.from_npy_files(
         input_path / 'lidar',
-        'lidar_sensor_0' #change this for more robots
+        'lidar_sensor_0', #change this for more robots
+        CoordinateFrame.FLU
     )
     print(f"   Loaded {lidar_data.len()} point clouds")
 
@@ -105,15 +106,15 @@ def main():
     # ========== CONFIGURE THESE PATHS ==========
 
     # Robot name (used for frame IDs in the bag)
-    robot_name = 'Husky1'
+    robot_name = 'Drone1'
     dataset_num = "V2.1.0"
 
     # Input directory containing your data
     user = getpass.getuser()
-    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    input_dir = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 

@@ -2,7 +2,8 @@ from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import CoordinateFrame, LiDARData
+from robotdataprocess import CoordinateFrame, LiDARData, ROSMsgLibType
+import struct
 import unittest
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -43,6 +44,76 @@ class TestLiDARData(unittest.TestCase):
         print(folder_path)
         lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
         lidar_data.visualize(testing=True)
+
+    # Only testing ROSBAGS right now
+    def test_get_ros_msg_type(self):
+        """ Ensure we get the correct ROS message type. """
+
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        print(folder_path)
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        ros_msg_type = lidar_data.get_ros_msg_type(ROSMsgLibType.ROSBAGS)
+        self.assertEqual(ros_msg_type, 'sensor_msgs/msg/PointCloud2')
+
+    def test_get_ros_msg(self):
+        """ Ensure we can create a ROS PointCloud2 message correctly. """
+
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        print(folder_path)
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+
+        # Get a ROS message for the first point cloud (index 0)
+        ros_msg = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+        # Validate header
+        self.assertEqual(ros_msg.header.frame_id, "robot")
+        self.assertEqual(ros_msg.header.stamp.sec, 0)
+        self.assertEqual(ros_msg.header.stamp.nanosec, 100000000)  # 0.1 seconds = 100000000 nanoseconds
+
+        # Validate point cloud structure
+        self.assertEqual(ros_msg.height, 1)
+        self.assertEqual(ros_msg.width, lidar_data.point_clouds[0].shape[0])  # Number of points
+        self.assertEqual(ros_msg.is_bigendian, False)
+        self.assertEqual(ros_msg.is_dense, True)
+        self.assertEqual(ros_msg.point_step, 12) 
+        self.assertEqual(ros_msg.row_step, 12 * lidar_data.point_clouds[0].shape[0])
+
+        # Validate fields (x, y, z)
+        self.assertEqual(len(ros_msg.fields), 3)
+        self.assertEqual(ros_msg.fields[0].name, 'x')
+        self.assertEqual(ros_msg.fields[0].offset, 0)
+        self.assertEqual(ros_msg.fields[0].datatype, 7)  # FLOAT32
+        self.assertEqual(ros_msg.fields[0].count, 1)
+        self.assertEqual(ros_msg.fields[1].name, 'y')
+        self.assertEqual(ros_msg.fields[1].offset, 4)
+        self.assertEqual(ros_msg.fields[2].name, 'z')
+        self.assertEqual(ros_msg.fields[2].offset, 8)
+
+        # Validate data array length
+        expected_data_length = lidar_data.point_clouds[0].shape[0] * 12  # num_points * point_step
+        self.assertEqual(len(ros_msg.data), expected_data_length)
+
+        # Validate actual point cloud values by decoding the binary data
+        binary_data = bytes(ros_msg.data)
+        num_points = ros_msg.width
+        unpacked_points = []
+        for i in range(num_points):
+            offset = i * 12  # 12 bytes per point (3 floats × 4 bytes)
+            x, y, z = struct.unpack('<fff', binary_data[offset:offset+12])  # little-endian floats
+            unpacked_points.append([x, y, z])
+        unpacked_points = np.array(unpacked_points)
+
+        # Compare unpacked points with original point cloud data
+        np.testing.assert_allclose(unpacked_points, lidar_data.point_clouds[0].astype(np.float32))
+
+        # Verify specific known points
+        np.testing.assert_array_almost_equal(unpacked_points[35], [26.67838478, 0.3280502, -9.79601479], decimal=5)
+
+        # Test another index to ensure timestamps are handled correctly
+        ros_msg_2 = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 1)
+        self.assertEqual(ros_msg_2.header.stamp.sec, 0)
+        self.assertEqual(ros_msg_2.header.stamp.nanosec, 600000000)  # 0.6 seconds
+
 
 if __name__ == "__main__":
     unittest.main()

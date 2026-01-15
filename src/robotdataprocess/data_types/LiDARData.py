@@ -65,6 +65,7 @@ class LiDARData(Data):
 
         # Check the point cloud shape from the first file
         first_pc = np.load(all_npy_files_sorted[0], mmap_mode='r')
+        # check shape
         assert len(first_pc.shape) == 2
         assert first_pc.shape[1] == 3
 
@@ -141,13 +142,12 @@ class LiDARData(Data):
         ani = FuncAnimation(fig, update, frames=self.len(), interval=interval_ms, blit=False, repeat=False)
         if not testing:
             plt.show()
-        return cls(frame_id, timestamps_sorted, point_clouds)
 
     # =========================================================================
     # =================== ROS Message Conversion Methods =====================
     # =========================================================================
 
-    @staticmethod
+    @staticmethod 
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
         """ Return the __msgtype__ for a PointCloud2 msg. """
 
