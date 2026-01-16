@@ -31,6 +31,7 @@ class TestRosPublisher(unittest.TestCase):
                 self.subscription = self.create_subscription(topic_class, topic_name, self.callback, 10)
                 self.msg_to_dict_fn = msg_to_dict_fn
                 self.received = []
+                self.get_logger().info(f"Listener initialized!")
             
             # Generic callback function to save recieved messages
             def callback(self, msg):
@@ -40,7 +41,7 @@ class TestRosPublisher(unittest.TestCase):
         
         # Launch the publisher we initialize rclpy (otherwise rclpy.init breaks process forking for ROS2)
         p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [None], [1], 
-                                                                ROSMsgLibType.RCLPY, False, True, 0.0))
+                                                                ROSMsgLibType.RCLPY, False, False, 0.0, True))
         p.start()
 
         # Initialize ROS2 and create the listener node
@@ -110,11 +111,14 @@ class TestRosPublisher(unittest.TestCase):
             np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
 
-        # Test that we can send data over ROS2 and get it back successfully
-        self.util_ROS2_test(image_data, Image, '/cam0/image_raw', msg_to_dict_fn, assert_data_dict_equal)
+        # # Test that we can send data over ROS2 and get it back successfully
+        p = Process(target=self.util_ROS2_test, args=(image_data, Image, 
+                                '/cam0/image_raw', msg_to_dict_fn, assert_data_dict_equal))
+        p.start()
+        p.join()
 
         # ================== Test LiDARData ================== 
-        # Create an LiDARData object
+        # Create a LiDARData object
         file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher', 
                          'test__run_ROS2_publisher_process', 'LiDARData').absolute()
         lidar_data = LiDARData.from_npy_files(file_path, "lidar_link", CoordinateFrame.NED)
@@ -184,7 +188,9 @@ class TestRosPublisher(unittest.TestCase):
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
     
         # Test that we can send data over ROS2 and get it back successfully
-        self.util_ROS2_test(lidar_data, PointCloud2, '/points_raw', msg_to_dict_fn, assert_data_dict_equal)
+        p = Process(target=self.util_ROS2_test, args=(lidar_data, PointCloud2, '/points_raw', msg_to_dict_fn, assert_data_dict_equal))
+        p.start()
+        p.join()
  
 if __name__ == "__main__":
     unittest.main()

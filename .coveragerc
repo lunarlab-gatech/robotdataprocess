@@ -2,6 +2,9 @@
 branch = False
 source = robotdataprocess
 concurrency = multiprocessing
+disable_warnings =
+    module-not-measured
+    no-data-collected
 
 [paths]
 source =
