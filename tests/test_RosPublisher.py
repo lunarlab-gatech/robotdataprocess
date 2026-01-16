@@ -87,18 +87,15 @@ class TestRosPublisher(unittest.TestCase):
 
         # Write msg_to_dict function
         def msg_to_dict_fn(msg: Image) -> dict:
-            try:
-                image: NDArray = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-                return {
-                    "image": image,
-                    "height": msg.height,
-                    "width": msg.width,
-                    "encoding": msg.encoding,
-                    "frame_id": msg.header.frame_id,
-                    "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-                }
-            except Exception as e:
-                print(f"Failed to convert image: {e}")
+            image: NDArray = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            return {
+                "image": image,
+                "height": msg.height,
+                "width": msg.width,
+                "encoding": msg.encoding,
+                "frame_id": msg.header.frame_id,
+                "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            }
 
         # Write assert_data_dict_equal function
         def assert_data_dict_equal(data_sent: ImageData, matched_index: int, msg_recieved: dict):
