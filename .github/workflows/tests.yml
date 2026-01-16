@@ -11,7 +11,7 @@ jobs:
   python-tests:
     name: "Build & Test Pure Python Code"
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
     env:
       SKIP_ROS2_TESTS: "True"
 
@@ -43,7 +43,7 @@ jobs:
   ros2-tests:
     name: "Build & Test ROS2 Python Code"
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 5
     container:
       image: dlittleman/robotdataprocess_ros2_humble:0.2
       options: --user root  # optional, helps avoid permission issues
