@@ -101,3 +101,8 @@ jobs:
         uses: coverallsapp/github-action@v2.3.6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Merged Coverage File
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-final
+          path: .coverage
