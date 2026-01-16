@@ -19,7 +19,8 @@ import unittest
 class TestRosPublisher(unittest.TestCase):
 
     def util_ROS2_test(self, data: Data, topic_class: Any, topic_name: str, 
-                       msg_to_dict_fn: Callable, assert_data_dict_equal: Callable):
+                       msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
+                       verbose: bool = False):
         
         rclpy = ModuleImporter.get_module('rclpy')
         Node = ModuleImporter.get_module_attribute('rclpy.node', 'Node')
@@ -41,7 +42,7 @@ class TestRosPublisher(unittest.TestCase):
         
         # Launch the publisher we initialize rclpy (otherwise rclpy.init breaks process forking for ROS2)
         p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [None], [1], 
-                                                                ROSMsgLibType.RCLPY, False, False, 0.0, True))
+                                                                ROSMsgLibType.RCLPY, False, verbose, 0.0, True))
         p.start()
 
         # Initialize ROS2 and create the listener node
@@ -188,7 +189,7 @@ class TestRosPublisher(unittest.TestCase):
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
     
         # Test that we can send data over ROS2 and get it back successfully
-        p = Process(target=self.util_ROS2_test, args=(lidar_data, PointCloud2, '/points_raw', msg_to_dict_fn, assert_data_dict_equal))
+        p = Process(target=self.util_ROS2_test, args=(lidar_data, PointCloud2, '/points_raw', msg_to_dict_fn, assert_data_dict_equal, True))
         p.start()
         p.join()
  
