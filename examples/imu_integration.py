@@ -5,7 +5,7 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 
 def main():
     # Enter desired configuration here
-    dataset_num = "V2.2.1"
+    dataset_num = "V2.3.C.Temp"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_Datasets/' + dataset_num + '/data'
     robot_name = "Husky1"
@@ -14,7 +14,7 @@ def main():
     input_path = Path(input_dir).absolute()
 
     # Extract IMU data and GT Pose data
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis.txt', robot_name + '/base_link', CoordinateFrame.NED, nine_axis=True)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', robot_name + '/base_link', CoordinateFrame.NED, nine_axis=True)
     gt_odom_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', robot_name + '/base_link', CoordinateFrame.NED, False)
 
     # Convert imu data to odometry via integration and visualize compared to GT
