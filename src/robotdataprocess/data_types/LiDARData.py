@@ -91,7 +91,13 @@ class LiDARData(Data):
     # =========================================================================  
 
     def calculate_point_channels(self, num_channels: int, v_min_angle: float, v_max_angle: float) -> None:
-        """ Calculate channel numbers for each point """
+        """ 
+        Calculate channel numbers for each point.
+         
+        NOTE: This assumes that lasers are evenly spaced within the angular range and that
+        the first laser fires at v_min_angle and the last laser fires at v_max_angle.
+        NOTE: Invalid points (NaNs) get a channel of -1.
+        """
 
         if self.channels is not None:
             raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
@@ -100,17 +106,20 @@ class LiDARData(Data):
         y = self.point_clouds[..., 1]
         z = self.point_clouds[..., 2]
 
-        # Compute vertical angle in degrees
+        # Compute vertical angle per point in degrees
         horiz_dist = np.sqrt(x**2 + y**2)
         vertical_angle = np.arctan2(z, horiz_dist) * 180.0 / np.pi
 
-        # Map angle to channel index
-        angle_range = v_max_angle - v_min_angle
-        channels = (vertical_angle - v_min_angle) / angle_range * (num_channels - 1)
+        # Calculate laser line angles
+        laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
 
-        # Round and clip to valid channel numbers
-        channels = np.round(channels).astype(int)
-        channels = np.clip(channels, 0, num_channels - 1)
+        # Assign points to laser line that is closest to its angle
+        angle_diff = np.abs(vertical_angle[..., None] - laser_angles)
+        channels = np.argmin(angle_diff, axis=-1)
+
+        # Any point where x, y, or z is NaN gets a channel of -1
+        nan_mask = np.isnan(x) | np.isnan(y) | np.isnan(z)
+        channels[nan_mask] = -1
         self.channels = channels
 
     # =========================================================================

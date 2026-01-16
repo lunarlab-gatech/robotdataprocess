@@ -36,6 +36,11 @@ class TestLiDARData(unittest.TestCase):
         expected_pc = np.array([[[ 0, -1, -2], [-1,  3, -4]]])
         np.testing.assert_array_equal(lidar_data.point_clouds, expected_pc)
 
+        # Make sure it doesn't change when we call it again
+        lidar_data.to_FLU_frame()
+        expected_pc = np.array([[[ 0, -1, -2], [-1,  3, -4]]])
+        np.testing.assert_array_equal(lidar_data.point_clouds, expected_pc)
+
     def test_visualize(self):
         """ Just ensure that this code doesn't crash. """
 
@@ -43,6 +48,26 @@ class TestLiDARData(unittest.TestCase):
         print(folder_path)
         lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
         lidar_data.visualize(testing=True)
+    
+    def test_calculate_point_channels(self):
+        """ Ensure the scan line (channels) are calculated correctly for each point"""
+        point_cloud_simple = np.array([[[ 0,   1,  2],
+                                        [-1,  -3,  4],
+                                        [ 4,   1,  2],
+                                        [ 4,  10,  2],
+                                        [ 4,  10,  1],
+                                        [ 4,  10,  0]],
+                                       [[ 4,  10, -2],
+                                        [ 4,  10, -1],
+                                        [ 0,   1, -2],
+                                        [10,  10, -1],
+                                        [10,  10, -3],
+                                        [np.nan, np.nan, np.nan]]])
+        lidar_data = LiDARData("robot", [0], point_cloud_simple, None, CoordinateFrame.FLU)
+        lidar_data.calculate_point_channels(41, -20, 20)
+
+        np.testing.assert_array_equal(lidar_data.channels, [[40, 40, 40, 31, 25, 20],
+                                                            [ 9, 15, 0, 16, 8, -1]])
 
 if __name__ == "__main__":
     unittest.main()
