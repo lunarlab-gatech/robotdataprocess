@@ -9,7 +9,7 @@ from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
-from sensor_msgs_py import point_cloud2
+import struct
 import time
 from typing import Any, Callable
 from numpy.typing import NDArray
@@ -126,15 +126,39 @@ class TestRosPublisher(unittest.TestCase):
         CvBridge = ModuleImporter.get_module_attribute('cv_bridge', 'CvBridge')
         bridge = CvBridge()
         def msg_to_dict_fn(msg: PointCloud2) -> dict:
-            points_list = list(point_cloud2.read_points(msg, 
-                                field_names=['x','y','z', 'ring', 'time', 'intensity'], skip_nans=False))
-            points_np = np.array(points_list, dtype=np.float32)  # shape (N, 6)
 
-            xyz = points_np[:, 0:3]      
-            ring = points_np[:, 3].astype(np.int32) 
-            time = points_np[:, 4]
-            intensity = points_np[:, 5]
+            # Map ROS datatype to struct format
+            datatype_to_struct = {
+                7: 'f',  # FLOAT32
+                4: 'I',  # UINT32
+                2: 'B',  # UINT8
+            }
 
+            # Build struct format for all fields in the message
+            struct_endian = '>' if msg.is_bigendian else '<'
+            struct_fmt = struct_endian
+            for f in msg.fields:
+                if f.datatype not in datatype_to_struct:
+                    raise NotImplementedError(f"Datatype {f.datatype} for field '{f.name}' not supported")
+                struct_fmt += datatype_to_struct[f.datatype]
+
+            # Extract all points
+            points = []
+            for i in range(0, len(msg.data), msg.point_step):
+                values = struct.unpack(struct_fmt, msg.data[i:i+msg.point_step])
+                points.append(values)
+            points_np = np.array(points, dtype=np.float32)
+
+            # Create a dict mapping field names -> column indices
+            field_indices = {f.name: idx for idx, f in enumerate(msg.fields)}
+
+            # Now we can index by name
+            xyz = points_np[:, [field_indices['x'], field_indices['y'], field_indices['z']]]
+            ring = points_np[:, field_indices['ring']].astype(np.int32)
+            time = points_np[:, field_indices['time']]
+            intensity = points_np[:, field_indices['intensity']]
+
+            # Return important data in a dictionary
             return {
                 "point_clouds": xyz,
                 "channels": ring,
