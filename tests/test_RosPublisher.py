@@ -9,7 +9,7 @@ from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInM
 from robotdataprocess.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 import time
-from typing import Any
+from typing import Any, Callable
 from numpy.typing import NDArray
 import unittest
 
@@ -17,7 +17,7 @@ import unittest
 class TestRosPublisher(unittest.TestCase):
 
     def util_ROS2_test(self, data: Data, topic_class: Any, topic_name: str, 
-                       msg_to_dict_fn: function, assert_data_dict_equal: function):
+                       msg_to_dict_fn: Callable, assert_data_dict_equal: Callable):
         
         rclpy = ModuleImporter.get_module('rclpy')
         Node = ModuleImporter.get_module_attribute('rclpy.node', 'Node')
