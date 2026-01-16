@@ -1,68 +1,51 @@
 from copy import deepcopy
-import cv2
-from decimal import Decimal
 from multiprocessing import Process
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import CoordinateFrame
-from robotdataprocess.data_types.Data import ROSMsgLibType
+from robotdataprocess.data_types.Data import Data, ROSMsgLibType
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
-from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 import time
+from typing import Any
 from numpy.typing import NDArray
 import unittest
 
 @unittest.skipIf(os.getenv("SKIP_ROS2_TESTS") == "True", "ROS2 not installed")
 class TestRosPublisher(unittest.TestCase):
-    
-    def test__run_ROS2_publisher_process(self):
-        """ Test that we can publish to ROS2 without losing data."""
 
-        # Create an ImageDataInMemory object
-        file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher', 'test__run_ROS2_publisher_process').absolute()
-        image_data = ImageDataInMemory.from_image_files(file_path, '/cam0')
-
-        # Lazily import ROS2 libraries
-        import rclpy
-        from rclpy.node import Node
-        from sensor_msgs.msg import Image
-        from cv_bridge import CvBridge
+    def util_ROS2_test(self, data: Data, topic_class: Any, topic_name: str, 
+                       msg_to_dict_fn: function, assert_data_dict_equal: function):
+        
+        rclpy = ModuleImporter.get_module('rclpy')
+        Node = ModuleImporter.get_module_attribute('rclpy.node', 'Node')
+        CvBridge = ModuleImporter.get_module_attribute('cv_bridge', 'CvBridge')
 
         # Create a ROS2 node to subscribe to the published topic
-        class ImageListener(Node):
+        class Listener(Node):
             def __init__(self):
-                super().__init__('image_listener')
+                super().__init__('listener')
                 self.bridge = CvBridge()
-                self.subscription = self.create_subscription(Image, '/cam0/image_raw', self.image_callback, 10)
+                self.subscription = self.create_subscription(topic_class, topic_name, self.callback, 10)
+                self.msg_to_dict_fn = msg_to_dict_fn
                 self.received = []
+            
+            # Generic callback function to save recieved messages
+            def callback(self, msg):
+                self.received.append(msg_to_dict_fn(msg))
+                self.get_logger().info(f"Received msg {len(self.received)-1} at time {self.received[-1]['stamp']}")
 
-            def image_callback(self, msg: Image):
-                try:
-                    # Convert ROS Image message to OpenCV image
-                    image: NDArray = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-                    self.received.append({
-                        "image": image,
-                        "height": msg.height,
-                        "width": msg.width,
-                        "encoding": msg.encoding,
-                        "frame_id": msg.header.frame_id,
-                        "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-                    })
-                    self.get_logger().info(f"Received image {len(self.received)-1} at time {msg.header.stamp.sec}.{msg.header.stamp.nanosec:09d}")
-
-                except Exception as e:
-                    self.get_logger().error(f"Failed to convert image: {e}")
-
+        
         # Launch the publisher we initialize rclpy (otherwise rclpy.init breaks process forking for ROS2)
-        p = Process(target=publish_data_ROS_multiprocess, args=([image_data], ['/cam0/image_raw'], [None], [1], ROSMsgLibType.RCLPY, False, True, 0.0))
+        p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [None], [1], 
+                                                                ROSMsgLibType.RCLPY, False, True, 0.0))
         p.start()
 
         # Initialize ROS2 and create the listener node
         rclpy.init()
-        node = ImageListener()
+        node = Listener()
 
         # Start listening here and meanwhile launch the publisher 
         try:
@@ -71,22 +54,18 @@ class TestRosPublisher(unittest.TestCase):
             while rclpy.ok() and (time.time() - start_time) < timeout_sec:
                 rclpy.spin_once(node, timeout_sec=0.1)
 
-            # Make sure we recieved at least one image
+            # Make sure we recieved at least one message
             self.assertTrue(len(node.received) > 0)
 
-            # Make sure data is correct for each image we recieved
-            image_data_ts_floats = image_data.timestamps.astype(float)
+            # Make sure data is correct for each message we recieved
+            data_ts_floats = data.timestamps.astype(float)
             for j in range(len(node.received)):
                 stamp = node.received[j]['stamp']
-                matches = np.where(np.isclose(image_data_ts_floats, stamp, atol=1e-6))[0]
+                matches = np.where(np.isclose(data_ts_floats, stamp, atol=1e-6))[0]
                 if matches.size > 0:
+                    # Ensure that data matches the recieved msg dictionary
                     matched_index = matches[0]
-                    np.testing.assert_array_equal(image_data.images[matched_index], node.received[j]["image"])
-                    np.testing.assert_equal(image_data.height, node.received[j]["height"])
-                    np.testing.assert_equal(image_data.width, node.received[j]["width"])
-                    np.testing.assert_equal(image_data.encoding, ImageData.ImageEncoding.from_ros_str(node.received[j]["encoding"]))
-                    np.testing.assert_equal(image_data.frame_id, node.received[j]["frame_id"])
-                    np.testing.assert_almost_equal(float(image_data.timestamps[matched_index]), node.received[j]["stamp"])
+                    assert_data_dict_equal(data, matched_index, node.received[j])
                 else:
                     self.fail("Recieved ROS Message has a timestamp that doesn't match any of the sent messages!")
 
@@ -94,6 +73,44 @@ class TestRosPublisher(unittest.TestCase):
             # ---------- Guaranteed cleanup ----------
             node.destroy_node()
             rclpy.shutdown()
+
         
+    def test__run_ROS2_publisher_process(self):
+        """ Test that we can publish to ROS2 without losing data."""
+
+        # Create an ImageDataInMemory object
+        file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher', 'test__run_ROS2_publisher_process').absolute()
+        image_data = ImageDataInMemory.from_image_files(file_path, '/cam0')
+
+        # Lazily import ROS2 libraries
+        Image = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
+
+        # Write msg_to_dict function
+        def msg_to_dict_fn(msg: Image) -> dict:
+            try:
+                image: NDArray = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+                return {
+                    "image": image,
+                    "height": msg.height,
+                    "width": msg.width,
+                    "encoding": msg.encoding,
+                    "frame_id": msg.header.frame_id,
+                    "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                }
+            except Exception as e:
+                self.get_logger().error(f"Failed to convert image: {e}")
+
+        # Write assert_data_dict_equal function
+        def assert_data_dict_equal(data_sent: ImageData, matched_index: int, msg_recieved: dict):
+            np.testing.assert_array_equal(data_sent.images[matched_index], msg_recieved["image"])
+            np.testing.assert_equal(data_sent.height, msg_recieved["height"])
+            np.testing.assert_equal(data_sent.width, msg_recieved["width"])
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_recieved["encoding"]))
+            np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])
+            np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
+
+        # Test that we can send data over ROS2 and get it back successfully
+        self.util_ROS2_test(image_data, Image, '/cam0/image_raw', msg_to_dict_fn, assert_data_dict_equal)
+ 
 if __name__ == "__main__":
     unittest.main()
