@@ -98,7 +98,7 @@ class TestRosPublisher(unittest.TestCase):
                     "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
                 }
             except Exception as e:
-                self.get_logger().error(f"Failed to convert image: {e}")
+                print(f"Failed to convert image: {e}")
 
         # Write assert_data_dict_equal function
         def assert_data_dict_equal(data_sent: ImageData, matched_index: int, msg_recieved: dict):
