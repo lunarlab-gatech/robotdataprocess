@@ -192,6 +192,13 @@ class TestRosPublisher(unittest.TestCase):
         p = Process(target=self.util_ROS2_test, args=(lidar_data, PointCloud2, '/points_raw', msg_to_dict_fn, assert_data_dict_equal, True))
         p.start()
         p.join()
+
+        # ================== Test ImuData ================== 
+        # Create a ImuData object
+        # file_path = Path(Path('.'), 'tests', 'files', os.path.basename(__file__), 
+        #                  'test__run_ROS2_publisher_process', 'LiDARData').absolute()
+        # lidar_data = LiDARData.from_npy_files(file_path, "lidar_link", CoordinateFrame.NED)
+        # lidar_data.calculate_point_channels(32, -25, 25)
  
 if __name__ == "__main__":
     unittest.main()

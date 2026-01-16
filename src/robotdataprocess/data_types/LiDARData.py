@@ -115,6 +115,23 @@ class LiDARData(Data):
     #         np.save(output_folder_path / f"{self.timestamps[i]}.npy", pc)
     #         pbar.update()
     #     pbar.close()
+
+    # =========================================================================
+    # ========================= Reproducible Loading ========================== 
+    # =========================================================================  
+    def get_point_cloud_at_T(self, T: int):
+        """ 
+        Gets the point cloud at time T and ensures all necessary transformations are applied.
+        This is a safe copy of the memmapped array, meaning it can be transformed and changed. 
+        """
+
+        pc = self.point_clouds[T].astype(np.float32, copy=True) 
+
+        # Mask invalid points (all zeros) and set to NaNs
+        mask_invalid = (pc == 0.0).all(axis=1) | np.isnan(pc).all(axis=1)
+        pc[mask_invalid] = np.nan
+
+        return pc
     
     # =========================================================================
     # ========================= Manipulation Methods ========================== 
@@ -137,11 +154,9 @@ class LiDARData(Data):
         # Compute channels
         self.channels = []
         pbar = tqdm.tqdm(total=self.len(), desc="Calculating Point Channels...", unit=" frames")
-        for pc in self.point_clouds:
-            # Mask invalid points (all zeros) and set to NaNs
-            mask_invalid = (pc == 0.0).all(axis=1)
-            valid_pts = pc.astype(np.float32)  # safe copy for computation
-            valid_pts[mask_invalid] = np.nan
+        for i in range(self.len()):
+            # Get point cloud
+            pc = self.get_point_cloud_at_T(i)
 
             # Extract dimensions
             x = pc[:, 0]
@@ -157,6 +172,7 @@ class LiDARData(Data):
             channels = np.argmin(angle_diff, axis=-1)
 
             # Any point where x, y, or z is NaN gets a channel of -1
+            mask_invalid = np.isnan(pc).any(axis=1)
             channels[mask_invalid] = -1
             self.channels.append(channels.astype(np.int16))
             pbar.update()
@@ -193,14 +209,11 @@ class LiDARData(Data):
         scatter = ax.scatter([], [], [], s=4, cmap='viridis')
         def update(frame: int):
             # Load safe copy of memmap array for plotting
-            pc_frame = self.point_clouds[frame]
-            pts = pc_frame.astype(np.float32, copy=True) 
+            pts = self.get_point_cloud_at_T(frame)
 
-            # Mask invalid points: NaNs or all zeros
-            zero_mask = (pts == 0.0).all(axis=1)
+            # Mask invalid points
             nan_mask = np.isnan(pts).any(axis=1)
-            valid_mask = ~(zero_mask | nan_mask)
-            pts = pts[valid_mask]
+            pts = pts[~nan_mask]
 
             # Update the plot
             x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
@@ -251,8 +264,8 @@ class LiDARData(Data):
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
         
-         # Make a temporary copy so we can safely modify it
-        pts = self.point_clouds[i].astype(np.float32, copy=True)
+        # Make a temporary copy so we can safely modify it
+        pts = self.get_point_cloud_at_T(i)
 
         # Convert [0,0,0] points to NaN
         mask_zeros = (pts == 0.0).all(axis=1)
