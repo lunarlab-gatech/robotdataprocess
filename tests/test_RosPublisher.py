@@ -21,13 +21,11 @@ class TestRosPublisher(unittest.TestCase):
         
         rclpy = ModuleImporter.get_module('rclpy')
         Node = ModuleImporter.get_module_attribute('rclpy.node', 'Node')
-        CvBridge = ModuleImporter.get_module_attribute('cv_bridge', 'CvBridge')
 
         # Create a ROS2 node to subscribe to the published topic
         class Listener(Node):
             def __init__(self):
                 super().__init__('listener')
-                self.bridge = CvBridge()
                 self.subscription = self.create_subscription(topic_class, topic_name, self.callback, 10)
                 self.msg_to_dict_fn = msg_to_dict_fn
                 self.received = []
@@ -86,8 +84,10 @@ class TestRosPublisher(unittest.TestCase):
         Image = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
 
         # Write msg_to_dict function
+        CvBridge = ModuleImporter.get_module_attribute('cv_bridge', 'CvBridge')
+        bridge = CvBridge()
         def msg_to_dict_fn(msg: Image) -> dict:
-            image: NDArray = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            image: NDArray = bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             return {
                 "image": image,
                 "height": msg.height,
