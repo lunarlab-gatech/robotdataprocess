@@ -217,8 +217,8 @@ class LiDARData(Data):
         Raises:
             ValueError: If i is outside the data bounds.
 
-        NOTE: Currently uses an unordered point cloud.
-        NOTE: Does not publish intensity, and assumes all points collected at same time (only holds true for simulation)
+        NOTE: Currently publishes an unordered point cloud.
+        NOTE: Assumes all points are collected at same time (likely false in the real-world).
         NOTE: Assumes channels data is provided.
         NOTE: Assumes intensity of 255 for all points.
         """
