@@ -119,19 +119,22 @@ class LiDARData(Data):
     # =========================================================================
     # ========================= Reproducible Loading ========================== 
     # =========================================================================  
-    def get_point_cloud_at_T(self, T: int):
+    def get_point_cloud_at_index(self, index: int):
         """ 
-        Gets the point cloud at time T and ensures all necessary transformations are applied.
+        Gets the point cloud at index T and ensures all necessary transformations are applied.
         This is a safe copy of the memmapped array, meaning it can be transformed and changed. 
         """
 
-        pc = self.point_clouds[T].astype(np.float32, copy=True) 
+        pc = self.point_clouds[index].astype(np.float32, copy=True) 
+        channels = None
+        if self.channels is not None:
+            channels = self.channels[index].astype(np.int16, copy=True)
 
         # Mask invalid points (all zeros) and set to NaNs
         mask_invalid = (pc == 0.0).all(axis=1) | np.isnan(pc).all(axis=1)
         pc[mask_invalid] = np.nan
 
-        return pc
+        return pc, channels
     
     # =========================================================================
     # ========================= Manipulation Methods ========================== 
@@ -152,11 +155,11 @@ class LiDARData(Data):
         laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
 
         # Compute channels
-        self.channels = []
+        channels = []
         pbar = tqdm.tqdm(total=self.len(), desc="Calculating Point Channels...", unit=" frames")
         for i in range(self.len()):
             # Get point cloud
-            pc = self.get_point_cloud_at_T(i)
+            pc, _ = self.get_point_cloud_at_index(i)
 
             # Extract dimensions
             x = pc[:, 0]
@@ -169,14 +172,15 @@ class LiDARData(Data):
 
             # Assign points to laser line that is closest to its angle
             angle_diff = np.abs(vertical_angle[..., None] - laser_angles)
-            channels = np.argmin(angle_diff, axis=-1)
+            chan = np.argmin(angle_diff, axis=-1)
 
             # Any point where x, y, or z is NaN gets a channel of -1
             mask_invalid = np.isnan(pc).any(axis=1)
-            channels[mask_invalid] = -1
-            self.channels.append(channels.astype(np.int16))
+            chan[mask_invalid] = -1
+            channels.append(chan.astype(np.int16))
             pbar.update()
 
+        self.channels = channels
         pbar.close()
 
     # =========================================================================
@@ -209,18 +213,18 @@ class LiDARData(Data):
         scatter = ax.scatter([], [], [], s=4, cmap='viridis')
         def update(frame: int):
             # Load safe copy of memmap array for plotting
-            pts = self.get_point_cloud_at_T(frame)
+            pts, channels = self.get_point_cloud_at_index(frame)
 
             # Mask invalid points
             nan_mask = np.isnan(pts).any(axis=1)
             pts = pts[~nan_mask]
+            channels = channels[~nan_mask]
 
             # Update the plot
             x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
-            scatter.set_offsets(np.c_[x, y])  # update X and Y
-            scatter.set_3d_properties(z, zdir='z')  # update Z
-            if self.channels is not None:
-                scatter.set_array(self.channels)
+            scatter._offsets3d = (x, y, z)  # update Z
+            if channels is not None:
+                scatter.set_array(channels)
             else:
                 scatter.set_array(z)  # Set color based on Z
             title.set_text(f"LiDAR Frame {frame+1}/{self.len()-1}")
@@ -265,7 +269,7 @@ class LiDARData(Data):
             raise ValueError(f"Index {i} is out of bounds!")
         
         # Make a temporary copy so we can safely modify it
-        pts = self.get_point_cloud_at_T(i)
+        pts, channels = self.get_point_cloud_at_index(i)
 
         # Convert [0,0,0] points to NaN
         mask_zeros = (pts == 0.0).all(axis=1)
@@ -319,8 +323,8 @@ class LiDARData(Data):
             intensity = np.ones((num_points, 1), dtype=np.float32) * 255
 
             # Append channel and time onto our point cloud to get (T, N, 5)
-            if self.channels is not None:
-                pc_aug = np.concatenate([pts, self.channels[i][:, np.newaxis], time, intensity], axis=-1)
+            if channels is not None:
+                pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
             else:
                 raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
 

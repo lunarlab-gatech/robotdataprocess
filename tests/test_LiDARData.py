@@ -19,9 +19,9 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(lidar_data.timestamps.astype(float), [0.1, 0.6, 1.1])
         np.testing.assert_equal(lidar_data.frame, CoordinateFrame.NED)
         np.testing.assert_equal(lidar_data.frame_id, "robot")
-        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_T(0)[3], [np.nan, np.nan, np.nan])
-        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_T(0)[35], [26.67838478088379, 0.3280501961708069, -9.796014785766602])
-        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_T(2)[-1], [5.671111583709717, 9.91832280305971e-7, 2.6444828510284424])
+        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_index(0)[0][3], [np.nan, np.nan, np.nan])
+        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_index(0)[0][35], [26.67838478088379, 0.3280501961708069, -9.796014785766602])
+        np.testing.assert_array_equal(lidar_data.get_point_cloud_at_index(2)[0][-1], [5.671111583709717, 9.91832280305971e-7, 2.6444828510284424])
         np.testing.assert_equal(len(lidar_data.point_clouds), 3)
 
     # def test_to_FLU_frame(self):
