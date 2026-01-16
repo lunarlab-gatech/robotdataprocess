@@ -16,7 +16,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
     lidar_with_channels_path = input_path.parent / "extract" / "files_for_lio_sam" / robot_name / "lidar"
     if lidar_with_channels_path.exists():
@@ -25,6 +25,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
         lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Calculate point channels if we don't have them
+    #lidar_data.visualize()
     if lidar_data.channels is None:
         lidar_data.calculate_point_channels(16, -20, 20)
         print("Point Channel Calculation Completed!")
@@ -43,7 +44,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     publish_data_ROS_multiprocess([imu_data, pose_data, lidar_data], 
                                   ['/imu_raw', '/odom_gt', '/points_raw'],
                                   [None, "Path", None],
-                                  [200, 20, 20],
+                                  [500, 20, 20],
                                   [1, 1, 4],
                                    ROSMsgLibType.RCLPY, True, verbose=True)
     

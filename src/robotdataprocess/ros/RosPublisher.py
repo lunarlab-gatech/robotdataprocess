@@ -256,7 +256,7 @@ class _SingleDataPublisher():
         if not target_index in self.local_buf:
             while not self.worker_queue.empty():
                 try:
-                    idx, ts, msg, shm_name = self.worker_queue.get_nowait()
+                    idx, ts, msg, shm_name = self.worker_queue.get(timeout=1.0 / float(self.timer_freq))
                     if idx < target_index:
                         if shm_name:
                             try:
