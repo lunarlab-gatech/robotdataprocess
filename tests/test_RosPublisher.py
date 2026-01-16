@@ -118,6 +118,7 @@ class TestRosPublisher(unittest.TestCase):
         file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher', 
                          'test__run_ROS2_publisher_process', 'LiDARData').absolute()
         lidar_data = LiDARData.from_npy_files(file_path, "lidar_link", CoordinateFrame.NED)
+        lidar_data.calculate_point_channels(32, -25, 25)
 
         # Lazily import ROS2 libraries
         PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
