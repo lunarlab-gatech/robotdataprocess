@@ -20,7 +20,6 @@ from typeguard import typechecked
 from typing import List, Union, Any, Tuple
 
 ROS_PUB_QUEUE_SIZE = 10
-TIMER_FREQ = 400 # Hz
 MSG_QUEUE_MAX_SIZE = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
 
@@ -52,6 +51,7 @@ class _SingleDataPublisher():
         data: The Data object to publish.
         topic_name: The ROS topic to publish on.
         type: The ROS message type for data that can be published as multiple types.
+        hertz: The expected frequency to publish at (used to set the publisher timer frequency).
         stop_event: Allow sub-processes to be stopped by KeyboardInterrupts.
         wait_for_sub: Whether to wait for a subscriber until we start publishing (used for tests).
         num_workers: Number of worker processes to pre-build messages.
@@ -60,7 +60,7 @@ class _SingleDataPublisher():
     """
 
     def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: Data, topic_name: str, 
-                 type: Union[str, None], stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+                 type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                  verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
         
         # Save parameters
@@ -69,6 +69,8 @@ class _SingleDataPublisher():
         self.data = data
         self.topic = topic_name
         self.type = type
+        self.hertz = hertz
+        self.timer_freq = 2 * self.hertz
         self.stop_event = stop_event
         self.num_workers = num_workers
         self.verbose = verbose
@@ -120,11 +122,11 @@ class _SingleDataPublisher():
             if self.libtype == ROSMsgLibType.ROSPY:
                 rospy = ModuleImporter.get_module('rospy')
                 while self.publisher.get_num_connections() == 0 and not rospy.is_shutdown():
-                    rospy.sleep(1.0 / TIMER_FREQ)
+                    rospy.sleep(1.0 / self.timer_freq)
             elif self.libtype == ROSMsgLibType.RCLPY:
                 while self.publisher.get_subscription_count() == 0:
                     rclpy = ModuleImporter.get_module('rclpy')
-                    rclpy.spin_once(self.ros2_node_class, timeout_sec=1.0 / TIMER_FREQ)
+                    rclpy.spin_once(self.ros2_node_class, timeout_sec=1.0 / self.timer_freq)
 
             # Redo timing setup once we have our subscriber
             self.start_time = time.monotonic() + 1.0
@@ -134,9 +136,9 @@ class _SingleDataPublisher():
         # High-resolution timer for triggering publishes
         if self.libtype == ROSMsgLibType.ROSPY:
             rospy = ModuleImporter.get_module('rospy')
-            rospy.Timer(rospy.Duration(1.0 / float(TIMER_FREQ)), self._timer_callback)
+            rospy.Timer(rospy.Duration(1.0 / float(self.timer_freq)), self._timer_callback)
         elif self.libtype == ROSMsgLibType.RCLPY:
-            self.timer = self.ros2_node_class.create_timer(1.0 / float(TIMER_FREQ), self._timer_callback)
+            self.timer = self.ros2_node_class.create_timer(1.0 / float(self.timer_freq), self._timer_callback)
 
         self.log_msg_to_ros(f"robotdataprocess_publisher_{topic_name.replace('/', '_')} intialized!", stats_dict)
 
@@ -232,10 +234,10 @@ class _SingleDataPublisher():
                     else:
                         try:
                             payload = (idx, float(timestamp), msg, shm_name)
-                            self.worker_queue.put(payload, timeout=1.0 / float(TIMER_FREQ))
+                            self.worker_queue.put(payload, timeout=1.0 / float(self.timer_freq))
                             break
                         except queue_module.Full:
-                            time.sleep(1.0 / float(TIMER_FREQ))
+                            time.sleep(1.0 / float(self.timer_freq))
 
 
         except BrokenPipeError:
@@ -425,7 +427,7 @@ class _SingleDataPublisher():
                 self.next_msg = None
 
 @typechecked
-def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], stop_event, wait_for_sub: bool = False,
+def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker. 
@@ -435,10 +437,10 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
     try:
         import rospy
         class SingleDataPublisherROS1():
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float,stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
-                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
-        node = SingleDataPublisherROS1(data, topic_name, type, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
         while not rospy.is_shutdown() and not node._pub._is_finished:
             time.sleep(0.1)
 
@@ -447,7 +449,7 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
         print(traceback.format_exc())
 
 @typechecked
-def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], stop_event, wait_for_sub: bool = False, 
+def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, 
                                 num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
@@ -460,10 +462,10 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
 
         # Wrapper class that is also a ROS2 Node, so that we are in compliance with rclpy design.
         class SingleDataPublisherROS2(Node):
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
-                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
 
             def is_finished(self) -> bool:
                 return self._pub._is_finished
@@ -471,7 +473,7 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
         # Start ROS2 node
         if not rclpy.ok():
             rclpy.init()
-        node = SingleDataPublisherROS2(data, topic_name, type, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=2.0)
             if node.is_finished():
@@ -482,8 +484,8 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
         print(traceback.format_exc())
 
 @typechecked
-def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]], 
-                                  data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
+def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]],
+                                  data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
                                   verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
@@ -492,6 +494,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         data_list: list of Data objects
         data_topics: list of ROS topic names
         data_msg_type: list of ROS message types for data that can be published as multiple types.
+        data_hz: The expected hertz of the data stream (used to set hertz speed of publishing process).
         data_workers: Each topic will have one publisher process and X number of worker processes to pull data.
         libtype: ROSMsgLibType indicating whether to use rospy (ROS1) or rclpy (ROS2).
         shutdown_ros: Whether to shutdown ROS after publishing is complete.
@@ -523,13 +526,13 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
     processes: List[Process] = []
     topic_to_proc: dict = {}
     stop_event = Event()
-    for data, topic, type, workers in zip(data_list, data_topics, data_msg_type, data_workers):
+    for data, topic, type, hertz, workers in zip(data_list, data_topics, data_msg_type, data_hz, data_workers):
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, type, stop_event, wait_for_sub, workers, verbose, stats_dict))
+        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict))
         p.start()
         processes.append(p)
         topic_to_proc[topic] = p
