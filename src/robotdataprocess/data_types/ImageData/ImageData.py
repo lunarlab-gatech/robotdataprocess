@@ -4,6 +4,7 @@ from ..Data import Data, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from enum import Enum
+from ...ModuleImporter import ModuleImporter
 import numpy as np
 from pathlib import Path
 from typeguard import typechecked
@@ -122,6 +123,33 @@ class ImageData(Data):
         # Apply mask
         self.timestamps = self.timestamps[mask]
         self.images = self.images[mask]
+    
+    # =========================================================================
+    # ======================= Multi ImageData Methods ========================= 
+    # ========================================================================= 
+
+    def compare_timestamps(self, other: ImageDataInMemory):
+        """
+        This method compares two ImageData objects based on the timestamps of their
+        images.
+        """
+
+        # Find the locations in other where self timestamps would fit
+        idxs = np.searchsorted(other.timestamps, self.timestamps, side='right')
+
+        # Get the left indices and right indices
+        idxs_right = np.clip(idxs, 0, len(other.timestamps)-1)
+        idxs_left = np.clip(idxs - 1, 0, len(other.timestamps)-1)
+
+        # Get distances to nearest on either side
+        dists = np.minimum(np.abs(self.timestamps - other.timestamps[idxs_left]), 
+                           np.abs(self.timestamps - other.timestamps[idxs_right]))
+        
+        # Print the mean and std of the distances
+        print(f"Mean distance (left): {np.mean(np.abs(self.timestamps - other.timestamps[idxs_left]))}")
+        print(f"Mean distance (right): {np.mean(np.abs(self.timestamps - other.timestamps[idxs_right]))}")
+        print(f"Mean distance: {np.mean(dists)}")
+        print(f"Std distance: {np.std(dists)}")
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
@@ -135,8 +163,7 @@ class ImageData(Data):
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Image'].__msgtype__
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from sensor_msgs.msg import Image
-            return Image
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
         else:
             raise NotImplementedError(f"Unsupported ROS_MSG_LIBRARY_TYPE {lib_type} for ImageData.get_ros_msg_type!")
 
@@ -192,17 +219,17 @@ class ImageData(Data):
                         data=data)
         
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from std_msgs.msg import Header
-            from sensor_msgs.msg import Image
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            Image = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
 
             # Create the messages
             img_msg = Image()
             img_msg.header = Header()
             if lib_type == ROSMsgLibType.RCLPY:
-                from rclpy.time import Time
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
                 img_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
             else:
-                import rospy
+                rospy = ModuleImporter.get_module('rospy')
                 img_msg.header.stamp = rospy.Time(secs=int(seconds), nsecs=int(nanoseconds))
 
             # Populate the rest of the data

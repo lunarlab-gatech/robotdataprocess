@@ -2,6 +2,7 @@ from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .Data import Data, CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
+from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
@@ -12,33 +13,36 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, Any
+from typing import Union, Any, Optional
 import tqdm
 
 @typechecked
 class ImuData(Data):
 
     # Define IMU-specific data attributes
-    lin_acc: NDArray[Decimal]
-    ang_vel: NDArray[Decimal]
-    orientations: NDArray[Decimal] # quaternions (x, y, z, w)
+    lin_acc: NDArray
+    ang_vel: NDArray
+    orientations: Optional[NDArray] # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
     @typechecked
     def __init__(self, frame_id: str, frame: CoordinateFrame, timestamps: Union[np.ndarray, list], 
                  lin_acc: Union[np.ndarray, list], ang_vel: Union[np.ndarray, list],
-                 orientations: Union[np.ndarray, list]):
+                 orientations: Optional[NDArray]):
         
         # Copy initial values into attributes
         super().__init__(frame_id, timestamps)
         self.frame = frame
         self.lin_acc = col_to_dec_arr(lin_acc)
         self.ang_vel = col_to_dec_arr(ang_vel)
-        self.orientations = col_to_dec_arr(orientations)
+        if orientations is not None:
+            self.orientations = col_to_dec_arr(orientations)
+        else:
+            self.orientations = None
 
         # Check to ensure that all arrays have same length
         if len(self.timestamps) != len(self.lin_acc) or len(self.lin_acc) != len(self.ang_vel) \
-            or len(self.ang_vel) != len(self.orientations):
+            or (self.orientations is not None and len(self.ang_vel) != len(self.orientations)):
             raise ValueError("Lengths of timestamp, lin_acc, ang_vel, and orientation arrays are not equal!")
 
     # =========================================================================
@@ -58,6 +62,8 @@ class ImuData(Data):
         Returns:
             ImageData: Instance of this class.
         """
+
+        print("WARNING: This code does not check the orientation covariance to determine if the orientation is valid; may use invalid orientations!")
 
         # Get topic message count and typestore
         bag_wrapper = Ros2BagWrapper(bag_path, None)
@@ -102,20 +108,20 @@ class ImuData(Data):
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame):
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame, nine_axis: bool = False):
         """
         Creates a class structure from the TartanAir dataset format, which includes
-        various .txt files with IMU data. It expects the timestamp, the linear
-        acceleration, and the angular velocity, seperated by spaces in that order.
+        various .txt files with IMU data. It expects (in order) the timestamp, the linear
+        acceleration, and the angular velocity seperated by spaces. Will also expect 
+        orientation (xyzw) at the end if nine_axis is set to True.
 
         Args:
             file_path (Path | str): Path to the file containing the IMU data.
             frame_id (str): The frame where this IMU data was collected.
             frame (CoordinateFrame): The coordinate system convention of this data.
+            nine_axis (bool): If true, will also load orientations from txt file.
         Returns:
             ImuData: Instance of this class.
-
-        NOTE: Sets orientation to identity! 
         """
         
         # Count the number of lines in the file
@@ -128,6 +134,10 @@ class ImuData(Data):
         timestamps = np.zeros((line_count), dtype=object)
         lin_acc = np.zeros((line_count, 3), dtype=object)
         ang_vel = np.zeros((line_count, 3), dtype=object)
+        if nine_axis:
+            orientations = np.zeros((line_count, 4), dtype=object)
+        else:
+            orientations = None
 
         # Open the txt file and read in the data
         with open(str(file_path), 'r') as file:
@@ -136,13 +146,11 @@ class ImuData(Data):
                 timestamps[i] = line_split[0]
                 lin_acc[i] = line_split[1:4]
                 ang_vel[i] = line_split[4:7]
+                if nine_axis:
+                    orientations[i] = line_split[7:11]
         
-        # Set orientation to identity, as it is assumed this text file doesn't have it
-        orientation = np.zeros((lin_acc.shape[0], 4), dtype=int)
-        orientation[:,3] = np.ones((lin_acc.shape[0]), dtype=int)
-
         # Create the ImuData class
-        return cls(frame_id, frame, timestamps, lin_acc, ang_vel, orientation)
+        return cls(frame_id, frame, timestamps, lin_acc, ang_vel, orientations)
     
     # =========================================================================
     # ========================= Manipulation Methods ========================== 
@@ -158,7 +166,8 @@ class ImuData(Data):
         self.timestamps = self.timestamps[mask]
         self.lin_acc = self.lin_acc[mask]
         self.ang_vel = self.ang_vel[mask]
-        self.orientations = self.orientations[mask]
+        if self.orientations is not None:
+            self.orientations = self.orientations[mask]
         
     # =========================================================================
     # ============================ Export Methods ============================= 
@@ -173,7 +182,8 @@ class ImuData(Data):
         Parameters:
             initial_pos: The initial position as a numpy array.
             initial_vel: The initial velocity as a numpy array.
-            initial_ori: The initial orientation as a numpy array (quaternion x, y, z, w).
+            initial_ori: The initial orientation as a numpy array (quaternion x, y, z, w),
+                only used if use_ang_vel is True.
             use_ang_vel: If True, will use angular velocity data to calculate orientation.
                 If False, will use orientation data directly from the IMUData class.
 
@@ -193,9 +203,12 @@ class ImuData(Data):
         if use_ang_vel:
             ori = np.zeros((self.len(), 4), dtype=float)  
             ori[:, 3] = np.ones((self.len()), dtype=float)
+            ori[0] = initial_ori
         else:
-            ori = dec_arr_to_float_arr(self.orientations)
-        ori[0] = initial_ori
+            if self.orientations is not None:
+                ori = dec_arr_to_float_arr(self.orientations)
+            else:
+                raise ValueError("use_ang_vel is False, but this ImuData hs no orientation data to use!")
 
         # Setup a tqdm progress bar
         pbar = tqdm.tqdm(total=self.len()-1, desc="Integrating IMU Data", unit="steps")
@@ -240,7 +253,6 @@ class ImuData(Data):
     # =========================== Conversion to ROS =========================== 
     # ========================================================================= 
 
-    @typechecked
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
         """ Return the __msgtype__ for an Imu msg. """
@@ -249,8 +261,7 @@ class ImuData(Data):
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/Imu'].__msgtype__
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from sensor_msgs.msg import Imu
-            return Imu
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg_type()!")
             
@@ -263,7 +274,7 @@ class ImuData(Data):
         Raises:
             ValueError: If i is outside the data bounds.
 
-        # NOTE: Currently ignores orientation data, and doesn't set covariance values.
+        # NOTE: Assumes covariances of 0.
         """
 
         # Check to make sure index is within data bounds
@@ -283,14 +294,20 @@ class ImuData(Data):
             Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
             Vector3 = typestore.types['geometry_msgs/msg/Vector3']
 
+            if self.orientations is not None:
+                ori = Quaternion(x=self.orientations[i][0], y=self.orientations[i][1],
+                           z=self.orientations[i][2], w=self.orientations[i][3])
+                ori_cov = np.zeros(9, dtype=np.float64)
+            else:
+                ori = Quaternion(x=0, y=0, z=0, w=1)
+                ori_cov = np.zeros(9, dtype=np.float64)
+                ori_cov[0] = -1
+
             return Imu(Header(stamp=Time(sec=int(seconds), 
                                         nanosec=int(nanoseconds)), 
                             frame_id=self.frame_id),
-                        orientation=Quaternion(x=0,
-                                            y=0,
-                                            z=0,
-                                            w=1), # Currently ignores data in orientation
-                        orientation_covariance=np.zeros(9),
+                        orientation=ori,
+                        orientation_covariance=ori_cov,
                         angular_velocity=Vector3(x=self.ang_vel[i][0],
                                                 y=self.ang_vel[i][1],
                                                 z=self.ang_vel[i][2]),
@@ -301,28 +318,39 @@ class ImuData(Data):
                         linear_acceleration_covariance=np.zeros(9))
         
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from std_msgs.msg import Header
-            from sensor_msgs.msg import Imu
-            from geometry_msgs.msg import Quaternion, Vector3
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            Imu = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
+            Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+            Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
 
             # Create the message objects
             imu_msg = Imu()
             imu_msg.header = Header()
             if lib_type == ROSMsgLibType.RCLPY: 
-                from rclpy.time import Time
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
                 imu_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
             else:
-                import rospy
+                rospy = ModuleImporter.get_module('rospy')
                 imu_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
 
             # Populate the rest of the data
             imu_msg.header.frame_id = self.frame_id
             imu_msg.orientation = Quaternion()
-            imu_msg.orientation.x = 0.0  # NOTE: Currently ignores data in orientation
-            imu_msg.orientation.y = 0.0
-            imu_msg.orientation.z = 0.0
-            imu_msg.orientation.w = 1.0
-            imu_msg.orientation_covariance = np.zeros(9)
+            if self.orientations is not None:
+                imu_msg.orientation.x = float(self.orientations[i][0])  
+                imu_msg.orientation.y = float(self.orientations[i][1])
+                imu_msg.orientation.z = float(self.orientations[i][2])
+                imu_msg.orientation.w = float(self.orientations[i][3])
+                imu_msg.orientation_covariance = np.zeros(9, dtype=np.float64)
+            else:
+                imu_msg.orientation.x = 0.0
+                imu_msg.orientation.y = 0.0
+                imu_msg.orientation.z = 0.0
+                imu_msg.orientation.w = 1.0
+                covariance = np.zeros(9, dtype=np.float64)
+                covariance[0] = -1
+                imu_msg.orientation_covariance = covariance
+
             imu_msg.angular_velocity = Vector3()
             imu_msg.angular_velocity.x = float(self.ang_vel[i][0])
             imu_msg.angular_velocity.y = float(self.ang_vel[i][1])

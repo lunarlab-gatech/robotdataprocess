@@ -5,16 +5,16 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 
 def main():
     # Enter desired configuration here
-    dataset_num = "V2.1.0"
+    dataset_num = "V2.3.C.Temp"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_Datasets/' + dataset_num + '/data'
-    robot_name = "Drone2"
+    robot_name = "Husky1"
 
     # Make directory paths
     input_path = Path(input_dir).absolute()
 
     # Extract IMU data and GT Pose data
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', robot_name + '/base_link', CoordinateFrame.NED)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', robot_name + '/base_link', CoordinateFrame.NED, nine_axis=True)
     gt_odom_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', robot_name + '/base_link', CoordinateFrame.NED, False)
 
     # Convert imu data to odometry via integration and visualize compared to GT
@@ -25,7 +25,7 @@ def main():
     print("Initial Velocity: ", initial_vel)
     print("Initial Orientation (quat xyzw): ", initial_ori)
 
-    odom_data: OdometryData = imu_data.to_PathData(initial_pos, initial_vel, initial_ori, use_ang_vel=True).to_OdometryData('world', robot_name + '/base_link')
+    odom_data: OdometryData = imu_data.to_PathData(initial_pos, initial_vel, None, use_ang_vel=False).to_OdometryData('world', robot_name + '/base_link')
     odom_data.visualize([gt_odom_data], ["IMU Derived Odometry", "Ground Truth Odometry"], axes_interval=5000, axes_length=10.0)
 
 if __name__ == "__main__":

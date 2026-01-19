@@ -7,6 +7,7 @@ import decimal
 from decimal import Decimal
 from evo.core import geometry
 import matplotlib.pyplot as plt
+from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 import os
@@ -423,7 +424,7 @@ class OdometryData(PathData):
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> Any:
-        """ Return the __msgtype__ for an Imu msg. """
+        """ Return the __msgtype__ for an Odometry msg. """
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             if msg_type == "Odometry":
@@ -434,14 +435,14 @@ class OdometryData(PathData):
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.RCLPY:
             if msg_type == "Path":
-                from nav_msgs.msg import Path
-                return Path
+                return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.ROSPY:
             if msg_type == "maplab_msg/OdometryWithImuBiases":
-                from maplab_msgs.msg import OdometryWithImuBiases
-                return OdometryWithImuBiases
+                return ModuleImporter.get_module_attribute('maplab_msgs.msg', 'OdometryWithImuBiases')
+            elif msg_type == "Path":
+                return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
@@ -533,13 +534,20 @@ class OdometryData(PathData):
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSBAGS")
             
-        elif lib_type == ROSMsgLibType.ROSPY:
+        elif lib_type == ROSMsgLibType.ROSPY or lib_type == ROSMsgLibType.RCLPY:
             if msg_type == "maplab_msg/OdometryWithImuBiases":
+                
+                if lib_type == ROSMsgLibType.RCLPY:
+                    raise ValueError("maplab_msg/OdometryWithImuBiases is not supported for RCLPY!")
 
-                import rospy
-                from maplab_msgs.msg import OdometryWithImuBiases
-                from geometry_msgs.msg import PoseWithCovariance, TwistWithCovariance, Point, Quaternion, Vector3
-                from std_msgs.msg import Header
+                rospy = ModuleImporter.get_module('rospy')
+                OdometryWithImuBiases = ModuleImporter.get_module_attribute('maplab_msgs.msg', 'OdometryWithImuBiases')
+                PoseWithCovariance = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'PoseWithCovariance')
+                TwistWithCovariance = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'TwistWithCovariance')
+                Point = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Point')
+                Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+                Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
+                Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
 
                 msg = OdometryWithImuBiases()
                 msg.header = Header()
@@ -578,26 +586,29 @@ class OdometryData(PathData):
                 msg.odometry_state = 0 # Assumes default state
                 return msg
 
-            else:
-                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSPY")
-        
-        elif lib_type == ROSMsgLibType.RCLPY:
-            if msg_type == "Path":
+            elif msg_type == "Path":
                 
-                from builtin_interfaces.msg import Time
-                from nav_msgs.msg import Path
-                from std_msgs.msg import Header
+                Path = ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
+                Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
 
                 # Pre-calculate all the poses
                 if len(self.poses_rclpy) != self.len():
 
-                    from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
+                    PoseStamped = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'PoseStamped')
+                    Pose = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Pose')
+                    Point = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Point')
+                    Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
 
                     for j in range(self.len()):
                         sec, nanosec = self._extract_seconds_and_nanoseconds(j)
                         pose_msg = PoseStamped()
                         pose_msg.header = Header()
-                        pose_msg.header.stamp = Time(sec=int(sec), nanosec=int(nanosec))
+                        if lib_type == ROSMsgLibType.RCLPY:
+                            Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                            pose_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+                        else:
+                            rospy = ModuleImporter.get_module('rospy')
+                            pose_msg.header.stamp = rospy.Time(secs=int(seconds), nsecs=int(nanoseconds))
                         pose_msg.header.frame_id = self.frame_id
                         pose_msg.pose = Pose()
                         pose_msg.pose.position = Point()
@@ -613,12 +624,17 @@ class OdometryData(PathData):
 
                 msg = Path()
                 msg.header = Header()
-                msg.header.stamp = Time(sec=int(seconds), nanosec=int(nanoseconds))
+                if lib_type == ROSMsgLibType.RCLPY:
+                    Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                    msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+                else:
+                    rospy = ModuleImporter.get_module('rospy')
+                    msg.header.stamp = rospy.Time(secs=int(seconds), nsecs=int(nanoseconds))
                 msg.header.frame_id = self.frame_id
                 msg.poses = self.poses_rclpy[0:i+1:PATH_SLICE_STEP]
                 return msg
             
             else:
-                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.RCLPY")
+                raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSPY or ROSMsgLibType.RCLPY.")
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg()!")

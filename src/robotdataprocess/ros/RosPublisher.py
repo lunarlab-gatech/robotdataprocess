@@ -1,22 +1,44 @@
 from ..data_types.Data import Data, ROSMsgLibType
 from ..data_types.ImageData.ImageData import ImageData
-from decimal import Decimal
-from multiprocessing import Process, Manager, Event
+from ..ModuleImporter import ModuleImporter
+import multiprocessing
+from multiprocessing import Process, Manager, Event, resource_tracker
 from multiprocessing.managers import DictProxy
+import multiprocessing.shared_memory
+from multiprocessing.shared_memory import SharedMemory
+import numpy as np
 import queue as queue_module
 import os
 from rich.live import Live
 from rich.table import Table
 from rich.console import Console
+from rich.markup import escape
+import signal
 import time
 import traceback
 from typeguard import typechecked
 from typing import List, Union, Any, Tuple
 
-QUEUE_SIZE = 10
-TIMER_FREQ = 2000 # Hz
-MSG_BUFFER_MAX_VAL = 100 # entries
+ROS_PUB_QUEUE_SIZE = 10
+MSG_QUEUE_MAX_SIZE = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
+
+def neutralize_resource_tracker():
+    # Create a dummy tracker class that won't crash
+    class DummyTracker:
+        def register(self, *args, **kwargs): pass
+        def unregister(self, *args, **kwargs): pass
+        def ensure_running(self, *args, **kwargs): pass
+
+    # 2. Globally neutralize the actual resource_tracker
+    resource_tracker.register = lambda *args, **kwargs: None
+    resource_tracker.unregister = lambda *args, **kwargs: None
+
+    # 3. Specifically for Python 3.10+, replace the module reference 
+    # instead of setting it to None
+    multiprocessing.shared_memory.resource_tracker = DummyTracker()
+
+neutralize_resource_tracker()
 
 class _SingleDataPublisher():
     """ 
@@ -29,14 +51,17 @@ class _SingleDataPublisher():
         data: The Data object to publish.
         topic_name: The ROS topic to publish on.
         type: The ROS message type for data that can be published as multiple types.
+        hertz: The expected frequency to publish at (used to set the publisher timer frequency).
         stop_event: Allow sub-processes to be stopped by KeyboardInterrupts.
+        wait_for_sub: Whether to wait for a subscriber until we start publishing (used for tests).
         num_workers: Number of worker processes to pre-build messages.
         verbose: Whether to print topic publishing status to the console.
         stats_dict: Dictionary for processes to put publishing statistics for printing.
     """
 
     def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: Data, topic_name: str, 
-                 type: Union[str, None], stop_event, num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
+                 type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+                 verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
         
         # Save parameters
         self.libtype = libtype
@@ -44,6 +69,8 @@ class _SingleDataPublisher():
         self.data = data
         self.topic = topic_name
         self.type = type
+        self.hertz = hertz
+        self.timer_freq = 2 * self.hertz
         self.stop_event = stop_event
         self.num_workers = num_workers
         self.verbose = verbose
@@ -53,15 +80,15 @@ class _SingleDataPublisher():
         self.restart_when_behind = False
 
         # Timing setup
-        self.start_time = Decimal(time.monotonic()) + Decimal('1.0')
-        self.first_ts = Decimal(self.data.timestamps[0])
+        self.start_time = time.monotonic() + 1.0
+        self.first_ts = float(self.data.timestamps[0])
         self.prev_time = self.start_time
-        self.total_intervals = []
+        self.prev_console_update_time = self.start_time
 
         # Message queue to hold build messages from workers
+        self.worker_queue = multiprocessing.Queue(maxsize=MSG_QUEUE_MAX_SIZE)
+        self.local_buf: dict = {}
         self.manager = Manager()
-        self.msg_buf = self.manager.dict()
-        self.buf_size = self.manager.Value('i', 0)
         self.index = self.manager.Value("i", 0)
         self.next_msg = None
         self._last_pub = None
@@ -70,7 +97,7 @@ class _SingleDataPublisher():
         self.stop_event_workers = Event()
         self.workers: List[Process] = []
         for worker_id in range(self.num_workers):
-            p = Process(target=self._message_worker, args=(worker_id, self.stop_event_workers))
+            p = Process(target=self._message_worker, args=(worker_id, self.stop_event_workers, self.stats_dict))
             p.start()
             self.workers.append(p)
 
@@ -85,24 +112,57 @@ class _SingleDataPublisher():
             # For ROS1, we have to intialize rospy AFTER forking processes
             import rospy
             rospy.init_node(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}", anonymous=True)
-            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=QUEUE_SIZE)
+            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=ROS_PUB_QUEUE_SIZE)
 
         elif self.libtype == ROSMsgLibType.RCLPY:
-            self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, QUEUE_SIZE)
+            self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, ROS_PUB_QUEUE_SIZE)
+
+        # If desired, wait until we have at least one subscriber to start publishing
+        if wait_for_sub:
+            if self.libtype == ROSMsgLibType.ROSPY:
+                rospy = ModuleImporter.get_module('rospy')
+                while self.publisher.get_num_connections() == 0 and not rospy.is_shutdown():
+                    rospy.sleep(1.0 / self.timer_freq)
+            elif self.libtype == ROSMsgLibType.RCLPY:
+                while self.publisher.get_subscription_count() == 0:
+                    rclpy = ModuleImporter.get_module('rclpy')
+                    rclpy.spin_once(self.ros2_node_class, timeout_sec=1.0 / self.timer_freq)
+
+            # Redo timing setup once we have our subscriber
+            self.start_time = time.monotonic() + 1.0
+            self.prev_time = self.start_time
+            self.prev_console_update_time = self.start_time
 
         # High-resolution timer for triggering publishes
         if self.libtype == ROSMsgLibType.ROSPY:
-            import rospy
-            rospy.Timer(rospy.Duration(1.0 / float(TIMER_FREQ)), self._timer_callback)
-
+            rospy = ModuleImporter.get_module('rospy')
+            rospy.Timer(rospy.Duration(1.0 / float(self.timer_freq)), self._timer_callback)
         elif self.libtype == ROSMsgLibType.RCLPY:
-            self.timer = self.ros2_node_class.create_timer(1.0 / float(TIMER_FREQ), self._timer_callback)
+            self.timer = self.ros2_node_class.create_timer(1.0 / float(self.timer_freq), self._timer_callback)
 
-    def _message_worker(self, worker_id: int, stop_event):
+        self.log_msg_to_ros(f"robotdataprocess_publisher_{topic_name.replace('/', '_')} intialized!", stats_dict)
+
+    def log_msg_to_ros(self, msg: str, stats_dict: Union[DictProxy, None] = None):
+        """ Method to log data to ROS regardless of ROS version (1 or 2) """
+
+        if self.libtype == ROSMsgLibType.ROSPY:
+            rospy = ModuleImporter.get_module('rospy')
+            rospy.loginfo(msg)
+        elif self.libtype == ROSMsgLibType.RCLPY:
+            self.ros2_node_class.get_logger().info(msg)
+
+        # Additionally logs it to the console if enabled
+        if stats_dict:
+            topic_info = self.stats_dict[self.topic]
+            topic_info['log_queue'].append(msg)
+            self.stats_dict[self.topic] = topic_info
+
+    def _message_worker(self, worker_id: int, stop_event, stats_dict: Union[DictProxy, None] = None, use_shared_mem: bool = True):
         """
         Worker process: prebuild ROS messages and put them into the queue.
         Each worker handles every nth message starting at worker_id.
         """
+        neutralize_resource_tracker()
 
         # For ROS1, initialize this worker's rospy node
         if self.libtype == ROSMsgLibType.ROSPY:
@@ -125,20 +185,61 @@ class _SingleDataPublisher():
                     msg = self.data.get_ros_msg(self.libtype, idx, self.type)
                 else:
                     msg = self.data.get_ros_msg(self.libtype, idx)
-                timestamp = Decimal(self.data.timestamps[idx])
+                timestamp = float(self.data.timestamps[idx])
+
+                # If message has data field, use shared memory to transfer to publishing process efficiently
+                shm_name = None
+                if use_shared_mem and hasattr(msg, 'data') and len(msg.data) > 0:
+
+                    # Write a handler to disable SharedMemory usage if we run out
+                    def handler(signum, frame):
+                        nonlocal use_shared_mem
+                        use_shared_mem = False
+                        raise TimeoutError("Calls to SharedMemory freezing! Switching to Process-to-Process Serialization, which will run slower. If in a Docker container, this can be avoided by increasing the shared memory (docker run --shm-size=2gb).")
+
+                    # Set an alarm for 0.2 seconds
+                    signal.signal(signal.SIGALRM, handler)
+                    signal.setitimer(signal.ITIMER_REAL, 0.2)
+
+                    # Attempt to allocate shared memory
+                    if isinstance(msg.data, list): data_to_copy = bytes(msg.data)
+                    else: data_to_copy = msg.data
+                    pixel_bytes = np.frombuffer(data_to_copy, dtype=np.uint8)
+                    success = False
+                    try:
+                        shm = SharedMemory(create=True, size=pixel_bytes.nbytes)
+                        signal.setitimer(signal.ITIMER_REAL, 0.0)
+                        success = True
+                    except TimeoutError as e:
+                        self.log_msg_to_ros(f"{e}", stats_dict)
+                    
+                    # If successful, save the data to shared memory
+                    if success:
+                        shared_array = np.ndarray(pixel_bytes.shape, dtype=pixel_bytes.dtype, buffer=shm.buf)
+                        shared_array[:] = pixel_bytes[:]
+                        
+                        # Strip the data from transport
+                        msg.data = [] if isinstance(msg.data, list) else b""
+                        shm_name = shm.name
+                        shm.close()
 
                 # Put the message into the buffer
                 while True:
-                    if stop_event.is_set():
-                        break
-                    elif self.buf_size.value < MSG_BUFFER_MAX_VAL: 
-                        self.msg_buf[idx] = (float(timestamp), msg)
-                        self.buf_size.value += 1
-                        break
-                    elif idx < self.index.value:
+                    if stop_event.is_set() or idx < self.index.value:
+                        if shm_name:
+                            temp_shm = SharedMemory(name=shm_name)
+                            temp_shm.close()
+                            temp_shm.unlink()
                         break
                     else:
-                        time.sleep(1 / float(TIMER_FREQ))
+                        try:
+                            payload = (idx, float(timestamp), msg, shm_name)
+                            self.worker_queue.put(payload, timeout=1.0 / float(self.timer_freq))
+                            break
+                        except queue_module.Full:
+                            time.sleep(1.0 / float(self.timer_freq))
+
+
         except BrokenPipeError:
             # Manager must have died from KeyboardInterrupt
             pass
@@ -149,21 +250,60 @@ class _SingleDataPublisher():
         Returns the item or None if not found. Additionally clears stale messages.
         """
 
-        # Clear out any stale messages that were skipped
-        keys_to_delete = [k for k in self.msg_buf.keys() if k < target_index]
-        for k in keys_to_delete:
-            self.msg_buf.pop(k)
-            self.buf_size.value -= 1
+        neutralize_resource_tracker()
+
+        # Drain the Queue into the local reorder buffer if we don't have the msg we want
+        if not target_index in self.local_buf:
+            while not self.worker_queue.empty():
+                try:
+                    idx, ts, msg, shm_name = self.worker_queue.get(timeout=1.0 / float(self.timer_freq))
+                    if idx < target_index:
+                        if shm_name:
+                            try:
+                                temp_shm = SharedMemory(name=shm_name)
+                                temp_shm.close()
+                                temp_shm.unlink()
+                            except (FileNotFoundError, BufferError):
+                                pass
+                    else:
+                        self.local_buf[idx] = (ts, msg, shm_name)
+                except queue_module.Empty:
+                    break
+        
+            # Clear out any stale messages that were skipped
+            keys_to_delete = [k for k in self.local_buf.keys() if k < target_index]
+            for k in keys_to_delete:
+                _, _, stale_shm_name = self.local_buf.pop(k)
+                if stale_shm_name:
+                    try:
+                        temp_shm = SharedMemory(name=stale_shm_name)
+                        temp_shm.close()
+                        temp_shm.unlink()
+                    except (FileNotFoundError, BufferError): 
+                        pass
 
         # Get the actual target we're looking for
-        if target_index in self.msg_buf:
-            item = self.msg_buf.pop(target_index)
-            self.buf_size.value -= 1
-            idx = target_index
-            ts, msg = item
-            return (idx, ts, msg)
+        if target_index in self.local_buf:
+            ts, msg, shm_name = self.local_buf.pop(target_index)
+            
+            # Load data from shared memory if shm_name exists
+            if shm_name:
+                try:
+                    actual_shm = SharedMemory(name=shm_name)
+                    msg.data = actual_shm.buf.tobytes() 
+                    actual_shm.close()
+                    actual_shm.unlink()
+                except FileNotFoundError:
+                    self.log_msg_to_ros(f"Warning: SHM {shm_name} vanished before pop.", self.stats_dict)
+                except Exception as e:
+                    self.log_msg_to_ros(f"Failed to reconstruct SHM: {e}", self.stats_dict)
+                    return None
+            
+            return (target_index, ts, msg)
+        
+        # Otherwise, we don't have the target yet...
         return None
-    
+
     def _timer_callback(self, event=None):
         # Check if we have no more messages to publish or we get a StopEvent:
         if self.index.value >= self.data.len() or self.stop_event.is_set():
@@ -174,23 +314,23 @@ class _SingleDataPublisher():
             # Shut down cleanly
             if self.libtype == ROSMsgLibType.ROSPY:
                 import rospy
-                rospy.loginfo("Finished publishing.")
-                rospy.loginfo("Waiting for worker processes to finish...")
+                self.log_msg_to_ros("Finished publishing.", self.stats_dict)
+                self.log_msg_to_ros("Waiting for worker processes to finish...", self.stats_dict)
                 for w in self.workers:
                     w.join()
                 rospy.signal_shutdown("Node shutdown...")
                 self._is_finished = True
-                rospy.loginfo("Node destroyed.")
+                self.log_msg_to_ros("Node destroyed.", self.stats_dict)
                 return
             elif self.libtype == ROSMsgLibType.RCLPY:
-                self.ros2_node_class.get_logger().info("Finished publishing.")
+                self.log_msg_to_ros("Finished publishing.", self.stats_dict)
                 self.timer.cancel()
-                self.ros2_node_class.get_logger().info("Waiting for worker processes to finish...")
+                self.log_msg_to_ros("Waiting for worker processes to finish...", self.stats_dict)
                 for w in self.workers:
                     w.join()
                 self.ros2_node_class.destroy_node()
                 self._is_finished = True
-                self.ros2_node_class.get_logger().info("Node destroyed.")
+                self.log_msg_to_ros("Node destroyed.", self.stats_dict)
                 return
         
         # Get the next message from the queue if we don't have one ready
@@ -200,8 +340,8 @@ class _SingleDataPublisher():
             self.next_msg: Tuple[int, float, Any] = result
 
         # Calculate target publish time for the current message
-        now = Decimal(time.monotonic())
-        target: Decimal = (self.data.timestamps[self.index.value] - self.first_ts + self.start_time)
+        now = time.monotonic()
+        target: float = float(self.data.timestamps[self.index.value]) - self.first_ts + self.start_time
 
         # Publish when time has arrived
         if now >= target:
@@ -209,7 +349,7 @@ class _SingleDataPublisher():
             # Check if we are behind
             behind: bool = False
             if self.index.value < self.data.len() - 1:
-                next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time)
+                next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
                 if now > next_target:
                     behind = True
             
@@ -232,7 +372,7 @@ class _SingleDataPublisher():
                 else:
                     # Find the next index
                     while self.index.value < self.data.len() - 1: 
-                        next_target = (self.data.timestamps[self.index.value + 1] - self.first_ts + self.start_time) 
+                        next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
                         if now < next_target: 
                             break 
                         self.index.value += 1 
@@ -255,26 +395,26 @@ class _SingleDataPublisher():
             # Stats calculation
             elapsed = now - self.start_time
             msgs_published = self.index.value - self.skipped_msgs
-            deviation = float(now - target)
             interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
-            self.total_intervals.append(interval)
             avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
             inst_hz = 1.0 / interval if interval > 0 else 0.0
             self.prev_time = now
 
-            # Update statistics
-            if self.verbose and self.stats_dict is not None:
+            # Update statistics (at most 10Hz)
+            elapsed_console_update = now - self.prev_console_update_time
+            if self.verbose and self.stats_dict is not None and elapsed_console_update > 0.1:
                 self.stats_dict[self.topic] = {
                     "last_update_time": now,
                     "progress": self.index.value,
                     "total": self.data.len(),
                     "avg_hz": avg_hz,
                     "inst_hz": inst_hz,
-                    "deviation": deviation,
-                    "prev_time": self.prev_time,
-                    "interval": interval,
-                    "skipped": self.skipped_msgs
+                    "skipped": self.skipped_msgs,
+                    "log_queue": self.stats_dict[self.topic]['log_queue'],
+                    'local_buf_size': len(self.local_buf),
+                    'worker_queue_size': self.worker_queue.qsize()
                 }
+                self.prev_console_update_time = now
 
             # Prepare the next message
             if self.index.value < self.data.len():
@@ -287,8 +427,8 @@ class _SingleDataPublisher():
                 self.next_msg = None
 
 @typechecked
-def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], stop_event, num_workers: int = 1, 
-                               verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
+def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
+                               num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker. 
     NOTE: This function feels useless, but follows similar structure to the ROS2 version, which is more complex.
@@ -297,10 +437,10 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
     try:
         import rospy
         class SingleDataPublisherROS1():
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], stop_event, num_workers: int = 1, 
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float,stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
-                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
-        node = SingleDataPublisherROS1(data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
         while not rospy.is_shutdown() and not node._pub._is_finished:
             time.sleep(0.1)
 
@@ -309,8 +449,8 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
         print(traceback.format_exc())
 
 @typechecked
-def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], stop_event, num_workers: int = 1, 
-                                verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
+def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, 
+                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
     """
@@ -322,10 +462,10 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
 
         # Wrapper class that is also a ROS2 Node, so that we are in compliance with rclpy design.
         class SingleDataPublisherROS2(Node):
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], stop_event, num_workers: int = 1, 
+            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
-                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
 
             def is_finished(self) -> bool:
                 return self._pub._is_finished
@@ -333,22 +473,20 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
         # Start ROS2 node
         if not rclpy.ok():
             rclpy.init()
-        node = SingleDataPublisherROS2(data, topic_name, type, stop_event, num_workers, verbose, stats_dict)
-        print("Spinning ROS2 node...")
+        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=2.0)
             if node.is_finished():
                 break
-        print("ROS2 node spin complete.")
 
     except Exception:
         print(f"Exception in publisher for topic '{topic_name}':")
         print(traceback.format_exc())
 
 @typechecked
-def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]], 
-                                  data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
-                                  verbose: bool = True, delay_seconds: float = 0.0) -> None:
+def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]],
+                                  data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
+                                  verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
@@ -356,11 +494,13 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         data_list: list of Data objects
         data_topics: list of ROS topic names
         data_msg_type: list of ROS message types for data that can be published as multiple types.
+        data_hz: The expected hertz of the data stream (used to set hertz speed of publishing process).
         data_workers: Each topic will have one publisher process and X number of worker processes to pull data.
         libtype: ROSMsgLibType indicating whether to use rospy (ROS1) or rclpy (ROS2).
         shutdown_ros: Whether to shutdown ROS after publishing is complete.
         verbose: Whether to print topic publishing status to the console.
         delay_seconds: Delay in seconds before doing anything (for testing purposes).
+        wait_for_sub: Whether to wait for a subscriber before we start publishing (for testing purposes).
     """
 
     # Optional delay before starting (for testing purposes)
@@ -379,20 +519,20 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
     # Initialize stats_dict for each topic
     for topic in data_topics:
         stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0, 
-                             "inst_hz": 0, "deviation": 0,
-                             "prev_time": 0, "interval": 0, "skipped": 0}
+                             "inst_hz": 0, "skipped": 0, "log_queue": manager.list(),
+                             'local_buf_size': 0, 'worker_queue_size': 0}
 
     # Launch the appropriate publisher processes
     processes: List[Process] = []
     topic_to_proc: dict = {}
     stop_event = Event()
-    for data, topic, type, workers in zip(data_list, data_topics, data_msg_type, data_workers):
+    for data, topic, type, hertz, workers in zip(data_list, data_topics, data_msg_type, data_hz, data_workers):
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, type, stop_event, workers, verbose, stats_dict))
+        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict))
         p.start()
         processes.append(p)
         topic_to_proc[topic] = p
@@ -402,17 +542,18 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         table = Table(title="ROS Publisher Dashboard", show_header=True, header_style="bold magenta")
         table.add_column("Status", justify="center", min_width=14)
         table.add_column("Topic", style="cyan")
-        table.add_column("Progress", justify="right")
+        table.add_column("Progress", justify="right", min_width=13)
         table.add_column("Avg Hz", justify="right")
         table.add_column("Inst Hz", justify="right")
         table.add_column("Skipped Msgs", justify="right")
+        table.add_column("Buffer Sizes", justify="right")
         
         for topic, s in stats_dict.items():
             proc = topic_to_proc[topic]
             row_style = None
 
             if proc.is_alive():
-                if time.monotonic() - float(s["last_update_time"]) < 0.1:
+                if time.monotonic() - float(s["last_update_time"]) < 0.3:
                     status = "[bold green]RUNNING[/bold green]"
                 else:
                     status = "[bold yellow]UNRESPONSIVE[/bold yellow]"
@@ -429,6 +570,7 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
                 f"{s['avg_hz']:.1f}", 
                 f"{s['inst_hz']:.1f}",
                 f"{s['skipped']}",
+                f"{s['local_buf_size']}/∞ | {s['worker_queue_size']}/{MSG_QUEUE_MAX_SIZE}",
                 style=row_style
             )
         return table
@@ -438,6 +580,11 @@ def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str],
         if verbose:
             with Live(generate_table(), refresh_per_second=10, screen=False) as live:
                 while any(p.is_alive() for p in processes):
+                    for topic in data_topics:
+                        logs = stats_dict[topic]["log_queue"]
+                        while len(logs) > 0:
+                            msg = logs.pop(0)
+                            live.console.print(f"[{topic}] {msg}", markup=False, style="")
                     live.update(generate_table())
                     time.sleep(0.1)
                 live.update(generate_table())

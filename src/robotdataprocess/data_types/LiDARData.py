@@ -1,36 +1,43 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr
-from .Data import Data, CoordinateFrame
+import decimal
 from decimal import Decimal
+from pathlib import Path
+import struct
+import sys
+from typing import Union, List, Tuple, Optional, Any
+
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
-from .Data import Data, ROSMsgLibType
-from decimal import Decimal
-import decimal
 import numpy as np
 from numpy.typing import NDArray
-from pathlib import Path
 from rosbags.typesys import Stores, get_typestore
-import struct
-from typeguard import typechecked
-from typing import Union, List, Tuple
-from typing import Union, List, Any
 import tqdm
+from typeguard import typechecked
+
+from ..conversion_utils import col_to_dec_arr
+from ..ModuleImporter import ModuleImporter
+from .Data import Data, CoordinateFrame, ROSMsgLibType
 
 @typechecked
 class LiDARData(Data):
     """
     LiDAR Data class that contains LiDAR-specific attributes and methods.
     Inherits from the generic Data class.
+
+    NOTE: Assumes points at [0,0,0] are invalid and will set them to NaNs when necessary. 
+    Thus, all other points are assumed to be valid.
     """
 
-    point_clouds: NDArray[Decimal] # (T, N, 3) array of point clouds, with assumed (x, y, z) ordering
+    point_clouds: List[np.ndarray] # List of length T of (N, 3) arrays of point clouds, with assumed (x, y, z) ordering
+    channels: Optional[NDArray] # List of length T of (N) arrays with channel number for each point
     frame: CoordinateFrame
 
-    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: NDArray, frame: CoordinateFrame) -> None:
+    def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: List[np.ndarray], 
+                 channels: Optional[NDArray], frame: CoordinateFrame) -> None:
         super().__init__(frame_id, timestamps)
         self.point_clouds = point_clouds
+        self.channels = channels
         self.frame = frame
 
     # =========================================================================
@@ -41,7 +48,8 @@ class LiDARData(Data):
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str, frame: CoordinateFrame) -> LiDARData:
         """
         Load LiDAR data from a series of .npy files in a specified folder,
-        where file names correspond to timestamps.
+        where file names correspond to timestamps. Each point is expected to
+        contain either [x, y, z] or [x, y, z, channel].
 
         Args:
             npy_folder_path: Path to the folder.
@@ -55,51 +63,129 @@ class LiDARData(Data):
         all_npy_files: List[str] = [str(p) for p in Path(npy_folder_path).glob("*.npy")]
         print(f"Found {len(all_npy_files)} .npy files in folder {npy_folder_path}")
 
-        # Extract the timestamps and sort them
+        # Extract the timestamps and sort the npy files
         timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_npy_files])
         sorted_indices = np.argsort(timestamps)
         timestamps_sorted = timestamps[sorted_indices]
-
-        # Use sorted_indices to sort all_image_files in the same way
         all_npy_files_sorted = [all_npy_files[i] for i in sorted_indices]
 
         # Check the point cloud shape from the first file
         first_pc = np.load(all_npy_files_sorted[0], mmap_mode='r')
         # check shape
         assert len(first_pc.shape) == 2
-        assert first_pc.shape[1] == 3
+        assert first_pc.shape[1] in (3, 4)
+        has_channels = first_pc.shape[1] == 4
 
-        # Load all the point clouds into a single array
-        point_clouds = np.zeros((len(all_npy_files_sorted), first_pc.shape[0], 3), dtype=np.float64)
+        # Setup arrays to hold data
+        point_clouds_memmap: List[np.ndarray] = []
+        channels_memmap: Optional[List[np.ndarray]] = [] if has_channels else None
+            
+        # Load all the point clouds memory mapped (so they are kept on disk)
         pbar = tqdm.tqdm(total=len(all_npy_files_sorted), desc="Extracting Point Clouds...", unit=" files")
         for i, path in enumerate(all_npy_files_sorted):
-            point_clouds[i] = np.load(path, mmap_mode='r')
-            assert point_clouds[i].shape[0] == first_pc.shape[0]
+            pc = np.load(path, mmap_mode="r")
+            assert pc.shape == first_pc.shape
+
+            # Separate XYZ and optional channel
+            point_clouds_memmap.append(pc[:, :3])
+            if has_channels:
+                channels_memmap.append(pc[:, 3])
             pbar.update()
 
         # Return an LiDARData class
-        return cls(frame_id, timestamps_sorted, point_clouds, frame)
+        return cls(frame_id, timestamps_sorted, point_clouds_memmap, channels_memmap, frame)
+    
+    # def to_npy_files(self, output_folder_path: Union[Path, str]) -> None:
+    #     """
+    #     Save LiDAR point clouds to a series of .npy files in a specified folder,
+    #     where file names correspond to timestamps.
+
+    #     Args:
+    #         output_folder_path: Path to the output folder.
+    #     """
+
+    #     # Create the output folder
+    #     output_folder_path = Path(output_folder_path)
+    #     output_folder_path.mkdir(parents=True, exist_ok=True)
+
+    #     # Save each .npy file
+    #     num_frames = self.point_clouds.shape[0]
+    #     pbar = tqdm.tqdm(total=num_frames, desc="Saving Point Clouds...", unit=" files")
+    #     for i in range(num_frames):
+    #         if self.channels is not None:
+    #             pc = np.concatenate([self.point_clouds[i], self.channels[i][:, None]], axis=1)
+    #         else:
+    #             pc = self.point_clouds[i]
+    #         np.save(output_folder_path / f"{self.timestamps[i]}.npy", pc)
+    #         pbar.update()
+    #     pbar.close()
 
     # =========================================================================
-    # =========================== Frame Conversions =========================== 
-    # ========================================================================= 
-    def to_FLU_frame(self):
-        # If we are already in the FLU frame, return
-        if self.frame == CoordinateFrame.FLU:
-            print("Data already in FLU coordinate frame, returning...")
-            return
+    # ========================= Reproducible Loading ========================== 
+    # =========================================================================  
+    def get_point_cloud_at_index(self, index: int):
+        """ 
+        Gets the point cloud at index T and ensures all necessary transformations are applied.
+        This is a safe copy of the memmapped array, meaning it can be transformed and changed. 
+        """
 
-        # If in NED, run the conversion
-        elif self.frame == CoordinateFrame.NED:
-            R_NED = np.array([[1,  0,  0],
-                              [0, -1,  0],
-                              [0,  0, -1]])
-            for i in range(self.point_clouds.shape[0]):
-                self.point_clouds[i] = (R_NED @ self.point_clouds[i].T).T
-            self.frame = CoordinateFrame.FLU
+        pc = self.point_clouds[index].astype(np.float32, copy=True) 
+        channels = None
+        if self.channels is not None:
+            channels = self.channels[index].astype(np.int16, copy=True)
 
-        else:
-            raise RuntimeError(f"LiDARData class is in an unexpected frame: {self.frame}!")
+        # Mask invalid points (all zeros) and set to NaNs
+        mask_invalid = (pc == 0.0).all(axis=1) | np.isnan(pc).all(axis=1)
+        pc[mask_invalid] = np.nan
+
+        return pc, channels
+    
+    # =========================================================================
+    # ========================= Manipulation Methods ========================== 
+    # =========================================================================  
+    def calculate_point_channels(self, num_channels: int, v_min_angle: float, v_max_angle: float) -> None:
+        """ 
+        Calculate channel numbers for each point.
+         
+        NOTE: This assumes that lasers are evenly spaced within the angular range and that
+        the first laser fires at v_min_angle and the last laser fires at v_max_angle.
+        NOTE: Invalid points (NaNs) get a channel of -1.
+        """
+
+        if self.channels is not None:
+            raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
+
+        # Calculate laser line angles
+        laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
+
+        # Compute channels
+        channels = []
+        pbar = tqdm.tqdm(total=self.len(), desc="Calculating Point Channels...", unit=" frames")
+        for i in range(self.len()):
+            # Get point cloud
+            pc, _ = self.get_point_cloud_at_index(i)
+
+            # Extract dimensions
+            x = pc[:, 0]
+            y = pc[:, 1]
+            z = pc[:, 2]
+
+            # Compute vertical angle per point in degrees
+            horiz_dist = np.sqrt(x**2 + y**2)
+            vertical_angle = np.arctan2(z, horiz_dist) * 180.0 / np.pi
+
+            # Assign points to laser line that is closest to its angle
+            angle_diff = np.abs(vertical_angle[..., None] - laser_angles)
+            chan = np.argmin(angle_diff, axis=-1)
+
+            # Any point where x, y, or z is NaN gets a channel of -1
+            mask_invalid = np.isnan(pc).any(axis=1)
+            chan[mask_invalid] = -1
+            channels.append(chan.astype(np.int16))
+            pbar.update()
+
+        self.channels = channels
+        pbar.close()
 
     # =========================================================================
     # ============================ Visualization ============================== 
@@ -130,11 +216,21 @@ class LiDARData(Data):
         # Create the update function
         scatter = ax.scatter([], [], [], s=4, cmap='viridis')
         def update(frame: int):
-            pts = self.point_clouds[frame].astype(float)
+            # Load safe copy of memmap array for plotting
+            pts, channels = self.get_point_cloud_at_index(frame)
+
+            # Mask invalid points
+            nan_mask = np.isnan(pts).any(axis=1)
+            pts = pts[~nan_mask]
+            channels = channels[~nan_mask]
+
+            # Update the plot
             x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
-            scatter.set_offsets(np.c_[x, y])  # update X and Y
-            scatter.set_3d_properties(z, zdir='z')  # update Z
-            scatter.set_array(z)  # Set color based on Z
+            scatter._offsets3d = (x, y, z)  # update Z
+            if channels is not None:
+                scatter.set_array(channels)
+            else:
+                scatter.set_array(z)  # Set color based on Z
             title.set_text(f"LiDAR Frame {frame+1}/{self.len()-1}")
             return scatter, title
     
@@ -154,9 +250,8 @@ class LiDARData(Data):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/PointCloud2'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from sensor_msgs.msg import PointCloud2
-            return PointCloud2
+        elif lib_type == ROSMsgLibType.RCLPY:
+            return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg_type()!")
 
@@ -169,25 +264,27 @@ class LiDARData(Data):
             i (int): The index of the point cloud to convert.
         Raises:
             ValueError: If i is outside the data bounds.
-        """
 
+        NOTE: Currently publishes an unordered point cloud.
+        NOTE: Assumes all points are collected at same time (likely false in the real-world).
+        NOTE: Assumes channels data is provided (for RCLPY).
+        NOTE: Assumes intensity of 255 for all points (for RCLPY).
+        """
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
-        nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN))
-
-        # Get the point cloud data (N, 3) array
-        points = self.point_clouds[i]
-        num_points = points.shape[0]
-
-        # Convert points to binary data (x, y, z as float32)
-        point_data = points.astype(np.float32).tobytes()
+        nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9"))
 
         # Create PointCloud2 message
         if lib_type == ROSMsgLibType.ROSBAGS:
+            # Get the raw point cloud data (N, 3) array
+            points = self.point_clouds[i]
+            num_points = points.shape[0]
+            point_data = points.astype(np.float32).tobytes()
+
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             PointCloud2 = typestore.types['sensor_msgs/msg/PointCloud2']
             Header = typestore.types['std_msgs/msg/Header']
@@ -203,7 +300,7 @@ class LiDARData(Data):
 
             return PointCloud2(
                 header=Header(
-                    stamp=Time(sec=int(seconds), nanosec=int(nanoseconds)),
+                    stamp=Time(sec=seconds, nanosec=nanoseconds),
                     frame_id=self.frame_id
                 ),
                 height=1,
@@ -216,39 +313,57 @@ class LiDARData(Data):
                 is_dense=True
             )
 
-        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            from std_msgs.msg import Header
-            from sensor_msgs.msg import PointCloud2, PointField
+        elif lib_type == ROSMsgLibType.RCLPY:
+            # Get point cloud with NaN masking applied
+            pts, channels = self.get_point_cloud_at_index(i)
+            num_points = pts.shape[0]
 
-            # Create the message objects
-            pc2_msg = PointCloud2()
-            pc2_msg.header = Header()
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+            PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
+            PointField = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointField')
+            Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
 
-            if lib_type == ROSMsgLibType.RCLPY:
-                from rclpy.time import Time
-                pc2_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
-            else:  # ROSPY
-                import rospy
-                pc2_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
+            # Create the message object
+            pc_msg = PointCloud2()
+            pc_msg.header = Header()
+            pc_msg.header.stamp = Time(seconds=seconds, nanoseconds=nanoseconds).to_msg()
+            pc_msg.header.frame_id = self.frame_id
 
-            pc2_msg.header.frame_id = self.frame_id
-            pc2_msg.height = 1
-            pc2_msg.width = num_points
+            # Set the height and width assuming an unordered point cloud
+            pc_msg.height = 1
+            pc_msg.width = num_points
 
-            # Define point fields
-            pc2_msg.fields = [
-                PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
+            # Set the point fields
+            pc_msg.fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name="ring", offset=12, datatype=PointField.FLOAT32, count=1),
+                PointField(name="time", offset=16, datatype=PointField.FLOAT32, count=1),
+                PointField(name="intensity", offset=20, datatype=PointField.FLOAT32, count=1)
             ]
+            pc_msg.point_step = 24
+            pc_msg.row_step = pc_msg.point_step * num_points
 
-            pc2_msg.is_bigendian = False
-            pc2_msg.point_step = 12
-            pc2_msg.row_step = 12 * num_points
-            pc2_msg.data = point_data
-            pc2_msg.is_dense = True
+            # Fill in the remaining data
+            pc_msg.is_bigendian = sys.byteorder == "big"
+            pc_msg.is_dense = not np.isnan(pts).any()
 
-            return pc2_msg
+            # Calculate time and intensity (NOTE: Time is assumed to be zero & intensity assumed to be 255 for all points)
+            time = np.zeros((num_points, 1), dtype=np.float32)
+            intensity = np.ones((num_points, 1), dtype=np.float32) * 255
+
+            # Append channel and time onto our point cloud to get (N, 6)
+            if channels is not None:
+                pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
+            else:
+                raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
+
+            # Pack points into binary
+            fmt = "<ffffff" if not pc_msg.is_bigendian else ">ffffff"
+            pc_msg.data = b"".join(struct.pack(fmt, *p) for p in pc_aug)
+            return pc_msg
 
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg()!")
+        
