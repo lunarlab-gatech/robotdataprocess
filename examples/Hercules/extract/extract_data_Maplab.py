@@ -106,15 +106,19 @@ def main():
     # ========== CONFIGURE THESE PATHS ==========
 
     # Robot name (used for frame IDs in the bag)
-    robot_name = 'Drone1'
+    robot_name = 'Husky1'
     dataset_num = "V2.1.0"
 
     # Input directory containing your data
     user = getpass.getuser()
-    input_dir = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+    # input_dir = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/data/' + robot_name
+
+    # # Output bag path
+    # output_bag = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path
-    output_bag = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
+    output_bag = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
 
     # ==========================================
 
