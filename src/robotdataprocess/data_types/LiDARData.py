@@ -255,7 +255,7 @@ class LiDARData(Data):
 
     def get_ros_msg(self, lib_type: ROSMsgLibType, i: int):
         """
-        Gets a PointCloud2 ROS2 Humble message corresponding to the point cloud at index i.
+        Gets a PointCloud2 message corresponding to the point cloud at index i.
 
         Args:
             lib_type (ROSMsgLibType): The type of ROS message to return (e.g., ROSBAGS, RCLPY).
@@ -264,10 +264,9 @@ class LiDARData(Data):
             ValueError: If i is outside the data bounds.
 
         NOTE: Currently publishes an unordered point cloud.
-        NOTE: For ROSBAGS, only publishes xyz (no ring, time or intensity).
         NOTE: Assumes all points are collected at same time (likely false in the real-world).
-        NOTE: Assumes channels data is provided (for RCLPY/ROSPY).
-        NOTE: Assumes intensity of 255 for all points (for RCLPY/ROSPY).
+        NOTE: Assumes channels data is provided.
+        NOTE: Assumes intensity of 255 for all points.
         """
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
@@ -277,12 +276,22 @@ class LiDARData(Data):
         seconds = int(self.timestamps[i])
         nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9"))
 
+        # Get point cloud with NaN masking applied
+        pts, channels = self.get_point_cloud_at_index(i)
+        num_points = pts.shape[0]
+
+        # Calculate time and intensity (NOTE: Time is assumed to be zero & intensity assumed to be 255 for all points)
+        time = np.zeros((num_points, 1), dtype=np.float32)
+        intensity = np.ones((num_points, 1), dtype=np.float32) * 255
+
+        # Append channel and time onto our point cloud to get (N, 6)
+        if channels is not None:
+            pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
+        else:
+            raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
+
         # Create PointCloud2 message
         if lib_type == ROSMsgLibType.ROSBAGS:
-            # Get the raw point cloud data (N, 3) array
-            points, _ = self.get_point_cloud_at_index(i)
-            num_points = points.shape[0]
-            point_data = points.astype(np.float32).tobytes()
 
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             PointCloud2 = typestore.types['sensor_msgs/msg/PointCloud2']
@@ -294,28 +303,28 @@ class LiDARData(Data):
             fields = [
                 PointField(name='x', offset=0, datatype=7, count=1),   # FLOAT32 = 7
                 PointField(name='y', offset=4, datatype=7, count=1),
-                PointField(name='z', offset=8, datatype=7, count=1)
+                PointField(name='z', offset=8, datatype=7, count=1),
+                PointField(name="ring", offset=12, datatype=7, count=1),
+                PointField(name="time", offset=16, datatype=7, count=1),
+                PointField(name="intensity", offset=20, datatype=7, count=1)
             ]
 
             return PointCloud2(
                 header=Header(
-                    stamp=Time(sec=seconds, nanosec=nanoseconds),
+                    stamp=Time(sec=int(seconds), nanosec=int(nanoseconds)),
                     frame_id=self.frame_id
                 ),
                 height=1,
                 width=num_points,
                 fields=fields,
                 is_bigendian= (sys.byteorder == "big"),
-                point_step=12,  # 3 floats * 4 bytes
-                row_step=12 * num_points,
-                data=np.frombuffer(point_data, dtype=np.uint8),
-                is_dense=not np.isnan(points).any()
+                point_step=24,  # 3 floats * 4 bytes
+                row_step=24 * num_points,
+                data=np.frombuffer(pc_aug.astype(np.float32).tobytes(), dtype=np.uint8),
+                is_dense=not np.isnan(pts).any()
             )
 
         elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
-            # Get point cloud with NaN masking applied
-            pts, channels = self.get_point_cloud_at_index(i)
-            num_points = pts.shape[0]
 
             Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
             PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
@@ -351,16 +360,6 @@ class LiDARData(Data):
             # Fill in the remaining data
             pc_msg.is_bigendian = sys.byteorder == "big"
             pc_msg.is_dense = not np.isnan(pts).any()
-
-            # Calculate time and intensity (NOTE: Time is assumed to be zero & intensity assumed to be 255 for all points)
-            time = np.zeros((num_points, 1), dtype=np.float32)
-            intensity = np.ones((num_points, 1), dtype=np.float32) * 255
-
-            # Append channel and time onto our point cloud to get (N, 6)
-            if channels is not None:
-                pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
-            else:
-                raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
 
             # Pack points into binary
             fmt = "<ffffff" if not pc_msg.is_bigendian else ">ffffff"

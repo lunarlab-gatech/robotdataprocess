@@ -85,6 +85,7 @@ class TestLiDARData(unittest.TestCase):
         folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
         print(folder_path)
         lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        lidar_data.calculate_point_channels(51, -25, 25)
 
         # Get a ROS message for the first point cloud (index 0)
         ros_msg = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
@@ -99,11 +100,11 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.width, lidar_data.point_clouds[0].shape[0])  # Number of points
         self.assertEqual(ros_msg.is_bigendian, False)
         self.assertEqual(ros_msg.is_dense, False)
-        self.assertEqual(ros_msg.point_step, 12) 
-        self.assertEqual(ros_msg.row_step, 12 * lidar_data.point_clouds[0].shape[0])
+        self.assertEqual(ros_msg.point_step, 24) 
+        self.assertEqual(ros_msg.row_step, 24 * lidar_data.point_clouds[0].shape[0])
 
         # Validate fields (x, y, z)
-        self.assertEqual(len(ros_msg.fields), 3)
+        self.assertEqual(len(ros_msg.fields), 6)
         self.assertEqual(ros_msg.fields[0].name, 'x')
         self.assertEqual(ros_msg.fields[0].offset, 0)
         self.assertEqual(ros_msg.fields[0].datatype, 7)  # FLOAT32
@@ -112,9 +113,15 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.fields[1].offset, 4)
         self.assertEqual(ros_msg.fields[2].name, 'z')
         self.assertEqual(ros_msg.fields[2].offset, 8)
+        self.assertEqual(ros_msg.fields[3].name, 'ring')
+        self.assertEqual(ros_msg.fields[3].offset, 12)
+        self.assertEqual(ros_msg.fields[4].name, 'time')
+        self.assertEqual(ros_msg.fields[4].offset, 16)
+        self.assertEqual(ros_msg.fields[5].name, 'intensity')
+        self.assertEqual(ros_msg.fields[5].offset, 20)
 
         # Validate data array length
-        expected_data_length = lidar_data.point_clouds[0].shape[0] * 12  # num_points * point_step
+        expected_data_length = lidar_data.point_clouds[0].shape[0] * 24  # num_points * point_step
         self.assertEqual(len(ros_msg.data), expected_data_length)
 
         # Validate actual point cloud values by decoding the binary data
@@ -122,18 +129,18 @@ class TestLiDARData(unittest.TestCase):
         num_points = ros_msg.width
         unpacked_points = []
         for i in range(num_points):
-            offset = i * 12  # 12 bytes per point (3 floats × 4 bytes)
-            x, y, z = struct.unpack('<fff', binary_data[offset:offset+12])  # little-endian floats
-            unpacked_points.append([x, y, z])
+            offset = i * 24  # 12 bytes per point (3 floats × 4 bytes)
+            x, y, z, r, t, i = struct.unpack('<ffffff', binary_data[offset:offset+24])  # little-endian floats
+            unpacked_points.append([x, y, z, r, t, i])
         unpacked_points = np.array(unpacked_points)
 
         # Compare unpacked points with original point cloud data (though with zeros turned to NaNs)
         org_points = lidar_data.point_clouds[0].astype(np.float32)
         org_points_wNaNs = np.where(org_points == 0, np.nan, org_points)
-        np.testing.assert_allclose(unpacked_points, org_points_wNaNs)
+        np.testing.assert_allclose(unpacked_points[:,0:3], org_points_wNaNs)
 
         # Verify specific known points
-        np.testing.assert_array_almost_equal(unpacked_points[35], [26.67838478, 0.3280502, -9.79601479], decimal=5)
+        np.testing.assert_array_almost_equal(unpacked_points[35], [26.67838478, 0.3280502, -9.79601479, 5, 0, 255], decimal=5)
 
         # Test another index to ensure timestamps are handled correctly
         ros_msg_2 = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 1)
