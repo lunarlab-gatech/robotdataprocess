@@ -69,7 +69,7 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(lidar_data.channels, [[40, 40, 40, 31, 25, 20],
                                                             [ 9, 15, 0, 16, 8, -1]])
 
-    # Only testing ROSBAGS right now
+    # NOTE: Only testing ROSBAGS right now
     def test_get_ros_msg_type(self):
         """ Ensure we get the correct ROS message type. """
 
@@ -98,7 +98,7 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.height, 1)
         self.assertEqual(ros_msg.width, lidar_data.point_clouds[0].shape[0])  # Number of points
         self.assertEqual(ros_msg.is_bigendian, False)
-        self.assertEqual(ros_msg.is_dense, True)
+        self.assertEqual(ros_msg.is_dense, False)
         self.assertEqual(ros_msg.point_step, 12) 
         self.assertEqual(ros_msg.row_step, 12 * lidar_data.point_clouds[0].shape[0])
 
@@ -127,8 +127,10 @@ class TestLiDARData(unittest.TestCase):
             unpacked_points.append([x, y, z])
         unpacked_points = np.array(unpacked_points)
 
-        # Compare unpacked points with original point cloud data
-        np.testing.assert_allclose(unpacked_points, lidar_data.point_clouds[0].astype(np.float32))
+        # Compare unpacked points with original point cloud data (though with zeros turned to NaNs)
+        org_points = lidar_data.point_clouds[0].astype(np.float32)
+        org_points_wNaNs = np.where(org_points == 0, np.nan, org_points)
+        np.testing.assert_allclose(unpacked_points, org_points_wNaNs)
 
         # Verify specific known points
         np.testing.assert_array_almost_equal(unpacked_points[35], [26.67838478, 0.3280502, -9.79601479], decimal=5)
