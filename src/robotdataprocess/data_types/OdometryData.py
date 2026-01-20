@@ -566,7 +566,7 @@ class OdometryData(PathData):
                 msg.pose.pose.orientation.y = float(self.orientations[i][1])
                 msg.pose.pose.orientation.z = float(self.orientations[i][2])
                 msg.pose.pose.orientation.w = float(self.orientations[i][3])
-                msg.pose.covariance = np.zeros(36)
+                msg.pose.covariance = np.zeros(36) # NOTE: Assumes covariance of zero.
                 msg.twist = TwistWithCovariance()
                 msg.twist.twist.linear = Vector3()
                 msg.twist.twist.linear.x = 0.0  # NOTE: Currently doesn't support Twist
@@ -585,7 +585,7 @@ class OdometryData(PathData):
                 msg.gyro_bias.x = 0.0
                 msg.gyro_bias.y = 0.0
                 msg.gyro_bias.z = 0.0
-                msg.odometry_state = 0 # Assumes default state
+                msg.odometry_state = 0 # NOTE: Assumes default state
                 return msg
 
             elif msg_type == "Path":

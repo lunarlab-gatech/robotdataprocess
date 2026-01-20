@@ -2,7 +2,7 @@ import argparse
 from decimal import Decimal
 import getpass
 from pathlib import Path
-from robotdataprocess import ImuData, OdometryData, CoordinateFrame
+from robotdataprocess import ImuData, OdometryData, CoordinateFrame, LiDARData
 from robotdataprocess.data_types.Data import ROSMsgLibType
 from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
@@ -20,6 +20,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     odom_data = OdometryData.from_csv(input_path.parent / 'extract' / 'files_for_roman_baseline' / robot_name / 'poseGT.csv', 'map', robot_name + '/base_link', CoordinateFrame.FLU, True, None)
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_right_Scene')
+    lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Crop the data
     if crop_data:
@@ -27,15 +28,19 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
         odom_data.crop_data(Decimal('0.0'), end_time)
         left_image_data.crop_data(Decimal('0.0'), end_time)
         right_image_data.crop_data(Decimal('0.0'), end_time)
+        raise NotADirectoryError("Crop Data not implemented for lidar_data!")
 
     # Publish the data via ROS2 topics
-    publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
+    publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data, odom_data, lidar_data], 
                                   ['/'+robot_name+'/imu0',
                                    '/'+robot_name+'/cam0/image_raw',
                                    '/'+robot_name+'/cam1/image_raw',
-                                   '/'+robot_name+'/odom_gt'],
-                                    [None, None, None, "Path"], 
-                                    [1, 1, 1, 1], ROSMsgLibType.ROSPY, True, verbose=True)
+                                   '/'+robot_name+'/odom_gt',
+                                   '/'+robot_name+'/rovioli/maplab_odom_T_M_I',
+                                   '/'+robot_name+'/lidar'],
+                                    [None, None, None, "Path", "maplab_msg/OdometryWithImuBiases", None], 
+                                    [200, 20, 20, 20, 20, 20],
+                                    [1, 1, 1, 1, 1, 1], ROSMsgLibType.ROSPY, True, verbose=True)
     # publish_data_ROS_multiprocess([imu_data, left_image_data, right_image_data, odom_data], 
     #                               ['/'+robot_name+'/imu0', 
     #                                '/'+robot_name+'/cam0/image_raw', 
