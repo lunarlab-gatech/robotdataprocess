@@ -583,7 +583,7 @@ class OdometryData(PathData):
                 msg.gyro_bias.x = 0.0
                 msg.gyro_bias.y = 0.0
                 msg.gyro_bias.z = 0.0
-                msg.odometry_state = 0 # Assumes default state
+                msg.odometry_state = 0 # NOTE: Assumes default state
                 return msg
 
             elif msg_type == "Path":
