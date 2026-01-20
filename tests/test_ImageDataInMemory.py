@@ -32,7 +32,7 @@ class TestImageDataInMemory(unittest.TestCase):
         if not os.path.isfile(path_hercules_bag_db3):
             safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
         if not os.path.isfile(path_hercules_bag_yaml):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/vsi1tpihpar87459upyiw/metadata.yaml?rlkey=ozi4h0i4wp0kr7ckvaybz70uq&st=vxs10bqt&dl=1", path_hercules_bag_yaml)
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/2iu1djmhedy1j4qci53a4/metadata.yaml?rlkey=x0kb00pruubxtbaojht4ui5yl&st=9b41wq07&dl=1", path_hercules_bag_yaml)
 
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""

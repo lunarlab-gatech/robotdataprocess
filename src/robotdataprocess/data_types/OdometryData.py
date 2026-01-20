@@ -564,7 +564,7 @@ class OdometryData(PathData):
                 msg.pose.pose.orientation.y = float(self.orientations[i][1])
                 msg.pose.pose.orientation.z = float(self.orientations[i][2])
                 msg.pose.pose.orientation.w = float(self.orientations[i][3])
-                msg.pose.covariance = np.zeros(36)
+                msg.pose.covariance = np.zeros(36) # NOTE: Assumes covariance of zero.
                 msg.twist = TwistWithCovariance()
                 msg.twist.twist.linear = Vector3()
                 msg.twist.twist.linear.x = 0.0  # NOTE: Currently doesn't support Twist
