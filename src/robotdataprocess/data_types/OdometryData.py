@@ -337,7 +337,7 @@ class OdometryData(PathData):
     # =========================================================================  
 
     @typechecked
-    def to_csv(self, csv_path: Union[Path, str]):
+    def to_csv(self, csv_path: Union[Path, str], write_header: bool = True):
         """
         Writes the odometry data to a .csv file. Note that data will be
         saved in the following order: timestamp, pos.x, pos.y, pos.z,
@@ -346,6 +346,7 @@ class OdometryData(PathData):
         Args:
             csv_path (Path | str): Path to the output csv file.
             odom_topic (str): Topic of the Odometry messages.
+            write_header (bool): If false, skip the header row.
         Returns:
             OdometryData: Instance of this class.
         """
@@ -363,7 +364,8 @@ class OdometryData(PathData):
             writer = csv.writer(csvfile, delimiter=',')
 
             # Write the first row
-            writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
+            if write_header:
+                writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
                 
             # Write message data to the csv file
             for i in range(len(self.timestamps)):

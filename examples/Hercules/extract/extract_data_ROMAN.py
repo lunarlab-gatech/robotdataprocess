@@ -30,7 +30,7 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
         rgb_data.to_npy(output_path / robot_name / 'rgb')
 
     # Load the odometry data
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED)
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
 
     # Convert to the FLU coordinate frame & crop
     pose_data.to_FLU_frame()
@@ -42,11 +42,11 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
                 print("Deleting CSV file at this location previously...")
                 os.remove(output_path / robot_name / 'poseGT.csv')
     os.makedirs(output_path / robot_name, exist_ok=True)
-    pose_data.to_csv(output_path / robot_name / 'poseGT.csv')
+    pose_data.to_csv(output_path / robot_name / 'poseGT.csv', write_header=True)
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.1.2"
+    dataset_num = "V2.2.0"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
