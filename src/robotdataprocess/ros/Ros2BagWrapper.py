@@ -11,6 +11,7 @@ from rosbags.rosbag1.writer import Connection
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.rosbag2 import Writer as Writer2
 from rosbags.typesys import Stores, get_typestore, get_types_from_msg
+import sys
 from rosbags.typesys.store import Typestore
 import tqdm
 from typeguard import typechecked
@@ -102,6 +103,23 @@ class Ros2BagWrapper:
     def get_typestore(self) -> Typestore:
         """ Return the ROS2 typestore """
         return self.typestore2
+
+    @staticmethod
+    def _create_writer2(path: Union[Path, str]) -> Writer2:
+        """
+        Create a Writer2 instance with compatibility for different rosbags library versions.
+        Older versions (used with Python 3.8) don't support the 'version' parameter.
+
+        Args:
+            path (Path | str): Path to the output ROS2 bag file.
+        Returns:
+            Writer2: A Writer2 instance configured appropriately.
+        """
+        sig = inspect.signature(Writer2.__init__)
+        if 'version' in sig.parameters:
+            return Writer2(path, version=9)
+        else:
+            return Writer2(path)
 
     # =========================================================================
     # ============================ Hertz Analysis =============================
@@ -399,7 +417,7 @@ class Ros2BagWrapper:
             connections = reader.connections
 
             # Create a writer with only the specified topics
-            with Writer2(output_bag) as writer:
+            with Ros2BagWrapper._create_writer2(output_bag) as writer:
                 conn_map = {}
                 for conn in connections:
                     if (conn.topic in topic_downsample_ratios) or include_unmentioned_topics:
@@ -533,7 +551,7 @@ class Ros2BagWrapper:
             connections = reader.connections
             
             # Setup the bag writer
-            with Writer2(output_bag) as writer:
+            with Ros2BagWrapper._create_writer2(output_bag) as writer:
                 conn_map = {}
                 for conn in connections:
                     conn_map[conn.topic] = writer.add_connection(
@@ -581,7 +599,7 @@ class Ros2BagWrapper:
         typestore = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS2_HUMBLE, external_msgs_path)
 
         # Open a ROS2 Humble bag for writing
-        with Writer2(str(bag_path)) as writer:
+        with Ros2BagWrapper._create_writer2(str(bag_path)) as writer:
 
             # For each data class
             for i in range(0, len(data_list)):
@@ -627,6 +645,8 @@ class Ros2BagWrapper:
         "sensor_msgs/msg/Image": "sensor_msgs/msg/Image",
         "sensor_msgs/msg/Imu": "sensor_msgs/msg/Imu",
         "sensor_msgs/msg/CameraInfo": "sensor_msgs/msg/CameraInfo",
+        "sensor_msgs/msg/PointCloud2": "sensor_msgs/msg/PointCloud2",
+        "sensor_msgs/msg/PointField": "sensor_msgs/msg/PointField",
         "sensor_msgs/msg/RegionOfInterest": "sensor_msgs/msg/RegionOfInterest",
         "std_msgs/msg/Header": "std_msgs/msg/Header",
         "tf2_msgs/msg/TFMessage": "tf2_msgs/msg/TFMessage"
@@ -763,6 +783,25 @@ class Ros2BagWrapper:
                 "binning_x": "binning_x",
                 "binning_y": "binning_y",
                 "roi": ("roi", self._get_mapping_2to1("sensor_msgs/msg/RegionOfInterest"))
+            }
+        elif msg_type == "sensor_msgs/msg/PointCloud2":
+            map = {
+                "header": ("header", self._get_mapping_2to1("std_msgs/msg/Header")),
+                "height": "height",
+                "width": "width",
+                "fields": ("fields", self._get_mapping_2to1("sensor_msgs/msg/PointField")),
+                "is_bigendian": "is_bigendian",
+                "point_step": "point_step",
+                "row_step": "row_step",
+                "data": "data",
+                "is_dense": "is_dense"
+            }
+        elif msg_type == "sensor_msgs/msg/PointField":
+            map = {
+                "name": "name",
+                "offset": "offset",
+                "datatype": "datatype",
+                "count": "count"
             }
         elif msg_type == "sensor_msgs/msg/RegionOfInterest":
             map = {
@@ -962,6 +1001,13 @@ class Ros2BagWrapper:
             if name == 'self':
                 continue
 
+            # Get the type of this parameter
+            type_str = str(param.annotation)
+
+            # Skip ClassVar parameters as they are class-level attributes, not instance parameters
+            if 'ClassVar' in type_str:
+                continue
+
             # Get the ros2 object for this parameter
             try:
                 name_ros2 = map1to2[name]
@@ -970,9 +1016,6 @@ class Ros2BagWrapper:
                 ros2_msg_attr = getattr(ros2_msg, name_ros2)
             except: # No matching ros2 mapping
                 ros2_msg_attr = None
-
-            # Get the type of this parameter
-            type_str = str(param.annotation)
 
             # If it is a list, add as many default values to list as needed
             if "list" in type_str:

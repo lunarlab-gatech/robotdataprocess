@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr
-from .Data import Data, CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
-from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
-from pathlib import Path
+from rosbags.typesys import Stores, get_typestore
 import struct
 import sys
+from pathlib import Path
+import tqdm
 from typeguard import typechecked
 from typing import Union, List, Tuple, Optional, Any
-import tqdm
+
+from ..conversion_utils import col_to_dec_arr
+from ..ModuleImporter import ModuleImporter
+from .Data import Data, CoordinateFrame, ROSMsgLibType
 
 @typechecked
 class LiDARData(Data):
@@ -66,8 +68,8 @@ class LiDARData(Data):
         timestamps_sorted = timestamps[sorted_indices]
         all_npy_files_sorted = [all_npy_files[i] for i in sorted_indices]
 
-        # Check the point cloud shape from the first file
-        first_pc = np.load(all_npy_files_sorted[0], 'r')
+        # Check shape
+        first_pc = np.load(all_npy_files_sorted[0], mmap_mode='r')
         assert len(first_pc.shape) == 2
         assert first_pc.shape[1] in (3, 4)
         has_channels = first_pc.shape[1] == 4
@@ -236,52 +238,85 @@ class LiDARData(Data):
             plt.show()
 
     # =========================================================================
-    # =========================== Conversion to ROS =========================== 
-    # ========================================================================= 
+    # =================== ROS Message Conversion Methods =====================
+    # =========================================================================
 
-    @staticmethod
+    @staticmethod 
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
-        """ Return the __msgtype__ for an LiDAR (Point Cloud) msg. """
+        """ Return the __msgtype__ for a PointCloud2 msg. """
 
-        if lib_type == ROSMsgLibType.RCLPY:
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            return typestore.types['sensor_msgs/msg/PointCloud2'].__msgtype__
+        elif lib_type == ROSMsgLibType.RCLPY:
             return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
         else:
-            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg_type()!")
-            
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg_type()!")
+
     def get_ros_msg(self, lib_type: ROSMsgLibType, i: int):
         """
-        Gets an Image ROS2 message corresponding to the LiDAR scan.
-        
+        Gets a PointCloud2 ROS2 Humble message corresponding to the point cloud at index i.
+
         Args:
-            lib_type: The ROS library we're getting the message for.
-            i (int): The index of the image message to convert.
+            lib_type (ROSMsgLibType): The type of ROS message to return (e.g., ROSBAGS, RCLPY).
+            i (int): The index of the point cloud to convert.
         Raises:
             ValueError: If i is outside the data bounds.
 
         NOTE: Currently publishes an unordered point cloud.
+        NOTE: For ROSBAGS, only publishes xyz (no ring, time or intensity).
         NOTE: Assumes all points are collected at same time (likely false in the real-world).
-        NOTE: Assumes channels data is provided.
-        NOTE: Assumes intensity of 255 for all points.
+        NOTE: Assumes channels data is provided (for RCLPY/ROSPY).
+        NOTE: Assumes intensity of 255 for all points (for RCLPY/ROSPY).
         """
-
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
             raise ValueError(f"Index {i} is out of bounds!")
-        
-        # Make a temporary copy so we can safely modify it
-        pts, channels = self.get_point_cloud_at_index(i)
-
-        # Convert [0,0,0] points to NaN
-        mask_zeros = (pts == 0.0).all(axis=1)
-        pts[mask_zeros] = np.nan
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
-        nanoseconds = (self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) \
-                       * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN)
+        nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9"))
 
-        # Write the data into the new msg
-        if lib_type == ROSMsgLibType.RCLPY:
+        # Create PointCloud2 message
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            # Get the raw point cloud data (N, 3) array
+            points, _ = self.get_point_cloud_at_index(i)
+            num_points = points.shape[0]
+            point_data = points.astype(np.float32).tobytes()
+
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            PointCloud2 = typestore.types['sensor_msgs/msg/PointCloud2']
+            Header = typestore.types['std_msgs/msg/Header']
+            Time = typestore.types['builtin_interfaces/msg/Time']
+            PointField = typestore.types['sensor_msgs/msg/PointField']
+
+            # Define point fields for x, y, z
+            fields = [
+                PointField(name='x', offset=0, datatype=7, count=1),   # FLOAT32 = 7
+                PointField(name='y', offset=4, datatype=7, count=1),
+                PointField(name='z', offset=8, datatype=7, count=1)
+            ]
+
+            return PointCloud2(
+                header=Header(
+                    stamp=Time(sec=seconds, nanosec=nanoseconds),
+                    frame_id=self.frame_id
+                ),
+                height=1,
+                width=num_points,
+                fields=fields,
+                is_bigendian= (sys.byteorder == "big"),
+                point_step=12,  # 3 floats * 4 bytes
+                row_step=12 * num_points,
+                data=np.frombuffer(point_data, dtype=np.uint8),
+                is_dense=not np.isnan(points).any()
+            )
+
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
+            # Get point cloud with NaN masking applied
+            pts, channels = self.get_point_cloud_at_index(i)
+            num_points = pts.shape[0]
+
             Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
             PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
             PointField = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointField')
@@ -298,7 +333,6 @@ class LiDARData(Data):
             pc_msg.header.frame_id = self.frame_id
 
             # Set the height and width assuming an unordered point cloud
-            num_points = pts.shape[0]
             pc_msg.height = 1
             pc_msg.width = num_points
 
@@ -315,14 +349,14 @@ class LiDARData(Data):
             pc_msg.row_step = pc_msg.point_step * num_points
 
             # Fill in the remaining data
-            pc_msg.is_bigendian = True if sys.byteorder == "big" else False
+            pc_msg.is_bigendian = sys.byteorder == "big"
             pc_msg.is_dense = not np.isnan(pts).any()
 
             # Calculate time and intensity (NOTE: Time is assumed to be zero & intensity assumed to be 255 for all points)
             time = np.zeros((num_points, 1), dtype=np.float32)
             intensity = np.ones((num_points, 1), dtype=np.float32) * 255
 
-            # Append channel and time onto our point cloud to get (T, N, 5)
+            # Append channel and time onto our point cloud to get (N, 6)
             if channels is not None:
                 pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
             else:
@@ -334,4 +368,5 @@ class LiDARData(Data):
             return pc_msg
 
         else:
-            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for OdometryData.get_ros_msg()!")
+            raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg()!")
+        
