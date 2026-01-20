@@ -19,7 +19,7 @@ def main():
         est_data_lst: list[OdometryData] = [est_data_husky1, est_data_husky2]
         for est_data in est_data_lst:
             est_data.timestamps = est_data.timestamps / Decimal('1e9')  # Convert from ns to s
-        est_data_drone1.visualize([est_data_husky1], ["Drone1 Maplab Results","Husky1 Maplab Results"], 10, 40)
+        est_data_husky2.visualize([est_data_husky1], ["Drone1 Maplab Results","Husky1 Maplab Results"], 10, 40)
 
         # Load the ground truth data
         gt_data_husky1 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Husky1/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)

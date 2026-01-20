@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import decimal
 from decimal import Decimal
-from pathlib import Path
-import struct
-import sys
-from typing import Union, List, Tuple, Optional, Any
-
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from rosbags.typesys import Stores, get_typestore
+import struct
+import sys
+from pathlib import Path
 import tqdm
 from typeguard import typechecked
+from typing import Union, List, Tuple, Optional, Any
 
 from ..conversion_utils import col_to_dec_arr
 from ..ModuleImporter import ModuleImporter
@@ -69,9 +68,8 @@ class LiDARData(Data):
         timestamps_sorted = timestamps[sorted_indices]
         all_npy_files_sorted = [all_npy_files[i] for i in sorted_indices]
 
-        # Check the point cloud shape from the first file
+        # Check shape
         first_pc = np.load(all_npy_files_sorted[0], mmap_mode='r')
-        # check shape
         assert len(first_pc.shape) == 2
         assert first_pc.shape[1] in (3, 4)
         has_channels = first_pc.shape[1] == 4
@@ -266,9 +264,10 @@ class LiDARData(Data):
             ValueError: If i is outside the data bounds.
 
         NOTE: Currently publishes an unordered point cloud.
+        NOTE: For ROSBAGS, only publishes xyz (no ring, time or intensity).
         NOTE: Assumes all points are collected at same time (likely false in the real-world).
-        NOTE: Assumes channels data is provided (for RCLPY).
-        NOTE: Assumes intensity of 255 for all points (for RCLPY).
+        NOTE: Assumes channels data is provided (for RCLPY/ROSPY).
+        NOTE: Assumes intensity of 255 for all points (for RCLPY/ROSPY).
         """
         # Check to make sure index is within data bounds
         if i < 0 or i >= self.len():
@@ -281,7 +280,7 @@ class LiDARData(Data):
         # Create PointCloud2 message
         if lib_type == ROSMsgLibType.ROSBAGS:
             # Get the raw point cloud data (N, 3) array
-            points = self.point_clouds[i]
+            points, _ = self.get_point_cloud_at_index(i)
             num_points = points.shape[0]
             point_data = points.astype(np.float32).tobytes()
 
@@ -306,14 +305,14 @@ class LiDARData(Data):
                 height=1,
                 width=num_points,
                 fields=fields,
-                is_bigendian=False,
+                is_bigendian= (sys.byteorder == "big"),
                 point_step=12,  # 3 floats * 4 bytes
                 row_step=12 * num_points,
                 data=np.frombuffer(point_data, dtype=np.uint8),
-                is_dense=True
+                is_dense=not np.isnan(points).any()
             )
 
-        elif lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             # Get point cloud with NaN masking applied
             pts, channels = self.get_point_cloud_at_index(i)
             num_points = pts.shape[0]
@@ -321,12 +320,16 @@ class LiDARData(Data):
             Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
             PointCloud2 = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
             PointField = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointField')
-            Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
 
             # Create the message object
             pc_msg = PointCloud2()
             pc_msg.header = Header()
-            pc_msg.header.stamp = Time(seconds=seconds, nanoseconds=nanoseconds).to_msg()
+            if lib_type == ROSMsgLibType.RCLPY: 
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                pc_msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+            else:
+                rospy = ModuleImporter.get_module('rospy')
+                pc_msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
             pc_msg.header.frame_id = self.frame_id
 
             # Set the height and width assuming an unordered point cloud
