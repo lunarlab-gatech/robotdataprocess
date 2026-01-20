@@ -111,10 +111,8 @@ def main():
 
     # Input directory containing your data
     user = getpass.getuser()
-    # input_dir = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # # Output bag path
-    # output_bag = '/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_num + '/extract/bags_for_maplab/' + robot_name + '.bag'
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data/' + robot_name
 
     # Output bag path

@@ -14,9 +14,6 @@ def main():
             
         # Load the odometry data
         user = getpass.getuser()
-        # est_data_husky1 = OdometryData.from_csv('/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_name + '/results/maplab_results/maplab/merged_map/vertex_poses_velocities_biases.csv', "odom", 'base_link', CoordinateFrame.NED, True, [0,3,4,5,6,7,8,9], filter=(' mission-id', ' 07ad112986f78b180a00000000000000'))
-        # est_data_drone1 = OdometryData.from_csv('/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_name + '/results/maplab_results/maplab/merged_map/vertex_poses_velocities_biases.csv', "odom", 'base_link', CoordinateFrame.NED, True, [0,3,4,5,6,7,8,9], filter=(' mission-id', ' edf50d2986f78b180a00000000000000'))
-        # est_data_lst: list[OdometryData] = [est_data_drone1, est_data_husky1]
         est_data_husky1 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/results/maplab_results/maplab/merged_map/vertex_poses_velocities_biases.csv', "odom", 'base_link', CoordinateFrame.NED, True, [0,3,4,5,6,7,8,9], filter=(' mission-id', ' 9d9572d8194a7f180900000000000000'))
         est_data_husky2 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/results/maplab_results/maplab/merged_map/vertex_poses_velocities_biases.csv', "odom", 'base_link', CoordinateFrame.NED, True, [0,3,4,5,6,7,8,9], filter=(' mission-id', ' 38a88adc194a7f180900000000000000'))
         est_data_lst: list[OdometryData] = [est_data_husky1, est_data_husky2]
@@ -25,9 +22,6 @@ def main():
         est_data_drone1.visualize([est_data_husky1], ["Drone1 Maplab Results","Husky1 Maplab Results"], 10, 40)
 
         # Load the ground truth data
-        # gt_data_drone1 = OdometryData.from_csv('/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Drone1/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
-        # gt_data_husky1 = OdometryData.from_csv('/media/' + user + '/T7/GT/SLAM/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Husky1/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
-        # gt_data_lst: list[OdometryData] = [gt_data_drone1, gt_data_husky1]
         gt_data_husky1 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Husky1/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
         gt_data_husky2 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Husky2/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
         gt_data_lst: list[OdometryData] = [gt_data_husky1, gt_data_husky2]
