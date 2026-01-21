@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 import tqdm
 from typeguard import typechecked
-from typing import Union, List, Tuple, Optional, Any
+from typing import Union, List, Tuple, Optional, Any, Callable
 
 from ..conversion_utils import col_to_dec_arr
 from ..ModuleImporter import ModuleImporter
@@ -38,6 +38,9 @@ class LiDARData(Data):
         self.point_clouds = point_clouds
         self.channels = channels
         self.frame = frame
+
+        # Used to transform LiDAR data
+        self.transformations: List[Callable] = []
 
     # =========================================================================
     # ============================ Class Methods ============================== 
@@ -136,6 +139,10 @@ class LiDARData(Data):
         mask_invalid = (pc == 0.0).all(axis=1) | np.isnan(pc).all(axis=1)
         pc[mask_invalid] = np.nan
 
+        # Apply any other requested transformations
+        for trans in self.transformations:
+            pc, channels = trans(pc, channels)
+
         return pc, channels
     
     # =========================================================================
@@ -184,6 +191,25 @@ class LiDARData(Data):
 
         self.channels = channels
         pbar.close()
+
+    def make_dense(self):
+        """ Removes invalid points (infinity and NaNs) to make the point cloud dense. """
+
+        def dense_transformation(pts: np.ndarray, channels: Optional[np.ndarray]) -> np.ndarray:
+            """
+            Args:
+                pts: A (N, 3) point cloud array.
+                channels: A (N) channel array.
+            Returns:
+                A filtered (M, 3) point cloud with only valid points.
+            """
+
+            valid_mask = np.isfinite(pts).all(axis=1)
+            return pts[valid_mask], channels[valid_mask]
+
+
+        if dense_transformation not in self.transformations:
+            self.transformations.append(dense_transformation)
 
     # =========================================================================
     # ============================ Visualization ============================== 

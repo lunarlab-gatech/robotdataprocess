@@ -19,6 +19,10 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
+    # Prepare LiDARData
+    lidar_data.calculate_point_channels(16, -20, 20)
+    lidar_data.make_dense()
+
     # Shift GT data to start at Identity to be roughly close to odometry output
     pose_data.shift_to_start_at_identity()
 
