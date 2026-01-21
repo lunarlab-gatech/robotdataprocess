@@ -56,19 +56,6 @@ class CmdLineInterface():
     # ======================== Operations ===========================
     # ===============================================================
 
-    def hertz_analysis(self):
-        """ Analyze the hertz of various topics in a ROS2 bag. """
-
-        # Extract operation specific parameters
-        topic: str = self.operation_params['hertz_analysis']['topic']
-        output_folder: str = self.operation_params['hertz_analysis']['output_folder']
-        expected_msgs: int = self.operation_params['hertz_analysis']['expected_msgs']
-        max_msgs: int = self.operation_params['hertz_analysis']['max_msgs']
-        try: robot_name: str = self.operation_params['hertz_analysis']['robot_name']
-        except: robot_name = None
-
-        self.bag_wrapper.hertz_analysis(topic, output_folder, expected_msgs, max_msgs, robot_name)
-
     def view_imu_data(self):
         """ Plot IMU data contained in a ROS2 bag. """
 
