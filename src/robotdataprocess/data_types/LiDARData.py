@@ -6,7 +6,9 @@ from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
+from rosbags.typesys.store import Typestore
 import struct
 import sys
 from pathlib import Path
@@ -17,6 +19,7 @@ from typing import Union, List, Tuple, Optional, Any, Callable
 from ..conversion_utils import col_to_dec_arr
 from ..ModuleImporter import ModuleImporter
 from .Data import Data, CoordinateFrame, ROSMsgLibType
+from ..ros.Ros2BagWrapper import Ros2BagWrapper
 
 @typechecked
 class LiDARData(Data):
@@ -96,31 +99,95 @@ class LiDARData(Data):
         # Return an LiDARData class
         return cls(frame_id, timestamps_sorted, point_clouds_memmap, channels_memmap, frame)
     
-    # def to_npy_files(self, output_folder_path: Union[Path, str]) -> None:
-    #     """
-    #     Save LiDAR point clouds to a series of .npy files in a specified folder,
-    #     where file names correspond to timestamps.
+    @classmethod
+    @typechecked
+    def from_ros2_bag(cls, bag_path: Union[Path, str], lidar_topic: str, frame_id: str, frame: CoordinateFrame):
+        """
+        Creates a class structure from a ROS2 bag file with an PointCloud2 topic.
 
-    #     Args:
-    #         output_folder_path: Path to the output folder.
-    #     """
+        Args:
+            bag_path (Path | str): Path to the ROS2 bag file.
+            lidar_topic (str): Topic of the Imu messages.
+            frame_id (str): The frame where this IMU data was collected.
+            frame: The coordinate frame of the LiDAR data.
+        Returns:
+            LiDARData: Instance of this class.
+        """
 
-    #     # Create the output folder
-    #     output_folder_path = Path(output_folder_path)
-    #     output_folder_path.mkdir(parents=True, exist_ok=True)
+        # Get topic message count and typestore
+        bag_wrapper = Ros2BagWrapper(bag_path, None)
+        typestore: Typestore = bag_wrapper.get_typestore()
+        num_msgs: int = bag_wrapper.get_topic_count(lidar_topic)
+        print(f"Found {num_msgs} messages on topic {lidar_topic}")
 
-    #     # Save each .npy file
-    #     num_frames = self.point_clouds.shape[0]
-    #     pbar = tqdm.tqdm(total=num_frames, desc="Saving Point Clouds...", unit=" files")
-    #     for i in range(num_frames):
-    #         if self.channels is not None:
-    #             pc = np.concatenate([self.point_clouds[i], self.channels[i][:, None]], axis=1)
-    #         else:
-    #             pc = self.point_clouds[i]
-    #         np.save(output_folder_path / f"{self.timestamps[i]}.npy", pc)
-    #         pbar.update()
-    #     pbar.close()
+        # TODO: Load the frame id directly from the ROS2 bag.
 
+        # Setup arrays to hold data
+        point_clouds: List[np.ndarray] = []
+        channels: Optional[List[np.ndarray]] = None
+        timestamps: List[float] = []
+
+        # Extract the point clouds/timestamps and save
+        pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Point Clouds...", unit=" msgs")
+        with Reader2(bag_path) as reader: 
+            i = 0
+            connections = [x for x in reader.connections if x.topic == lidar_topic]
+            for conn, _, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_cdr(rawdata, conn.msgtype)
+
+                # Get useful values
+                field_names = [f.name for f in msg.fields]
+                num_points = len(msg.data) // msg.point_step
+
+                # Determine struct format for each point
+                fmt_chars = []
+                for f in msg.fields:
+                    if f.datatype == 7:  # FLOAT32
+                        fmt_chars.append('f')
+                    elif f.datatype == 4:  # UINT16
+                        fmt_chars.append('H')
+                    else:
+                        raise ValueError(f"Unsupported field datatype {f.datatype} for field {f.name}")
+                fmt = ('>' if msg.is_bigendian else '<') + ''.join(fmt_chars)
+                struct_size = struct.calcsize(fmt)
+                assert struct_size == msg.point_step, "Point step does not match struct size!"
+
+                # Initialize arrays
+                points_xyz = np.zeros((num_points, 3), dtype=np.float32)
+                points_ring = None
+                if "ring" in field_names:
+                    points_ring = np.zeros(num_points, dtype=np.uint8)
+                    if channels is None:
+                        channels = []
+
+                # Unpack each point once
+                for i in range(num_points):
+                    start = i * msg.point_step
+                    end = start + msg.point_step
+                    point_bytes = msg.data[start:end]
+                    point_vals = struct.unpack(fmt, point_bytes)
+
+                    # Map field values by name
+                    field_dict = {name: point_vals[idx] for idx, name in enumerate(field_names)}
+
+                    # Extract XYZ
+                    points_xyz[i] = [field_dict['x'], field_dict['y'], field_dict['z']]
+
+                    # Extract ring if exists
+                    if points_ring is not None:
+                        points_ring[i] = field_dict['ring']
+
+                point_clouds.append(points_xyz)
+                if points_ring is not None:
+                    channels.append(points_ring)
+
+                # Timestamp
+                timestamps.append(msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9)
+                pbar.update(1)
+
+        # Create an ImageData class
+        return cls(frame_id, timestamps, point_clouds, channels, frame)
+    
     # =========================================================================
     # ========================= Reproducible Loading ========================== 
     # =========================================================================  
@@ -155,12 +222,35 @@ class LiDARData(Data):
         NOTE: This assumes that lasers are evenly spaced within the angular range and that
         the first laser fires at v_min_angle and the last laser fires at v_max_angle.
         NOTE: Invalid points (NaNs) get a channel of -1.
+        NOTE: Assumes laser angles of a VLP-16 LiDAR.
         """
 
         if self.channels is not None:
             raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
 
-        # Calculate laser line angles
+        # == Calculate laser line angles (From VLP-16), with a weaved pattern between negative and positive numbers
+        # all_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
+        # neg = all_angles[all_angles < 0]
+        # pos = all_angles[all_angles > 0]
+        # zero = all_angles[all_angles == 0]
+
+        # # Interleave negatives and positives
+        # laser_angles = []
+        # for n, p in zip(neg, pos):
+        #     laser_angles.append(n)
+        #     laser_angles.append(p)
+        
+        # # If one side has one extra (odd number of channels), append it
+        # if len(neg) > len(pos):
+        #     laser_angles.append(neg[-1])
+        # elif len(pos) > len(neg):
+        #     laser_angles.append(pos[-1])
+        
+        # # If there is exactly 0, insert it in the middle
+        # if zero.size > 0:
+        #     mid = len(laser_angles) // 2
+        #     laser_angles.insert(mid, 0.0)
+
         laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
 
         # Compute channels
@@ -311,11 +401,31 @@ class LiDARData(Data):
         time = np.zeros((num_points, 1), dtype=np.float32)
         intensity = np.ones((num_points, 1), dtype=np.float32) * 255
 
-        # Append channel and time onto our point cloud to get (N, 6)
+        # Build the raw byte array manually to match PointField offsets
         if channels is not None:
-            pc_aug = np.concatenate([pts, channels[:, np.newaxis], time, intensity], axis=-1)
+
+            point_dtype = np.dtype([
+                ('x', np.float32),
+                ('y', np.float32),
+                ('z', np.float32),
+                ('ring', np.uint16),
+                ('padding', np.uint16), # 2-byte padding
+                ('time', np.float32),
+                ('intensity', np.float32)
+            ])
+
+            pc_struct = np.zeros(num_points, dtype=point_dtype)
+            pc_struct['x'] = pts[:, 0]
+            pc_struct['y'] = pts[:, 1]
+            pc_struct['z'] = pts[:, 2]
+            pc_struct['ring'] = channels.astype(np.uint16)
+            pc_struct['padding'] = 0 
+            pc_struct['time'] = time[:, 0]
+            pc_struct['intensity'] = intensity[:, 0]
+
+            pc_bytes = pc_struct.tobytes()
         else:
-            raise RuntimeError("ROS2 PointCloud2 message expects channels data, but it has not been provided or calculated via calculate_point_channels()!")
+            raise RuntimeError("Channels has not yet been created with calculate_point_channels()!")
 
         # Create PointCloud2 message
         if lib_type == ROSMsgLibType.ROSBAGS:
@@ -331,7 +441,7 @@ class LiDARData(Data):
                 PointField(name='x', offset=0, datatype=7, count=1),   # FLOAT32 = 7
                 PointField(name='y', offset=4, datatype=7, count=1),
                 PointField(name='z', offset=8, datatype=7, count=1),
-                PointField(name="ring", offset=12, datatype=7, count=1),
+                PointField(name="ring", offset=12, datatype=4, count=1),
                 PointField(name="time", offset=16, datatype=7, count=1),
                 PointField(name="intensity", offset=20, datatype=7, count=1)
             ]
@@ -347,7 +457,7 @@ class LiDARData(Data):
                 is_bigendian= (sys.byteorder == "big"),
                 point_step=24,  # 3 floats * 4 bytes
                 row_step=24 * num_points,
-                data=np.frombuffer(pc_aug.astype(np.float32).tobytes(), dtype=np.uint8),
+                data=np.frombuffer(pc_bytes, dtype=np.uint8),
                 is_dense=not np.isnan(pts).any()
             )
 
@@ -377,7 +487,7 @@ class LiDARData(Data):
                 PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
                 PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
                 PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-                PointField(name="ring", offset=12, datatype=PointField.FLOAT32, count=1),
+                PointField(name="ring", offset=12, datatype=PointField.UINT16, count=1),
                 PointField(name="time", offset=16, datatype=PointField.FLOAT32, count=1),
                 PointField(name="intensity", offset=20, datatype=PointField.FLOAT32, count=1)
             ]
@@ -388,9 +498,8 @@ class LiDARData(Data):
             pc_msg.is_bigendian = sys.byteorder == "big"
             pc_msg.is_dense = not np.isnan(pts).any()
 
-            # Pack points into binary
-            fmt = "<ffffff" if not pc_msg.is_bigendian else ">ffffff"
-            pc_msg.data = b"".join(struct.pack(fmt, *p) for p in pc_aug)
+            # Save byte data
+            pc_msg.data = pc_bytes
             return pc_msg
 
         else:

@@ -130,7 +130,7 @@ class TestLiDARData(unittest.TestCase):
         unpacked_points = []
         for i in range(num_points):
             offset = i * 24  # 12 bytes per point (3 floats × 4 bytes)
-            x, y, z, r, t, i = struct.unpack('<ffffff', binary_data[offset:offset+24])  # little-endian floats
+            x, y, z, r, t, i = struct.unpack('<fffHxxff', binary_data[offset:offset+24])  # little-endian floats
             unpacked_points.append([x, y, z, r, t, i])
         unpacked_points = np.array(unpacked_points)
 

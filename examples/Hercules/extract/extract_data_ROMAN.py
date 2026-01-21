@@ -46,7 +46,7 @@ def data_extraction(input_dir: str, robot_name: str, crop_data: bool, end_time: 
 
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.2.0"
+    dataset_num = "V2.3.C"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
