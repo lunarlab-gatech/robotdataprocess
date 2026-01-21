@@ -28,4 +28,4 @@ def col_to_dec_arr(collection: Union[NDArray, list]) -> NDArray[Decimal]:
     
 def dec_arr_to_float_arr(decimal_array: NDArray[Decimal]) -> NDArray[float]:
     """ Converts decimal arrays into float arrays for use with external libraries. """
-    return np.vectorize(float)(decimal_array)
+    return np.array(decimal_array.tolist(), dtype=np.float64)

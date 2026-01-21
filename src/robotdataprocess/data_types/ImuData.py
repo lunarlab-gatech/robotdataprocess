@@ -3,6 +3,7 @@ from .Data import Data, CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from ..ModuleImporter import ModuleImporter
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
@@ -13,7 +14,7 @@ from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, Any, Optional
+from typing import Union, Any, Optional, List
 import tqdm
 
 @typechecked
@@ -168,6 +169,46 @@ class ImuData(Data):
         self.ang_vel = self.ang_vel[mask]
         if self.orientations is not None:
             self.orientations = self.orientations[mask]
+
+    # =========================================================================
+    # ============================ Visualization ============================== 
+    # =========================================================================  
+
+    def visualize(self, ts_start: float, ts_end: float):
+        """ Plot the linear acceleration, angular velocity, and orientation data. """
+
+        def multi_list_plotter(data: np.ndarray, timestamps: np.ndarray, title: str, keys: List[str], ylabel: str):
+            """
+            Helper function that plots each list in a dictionary in its own subplot,
+            all in a single matplotlib figure.
+            """
+
+            num_plots = data.shape[1]
+            fig, axes = plt.subplots(num_plots, 1, figsize=(10, 3 * num_plots), sharex=True)
+
+            # Make it a list always
+            if num_plots == 1:
+                axes = [axes]
+            timestamps_shifted = timestamps - timestamps[0]
+
+            for i in range(0, num_plots):
+                axes[i].plot(timestamps_shifted, data[:,i], label=keys[i])
+                axes[i].set_ylabel(f"{keys[i]} - ({ylabel})")
+                axes[i].grid(True)
+                axes[i].legend(loc='upper right')
+
+            axes[-1].set_xlabel("Time (s)")
+            fig.suptitle(f"{title} vs Time", fontsize=14)
+            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+            plt.show()
+            plt.close(fig)
+
+        # Create all plots
+        mask = (self.timestamps >= ts_start) & (self.timestamps <= ts_end)
+        timestamps_float = dec_arr_to_float_arr(self.timestamps[mask])
+        multi_list_plotter(dec_arr_to_float_arr(self.lin_acc[mask]), timestamps_float, "Linear Acceleration", ['x', 'y', 'z'], "m/s^2")
+        multi_list_plotter(dec_arr_to_float_arr(self.ang_vel[mask]), timestamps_float, "Angular Velocity", ['roll', 'pitch', 'yaw'], "rad/s")
+        multi_list_plotter(dec_arr_to_float_arr(self.orientations[mask]), timestamps_float, "Orientation", ['x', 'y', 'z', 'w'], "units")
         
     # =========================================================================
     # ============================ Export Methods ============================= 

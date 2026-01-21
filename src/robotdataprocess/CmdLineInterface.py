@@ -56,22 +56,6 @@ class CmdLineInterface():
     # ======================== Operations ===========================
     # ===============================================================
 
-    def view_imu_data(self):
-        """ Plot IMU data contained in a ROS2 bag. """
-
-        # Extract operation specific parameters
-        topic: str = self.operation_params['view_imu_data']['topic']
-        output_folder: str = self.operation_params['view_imu_data']['output_folder']
-        try: expected_msgs: int = self.operation_params['view_imu_data']['expected_msgs']
-        except: expected_msgs = None
-        try:
-            data_range = self.operation_params['view_imu_data']['data_range']
-            assert len(data_range) == 2
-            data_range = tuple(data_range)
-        except: data_range = None
-
-        self.bag_wrapper.view_imu_data(topic, output_folder, expected_msgs, data_range)
-
     def downsample(self):
         """ Downsample a ROS2 bag file. """
 

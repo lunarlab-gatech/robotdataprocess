@@ -246,7 +246,8 @@ class LiDARData(Data):
             # Mask invalid points
             nan_mask = np.isnan(pts).any(axis=1)
             pts = pts[~nan_mask]
-            channels = channels[~nan_mask]
+            if channels is not None:
+                channels = channels[~nan_mask]
 
             # Update the plot
             x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
