@@ -214,8 +214,8 @@ class ImuData(Data):
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
-    def to_PathData(self, initial_pos: NDArray[float], initial_vel: NDArray[float], 
-                    initial_ori: NDArray[float], use_ang_vel: bool) -> PathData:
+    def to_PathData(self, initial_pos: NDArray, initial_vel: NDArray, 
+                    initial_ori: NDArray, use_ang_vel: bool) -> PathData:
         """
         Converts this IMUData class into OdometeryData by integrating the IMU data using
         Euler's method.
