@@ -182,7 +182,8 @@ class TestRosPublisher(unittest.TestCase):
         def assert_data_dict_equal(data_sent: LiDARData, matched_index: int, msg_recieved: dict):
             exp_num_points = data_sent.point_clouds[matched_index].shape[0]
             np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[0], msg_recieved["point_clouds"])
-            np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[1], msg_recieved["channels"])
+            np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[1], 
+                                          msg_recieved["channels"])
             np.testing.assert_array_equal(np.zeros(exp_num_points), msg_recieved["time"])
             np.testing.assert_array_equal(255 * np.ones(exp_num_points), msg_recieved["intensity"])
             np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])

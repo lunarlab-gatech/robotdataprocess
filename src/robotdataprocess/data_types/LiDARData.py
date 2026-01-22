@@ -42,6 +42,10 @@ class LiDARData(Data):
         self.channels = channels
         self.frame = frame
 
+        # Check data types
+        if self.channels is not None:
+            assert self.channels.dtype == np.uint16, "Channels must be np.uint16"
+
         # Used to transform LiDAR data
         self.transformations: List[Callable] = []
 
@@ -200,7 +204,7 @@ class LiDARData(Data):
         pc = self.point_clouds[index].astype(np.float32, copy=True) 
         channels = None
         if self.channels is not None:
-            channels = self.channels[index].astype(np.int16, copy=True)
+            channels = self.channels[index].astype(np.uint16, copy=True)
 
         # Mask invalid points (all zeros) and set to NaNs
         mask_invalid = (pc == 0.0).all(axis=1) | np.isnan(pc).all(axis=1)
@@ -221,7 +225,7 @@ class LiDARData(Data):
          
         NOTE: This assumes that lasers are evenly spaced within the angular range and that
         the first laser fires at v_min_angle and the last laser fires at v_max_angle.
-        NOTE: Invalid points (NaNs) get a channel of -1.
+        NOTE: Invalid points (NaNs) get a channel of 65535.
         NOTE: Assumes laser angles of a VLP-16 LiDAR.
         """
 
@@ -271,12 +275,12 @@ class LiDARData(Data):
 
             # Assign points to laser line that is closest to its angle
             angle_diff = np.abs(vertical_angle[..., None] - laser_angles)
-            chan = np.argmin(angle_diff, axis=-1)
+            chan = np.argmin(angle_diff, axis=-1).astype(np.uint16)
 
-            # Any point where x, y, or z is NaN gets a channel of -1
+            # Any point where x, y, or z is NaN gets maximum uint value
             mask_invalid = np.isnan(pc).any(axis=1)
-            chan[mask_invalid] = -1
-            channels.append(chan.astype(np.int16))
+            chan[mask_invalid] = np.iinfo(np.uint16).max
+            channels.append(chan)
             pbar.update()
 
         self.channels = channels
