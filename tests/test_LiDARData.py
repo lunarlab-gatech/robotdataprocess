@@ -67,7 +67,7 @@ class TestLiDARData(unittest.TestCase):
         lidar_data.calculate_point_channels(41, -20, 20)
 
         np.testing.assert_array_equal(lidar_data.channels, [[40, 40, 40, 31, 25, 20],
-                                                            [ 9, 15, 0, 16, 8, -1]])
+                                                            [ 9, 15, 0, 16, 8, 65535]])
 
     # NOTE: Only testing ROSBAGS right now
     def test_get_ros_msg_type(self):
