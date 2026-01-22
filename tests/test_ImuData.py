@@ -51,6 +51,20 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(imu_data.orientations[84].astype(np.float128), [0.001867, -0.000799, 0.927410, 0.374042])
         np.testing.assert_equal(imu_data.frame_id, '/Husky2/robot')
 
+        bag_path_2 = Path(Path('.'), 'tests', 'temporary_files', 'test_ImuData', 'test_from_txt_file', 'imu_ori_bag').absolute()
+        if os.path.isdir(bag_path_2):
+            os.remove(bag_path_2 / 'imu_ori_bag.db3')
+            os.remove(bag_path_2 / 'metadata.yaml')
+            os.rmdir(bag_path_2)
+        Ros2BagWrapper.write_data_to_rosbag(bag_path_2, [imu_data], ['/imu'], [None], None)
+
+        ros_data_2 = ImuData.from_ros2_bag(bag_path_2, '/imu', '/Husky1/base_link')
+        np.testing.assert_equal(float(ros_data_2.timestamps[84]), 331.79)
+        np.testing.assert_array_equal(ros_data_2.lin_acc[84].astype(np.float128), [-8.800791, -0.004754, -9.927985])
+        np.testing.assert_array_equal(ros_data_2.ang_vel[84].astype(np.float128), [ 0.000035,  0.001181, -0.005946])
+        np.testing.assert_array_equal(ros_data_2.orientations[84].astype(np.float128), [0.001867, -0.000799, 0.927410, 0.374042])
+        np.testing.assert_equal(ros_data_2.frame_id, '/Husky1/base_link')
+
     def test_crop_data(self):
         """ Make sure data is successfully cropped. """
 
@@ -65,26 +79,6 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(imu_data_cropped.lin_acc, imu_data.lin_acc[13:75])
         np.testing.assert_array_equal(imu_data_cropped.ang_vel, imu_data.ang_vel[13:75])
         np.testing.assert_equal(imu_data_cropped.orientations, None)
-
-
-    # def test_to_FLU_frame(self):
-    #     """ 
-    #     Makes sure that the conversion from NED to ROS functions properly.
-    #     """
-
-    #     # Load the IMU data
-    #     file_path = Path(Path('.'), 'tests', 'test_outputs', 'test_from_txt_file', 'imu.txt').absolute()
-    #     imu_data = ImuData.from_txt_file(file_path, '/Husky1/base_link', CoordinateFrame.NED)
-
-    #     # Convert into a ROS frame
-    #     imu_data.to_FLU_frame()
-
-    #     # Make sure this data matches what we expect
-    #     np.testing.assert_equal(float(imu_data.timestamps[87212]), 436.065000)
-    #     np.testing.assert_array_equal(imu_data.lin_acc[87212].astype(np.float128), [-0.124648, 0.091863, 10.415014])
-    #     np.testing.assert_array_equal(imu_data.ang_vel[87212].astype(np.float128), [0.001785, -0.004928, -0.003135])
-    #     np.testing.assert_array_equal(imu_data.orientation[87212].astype(np.float128), [1, 0, 0, 0])
-    #     np.testing.assert_equal(imu_data.frame_id, '/Husky1/base_link')
 
 if __name__ == "__main__":
     unittest.main()
