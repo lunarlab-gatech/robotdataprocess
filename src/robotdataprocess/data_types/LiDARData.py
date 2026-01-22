@@ -36,7 +36,7 @@ class LiDARData(Data):
     frame: CoordinateFrame
 
     def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: List[np.ndarray], 
-                 channels: Optional[NDArray], frame: CoordinateFrame) -> None:
+                 channels: Optional[List[np.ndarray]], frame: CoordinateFrame) -> None:
         super().__init__(frame_id, timestamps)
         self.point_clouds = point_clouds
         self.channels = channels
