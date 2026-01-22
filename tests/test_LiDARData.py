@@ -74,11 +74,17 @@ class TestLiDARData(unittest.TestCase):
 
         pc_list = [np.array([[0, 0, 0], [1, 4, 6], [0, 1, 0], [np.inf, np.inf, np.inf], [0, 1, np.inf]])]
         lidar_data = LiDARData('lidar_link', np.array([0]), pc_list, None, CoordinateFrame.NED)
-
         lidar_data.make_dense()
-
         pc_expected = np.array([[1, 4, 6], [0, 1, 0]])
         np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
+
+        pc_list = [np.array([[0, 0, 0], [1, 4, 6], [0, 1, 0], [np.inf, np.inf, np.inf], [0, 1, np.inf]])]
+        lidar_data = LiDARData('lidar_link', np.array([0]), pc_list, [np.array([0, 1, 2, 3, 4], dtype=np.uint16)], CoordinateFrame.NED)
+        lidar_data.make_dense()
+        pc_expected = np.array([[1, 4, 6], [0, 1, 0]])
+        channels_expected = np.array([1,2], dtype=np.uint16)
+        np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
+        np.testing.assert_array_equal(channels_expected, lidar_data.get_point_cloud_at_index(0)[1])
 
     # NOTE: Only testing ROSBAGS right now
     def test_get_ros_msg_type(self):

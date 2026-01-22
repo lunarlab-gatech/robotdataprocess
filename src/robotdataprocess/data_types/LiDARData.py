@@ -32,7 +32,7 @@ class LiDARData(Data):
     """
 
     point_clouds: List[np.ndarray] # List of length T of (N, 3) arrays of point clouds, with assumed (x, y, z) ordering
-    channels: Optional[NDArray] # List of length T of (N) arrays with channel number for each point
+    channels: Optional[List[np.ndarray]] # List of length T of (N) arrays with channel number for each point
     frame: CoordinateFrame
 
     def __init__(self, frame_id: str, timestamps: np.ndarray | list, point_clouds: List[np.ndarray], 
@@ -44,7 +44,8 @@ class LiDARData(Data):
 
         # Check data types
         if self.channels is not None:
-            assert self.channels.dtype == np.uint16, "Channels must be np.uint16"
+            for chan in self.channels:
+                assert chan.dtype == np.uint16, "Channels must be np.uint16"
 
         # Used to transform LiDAR data
         self.transformations: List[Callable] = []
