@@ -257,7 +257,7 @@ class ImuData(Data):
         # Integrate the IMU data
         for i in range(1, self.len()):
             # Get time difference
-            dt: float = dec_arr_to_float_arr(self.timestamps[i] - self.timestamps[i-1]).item()
+            dt: float = dec_arr_to_float_arr(np.array([self.timestamps[i] - self.timestamps[i-1]])).item()
 
             # Calculate orientation
             if use_ang_vel:

@@ -3,7 +3,7 @@ name = "robotdataprocess"
 version = "0.2"
 authors = [
   { name="Daniel Butterfield", email="danielcbutter@gmail.com" },
-  { name="Hanzhi Li", email="danielcbutter@gmail.com" },
+  { name="Hanzhi Li", email="ivan_li_hz@outlook.com" },
   { name="Sandilya Sai Garimella", email="sgarimella34@gatech.edu"}
 ]
 description = "A library for loading, saving, converting, and manipulating robotic datasets."

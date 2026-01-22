@@ -3,7 +3,7 @@ from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFra
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Husky1"]
+    robot_names = ["Drone1"]
     dataset_version = "V2.3.C"
     file_names = ['vins_result_no_loop_reformatted.csv', 'vins_result_loop_reformatted.csv']
 

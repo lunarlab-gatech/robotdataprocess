@@ -5,8 +5,8 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.1.0"
+    robot_names = ["Husky1"]
+    dataset_version = "V2.3.C"
     file_name = 'ov_estimate.txt'
 
     for robot_name in robot_names:

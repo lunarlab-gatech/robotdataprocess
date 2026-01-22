@@ -44,7 +44,7 @@ def main():
     dataset_num = "V2.3.C"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky1"]
+    robot_names = ["Husky2"]
     robot_crop_end_times = [None] 
 
     # Check validity of inputs
