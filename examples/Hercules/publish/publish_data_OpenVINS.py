@@ -15,7 +15,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
     pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'global', 'body', CoordinateFrame.NED, False)
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_center_Scene')
@@ -35,6 +35,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     publish_data_ROS_multiprocess([imu_data, pose_data, left_image_data, right_image_data], 
                                   ['/imu0', '/odom_gt', '/cam0/image_raw', '/cam1/image_raw'],
                                   [None, "Path", None, None],
+                                  [500, 20, 20, 20],
                                   [1, 1, 3, 3],
                                    ROSMsgLibType.RCLPY, True, verbose=True)
     
