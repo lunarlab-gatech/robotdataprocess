@@ -299,8 +299,10 @@ class LiDARData(Data):
             """
 
             valid_mask = np.isfinite(pts).all(axis=1)
-            return pts[valid_mask], channels[valid_mask]
-
+            channels_dense = None
+            if channels is not None:
+                channels_dense = channels[valid_mask]
+            return pts[valid_mask], channels_dense
 
         if dense_transformation not in self.transformations:
             self.transformations.append(dense_transformation)

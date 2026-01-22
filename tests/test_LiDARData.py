@@ -68,6 +68,17 @@ class TestLiDARData(unittest.TestCase):
 
         np.testing.assert_array_equal(lidar_data.channels, [[40, 40, 40, 31, 25, 20],
                                                             [ 9, 15, 0, 16, 8, 65535]])
+        
+    def test_make_dense(self):
+        """ Ensure invalid points (infinities and NaNs are removed) """
+
+        pc_list = [np.array([[0, 0, 0], [1, 4, 6], [0, 1, 0], [np.inf, np.inf, np.inf], [0, 1, np.inf]])]
+        lidar_data = LiDARData('lidar_link', np.array([0]), pc_list, None, CoordinateFrame.NED)
+
+        lidar_data.make_dense()
+
+        pc_expected = np.array([[1, 4, 6], [0, 1, 0]])
+        np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
 
     # NOTE: Only testing ROSBAGS right now
     def test_get_ros_msg_type(self):
