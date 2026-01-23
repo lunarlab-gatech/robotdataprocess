@@ -99,10 +99,3 @@ class CmdLineInterface():
         topic: str = self.operation_params['extract_images_to_npy']['topic']
         output_folder: str = self.operation_params['extract_images_to_npy']['output_folder']
         ImageDataInMemory.from_ros2_bag(self.input_bag, topic, output_folder)
-
-    def compare_timestamps_two_image_data(self):
-        """ Compare timestamps between two ImageData instances. """
-
-        data0 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_0'])
-        data1 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_1'])
-        data0.compare_timestamps(data1)

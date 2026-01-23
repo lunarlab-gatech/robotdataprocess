@@ -112,6 +112,7 @@ jobs:
     name: "Merge & Upload Coverage Reports"
     needs: [python3_8-tests, python3_10-tests, ros2-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python 3.10
