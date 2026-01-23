@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Husky2"]
+    robot_names = ["Drone1"]
     dataset_version = "V2.3.C"
     file_names = ['odometry.csv']
 
@@ -22,16 +22,16 @@ def main():
             
             # Convert frame to FLU
             est_data.to_FLU_frame()
-            est_data.visualize([], ["LIO-SAM"], axes_interval=100)
 
             # Calculate RMS ATE, among other metrics
-            metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+            metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1,   
+                                                                                visualize=True, axes_interval=500)
             print("\nMetrics for file: ", file_name)
             print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-            print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+            print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'], "\n")
 
-            print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-            print("Robot: ", robot_name, "RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+            print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+            print("Robot: ", robot_name, "RMS RPE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
 
 
 if __name__ == "__main__":
