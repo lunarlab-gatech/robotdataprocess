@@ -14,7 +14,7 @@ from pathlib import Path
 # Each robot entry: (robot_name, mission_id)
 # The mission_id is used to filter the maplab CSV for this specific robot
 ROBOTS = [
-    ("Husky1", " dbdc55034cb48e180b00000000000000"),
+    ("Husky1", " c5cb121be3b88e180b00000000000000"),
     # ("Husky2", " 38a88adc194a7f180900000000000000"),
     # ("Drone1", " <mission-id-here>"),
 ]
@@ -49,11 +49,13 @@ def main():
         # Visualize initial estimated data
         est_data_lst[0].visualize([], [f"{robot_names[0]} Maplab Results"], 10, 40)
 
+
         # Load the ground truth data for each robot
         gt_data_lst: list[OdometryData] = []
         for robot_name, _ in ROBOTS:
             input_path = Path(base_path).absolute()
             gt_data = OdometryData.from_txt_file(input_path / dataset_name / 'data' / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
+            gt_data.to_FLU_frame()
             gt_data_lst.append(gt_data)
 
         # Make the timestamps match
@@ -66,26 +68,18 @@ def main():
         R_NED_Q = R.from_matrix(R_NED)
 
         # Apply coordinate transformations to individual estimated trajectories
-        # for est_data in est_data_lst:
-        #     est_data._ori_apply_rotation(R_NED_Q.inv())
-        #     est_data._ori_change_of_basis(R_NED_Q)
-        #     est_data.frame = CoordinateFrame.FLU
         for est_data in est_data_lst:
-            import copy
-            est_data_copy = copy.deepcopy(est_data)
-            # est_data_copy.to_FLU_frame()
             est_data._ori_apply_rotation(R_NED_Q.inv())
             est_data._ori_change_of_basis(R_NED_Q)
-            est_data.shift_position(5, 5, 0)
-            #est_data._ori_change_of_basis(R_NED_Q)
-            est_data.visualize([est_data_copy], ["After to_FLU_frame", "Before to_FLU_frame"], [10, 10], [40, 40])
+            est_data.frame = CoordinateFrame.FLU
+
+
 
         # 1. Compare individual robots with their ground truths
         for est_data, gt_data, name in zip(est_data_lst, gt_data_lst, robot_names):
             print(f"\n{'='*50}")
             print(f"Individual Results for {name}")
             print(f"{'='*50}")
-
             est_data.visualize([gt_data], [f"{name} Maplab Results", f"{name} Ground Truth"], [10, 10], [40, 1000])
 
             metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
