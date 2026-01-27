@@ -56,35 +56,6 @@ class CmdLineInterface():
     # ======================== Operations ===========================
     # ===============================================================
 
-    def hertz_analysis(self):
-        """ Analyze the hertz of various topics in a ROS2 bag. """
-
-        # Extract operation specific parameters
-        topic: str = self.operation_params['hertz_analysis']['topic']
-        output_folder: str = self.operation_params['hertz_analysis']['output_folder']
-        expected_msgs: int = self.operation_params['hertz_analysis']['expected_msgs']
-        max_msgs: int = self.operation_params['hertz_analysis']['max_msgs']
-        try: robot_name: str = self.operation_params['hertz_analysis']['robot_name']
-        except: robot_name = None
-
-        self.bag_wrapper.hertz_analysis(topic, output_folder, expected_msgs, max_msgs, robot_name)
-
-    def view_imu_data(self):
-        """ Plot IMU data contained in a ROS2 bag. """
-
-        # Extract operation specific parameters
-        topic: str = self.operation_params['view_imu_data']['topic']
-        output_folder: str = self.operation_params['view_imu_data']['output_folder']
-        try: expected_msgs: int = self.operation_params['view_imu_data']['expected_msgs']
-        except: expected_msgs = None
-        try:
-            data_range = self.operation_params['view_imu_data']['data_range']
-            assert len(data_range) == 2
-            data_range = tuple(data_range)
-        except: data_range = None
-
-        self.bag_wrapper.view_imu_data(topic, output_folder, expected_msgs, data_range)
-
     def downsample(self):
         """ Downsample a ROS2 bag file. """
 
@@ -128,10 +99,3 @@ class CmdLineInterface():
         topic: str = self.operation_params['extract_images_to_npy']['topic']
         output_folder: str = self.operation_params['extract_images_to_npy']['output_folder']
         ImageDataInMemory.from_ros2_bag(self.input_bag, topic, output_folder)
-
-    def compare_timestamps_two_image_data(self):
-        """ Compare timestamps between two ImageData instances. """
-
-        data0 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_0'])
-        data1 = ImageDataInMemory.from_npy(self.operation_params['compare_timestamps_two_image_data']['folder_1'])
-        data0.compare_timestamps(data1)

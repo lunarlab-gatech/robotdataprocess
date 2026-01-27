@@ -2,56 +2,26 @@
 
 [![Python Unit Tests](https://github.com/lunarlab-gatech/robotdataprocess/actions/workflows/python_test.yml/badge.svg?branch=master)](https://github.com/lunarlab-gatech/robotdataprocess/actions/workflows/python_test.yml) [![Coverage Status](https://coveralls.io/repos/github/lunarlab-gatech/robotdataprocess/badge.svg?branch=master)](https://coveralls.io/github/lunarlab-gatech/robotdataprocess?branch=master)
 
-A library for loading, saving, converting, and manipulating robotic datasets.
-
-Currently, for operations with rosbags, the library inputs and outputs ROS2 Humble bags. For converting to ROS1 bags, the output bag will be compatible with ROS1 Noetic.
+A library for loading, saving, converting, publishsing, and manipulating robotic datasets. Most notably, it can load data in a variety of formats and then publish them live over ROS1 or ROS2. This circumvents the need to convert datasets into rosbags first, saving disk space.
 
 **WARNING:** Currently, this repository is in active development and functionality isn't guaranteed to work. If you will depend on this repository for important tasks, perhaps write test cases for the corresponding functionality before deployment/use.
 
 ## Installation
 
-You will need Python 3.8+ to run this code. Run the following commands to install the repository:
+This repository is officially supported with:
+- Python 3.8 (for use with ROS1 Noetic & ROS2 Foxy/Galactic) 
+- Python 3.10 (for use with ROS2 Humble and later)
+
+Run the following commands to install the repository:
 ```
 git submodule init
 git submodule update
 pip install .
 ```
 
-## Example Use
+## Documentation
 
-### Command Line Examples
-
-See use cases for this repository below. For more information on specific operations, see the corresponding config file. All of these operations can be launched by running the following command below (or a similar one):
-```
-robotdataprocess <repository_path>/config/<operation name.yaml
-```
-
-#### Hertz Analysis
-Generate histograms with an analysis of the hertz rates for a specific topic. If you want to investigate the `/tf` or `/tf_static` topic, these contain headers per transform, and thus you need to specify the name of the robot, as shown in `config/hertz_analysis_tf.yaml`.
-
-#### View IMU Data
-Plot the linear acceleration, angular velocity, and orientation data of an IMU topic in a ROS2 bag.
-
-#### Downsample (& Prune)
-
-This functionality allows downsampling the hertz rates of topics in the bag (for example, 40 Hz to 5 Hz). It can also prune topics by setting `include_unmentioned_topics` to false. 
-
-#### Crop
-A ROS2 bag can be cropped to only include message written into the bag within a certain timeframe with this feature. Note that this doesn't take into account the timestamps inside the messages, but just the recieve time of the messages.
-
-#### ROS2 to ROS1 conversion
-A ROS2 bag can be converted to ROS1 with this functionality, note that only certain message types are supported (see `msg_mapping_ros2_to_ros1` in `Ros2BagWrapper.py` for all supported messages). When running the command, any unsuported message types will print a warning message. 
-
-Note that support for more messages can be easily added by altering `get_mapping()` and `msg_mapping_ros2_to_ros1` in `Ros2BagWrapper.py`.
-
-#### Extract Odometry to CSV
-Extract odometry from a ROS2 bag and save in a csv file.
-
-#### Extract Images to Npy
-Extract images from a ROS2 bag and saves them into .npy files. 
-
-#### Compare Timestamps between two sets of Image Data
-Compare timestamps between two sets of image data, loaded from .npy files.
+Documentation is a WIP.
 
 ### Code Examples
 
@@ -62,9 +32,9 @@ Various examples of doing this can be seen in the `examples` directory. For any 
 For example, `OdometryData` can:
 - Load from ROS2 bag, CSV file, or TXT file.
 - Add noise or shift position.
-- Export to ROS2 bag or CSV file.
+- Export to ROS2 bag, publish over ROS2 or ROS1, or save to a CSV file.
 - Visualize various OdometryData classes as paths via matplotlib.
-- Convert from NED to ROS frame.
+- Convert frames.
 
 ## Validation
 

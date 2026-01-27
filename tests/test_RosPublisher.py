@@ -3,15 +3,16 @@ from multiprocessing import Process
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import LiDARData, CoordinateFrame, ImuData
+from robotdataprocess import LiDARData, CoordinateFrame, ImuData, OdometryData
 from robotdataprocess.data_types.Data import Data, ROSMsgLibType
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.OdometryData import PATH_SLICE_STEP
 from robotdataprocess.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 import struct
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from numpy.typing import NDArray
 import unittest
 
@@ -20,7 +21,7 @@ class TestRosPublisher(unittest.TestCase):
 
     def util_ROS2_test(self, data: Data, topic_class: Any, topic_name: str, 
                        msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
-                       verbose: bool = False):
+                       verbose: bool = False, data_msg_type:  Optional[str] = None):
         
         rclpy = ModuleImporter.get_module('rclpy')
         Node = ModuleImporter.get_module_attribute('rclpy.node', 'Node')
@@ -41,7 +42,7 @@ class TestRosPublisher(unittest.TestCase):
 
         
         # Launch the publisher we initialize rclpy (otherwise rclpy.init breaks process forking for ROS2)
-        p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [None], [500], [1], 
+        p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [data_msg_type], [500], [1], 
                                                                 ROSMsgLibType.RCLPY, False, verbose, 0.0, True))
         p.start()
 
@@ -181,7 +182,8 @@ class TestRosPublisher(unittest.TestCase):
         def assert_data_dict_equal(data_sent: LiDARData, matched_index: int, msg_recieved: dict):
             exp_num_points = data_sent.point_clouds[matched_index].shape[0]
             np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[0], msg_recieved["point_clouds"])
-            np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[1], msg_recieved["channels"])
+            np.testing.assert_array_equal(data_sent.get_point_cloud_at_index(matched_index)[1], 
+                                          msg_recieved["channels"])
             np.testing.assert_array_equal(np.zeros(exp_num_points), msg_recieved["time"])
             np.testing.assert_array_equal(255 * np.ones(exp_num_points), msg_recieved["intensity"])
             np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])
@@ -235,6 +237,40 @@ class TestRosPublisher(unittest.TestCase):
         
         # Test that we can send data over ROS2 and get it back successfully
         p = Process(target=self.util_ROS2_test, args=(imu_data, Imu, '/imu0', msg_to_dict_fn, assert_data_dict_equal, False))
+        p.start()
+        p.join()
+        self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
+
+        # ================== Test OdometryData ================== 
+        # Create an OdometryData object
+        file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher', 'test__run_ROS2_publisher_process', 'OdometryData', 'odomGT.csv').absolute()
+        odom_data = OdometryData.from_csv(file_path, "odom", "base_link", CoordinateFrame.FLU, True, None)
+
+        # Write msg_to_dict_fn
+        PathMsg = ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
+        def msg_to_dict_fn(msg: PathMsg) -> dict:
+            return {
+                "stamp": msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                "frame_id": msg.header.frame_id,
+                "position": np.array([msg.poses[-1].pose.position.x,
+                                      msg.poses[-1].pose.position.y,
+                                      msg.poses[-1].pose.position.z]),
+                "orientation": np.array([msg.poses[-1].pose.orientation.x,
+                                         msg.poses[-1].pose.orientation.y,
+                                         msg.poses[-1].pose.orientation.z,
+                                         msg.poses[-1].pose.orientation.w])
+            }
+
+        # Write assert_data_dict_equal function
+        def assert_data_dict_equal(data_sent: OdometryData, matched_index: int, msg_recieved: dict):
+            np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
+            np.testing.assert_equal(      data_sent.frame_id,                          msg_recieved["frame_id"])
+            i = (matched_index // PATH_SLICE_STEP)
+            np.testing.assert_array_equal(data_sent.positions[i * PATH_SLICE_STEP].astype(float),    msg_recieved["position"])
+            np.testing.assert_array_equal(data_sent.orientations[i * PATH_SLICE_STEP].astype(float), msg_recieved["orientation"])
+
+        # Test that we can send data over ROS2 and get it back successfully
+        p = Process(target=self.util_ROS2_test, args=(odom_data, PathMsg, '/odom_gt', msg_to_dict_fn, assert_data_dict_equal, False, "Path"))
         p.start()
         p.join()
         self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")

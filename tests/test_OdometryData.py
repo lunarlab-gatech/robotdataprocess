@@ -186,5 +186,29 @@ class TestOdometryData(unittest.TestCase):
         odom_data_rotated._ori_apply_rotation(rotation)
         np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
 
+    def test_apply_transformation(self):
+        # Load the Odometry data
+        odom_data = OdometryData("temp", "child", [0], np.array([[1, 2, 3]]), np.array([[-0.7071068, 0, 0, 0.7071068]]), CoordinateFrame.FLU)
+
+        # Apply the transformation and make sure it worked
+        H = np.array([[0.0, -1.0,  0.0,  1.0],
+                      [1.0,  0.0,  0.0,  0.0],
+                      [0.0,  0.0,  1.0,  0.0],
+                      [0.0,  0.0,  0.0,  1.0]])
+        odom_data.apply_transformation_left_side(H)
+
+        np.testing.assert_array_equal(odom_data.positions[0].astype(float), np.array([-1, 1, 3]))
+        np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(float), np.array([0.5, 0.5, -0.5, -0.5]), decimal=6)
+
+        # Test with a more complicated transformation
+        odom_data = OdometryData("temp", "child", [0], np.array([[1, 2, 3]]), np.array([[-0.7071068, 0, 0, 0.7071068]]), CoordinateFrame.FLU)
+
+        # Apply the transformation and make sure it worked
+        odom_data.apply_transformation_right_side(H)
+
+        np.testing.assert_array_equal(odom_data.positions[0].astype(float), np.array([2, 2, 3]))
+        np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(float), np.array([ 0.5, -0.5, -0.5, -0.5 ]), decimal=6)
+
+
 if __name__ == "__main__":
     unittest.main()

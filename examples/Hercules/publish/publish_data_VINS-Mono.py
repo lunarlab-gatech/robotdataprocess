@@ -15,23 +15,29 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract RGB and IMU from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    #pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
-    image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb', '' + robot_name + '/front_center_Scene')
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', '' + robot_name + '/base_link', 
+                                     CoordinateFrame.NED, nine_axis=True)
+    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED, False)
+    image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
 
     # Convert data from NED frame to ROS frame (and make sure it is at the identity)
-    # pose_data.to_FLU_frame()
-    # pose_data.shift_to_start_at_identity()
+    pose_data.to_FLU_frame()
+    pose_data.shift_to_start_at_identity()
 
     # Crop the data
     if crop_data:
         imu_data.crop_data(Decimal('0.0'), end_time)
-        #pose_data.crop_data(Decimal('0.0'), end_time)
+        pose_data.crop_data(Decimal('0.0'), end_time)
         image_data.crop_data(Decimal('0.0'), end_time)
 
     # Publish the data via ROS2 topics
-    publish_data_ROS_multiprocess([imu_data, image_data], ['/imu0', '/cam0/image_raw'], ROSMsgLibType.RCLPY)
-
+    publish_data_ROS_multiprocess([imu_data, image_data, pose_data], 
+                                  ['/imu0', '/cam0/image_raw', '/odom_gt/path'],
+                                  [None, None, "Path"],
+                                  [500, 20, 20],
+                                  [1, 2, 1], 
+                                  ROSMsgLibType.RCLPY, True, True)
+    
 def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
 
     # Publish data for each robot

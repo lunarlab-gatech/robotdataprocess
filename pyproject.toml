@@ -3,6 +3,8 @@ name = "robotdataprocess"
 version = "0.2"
 authors = [
   { name="Daniel Butterfield", email="danielcbutter@gmail.com" },
+  { name="Hanzhi Li", email="ivan_li_hz@outlook.com" },
+  { name="Sandilya Sai Garimella", email="sgarimella34@gatech.edu"}
 ]
 description = "A library for loading, saving, converting, and manipulating robotic datasets."
 readme = "README.md"
@@ -14,13 +16,21 @@ classifiers = [
 dependencies = ["coverage",
                 "evo",
                 "matplotlib",
-                "numpy",
+
+                # NumPy pin for successful build with ROS2
+                "numpy<1.25; python_version >= '3.10'",
+                "numpy; python_version <= '3.9'",
+
                 "opencv-python",
                 "rosbags",
                 "scipy",
                 "snakeviz",
                 "tqdm",
-                "typeguard",
+
+                # Typeguard pin for successful build with ROS2
+                "typeguard>=4.4.4; python_version >= '3.10'",
+                "typeguard; python_version <= '3.9'",
+
                 "typer",
                 "pandas",
                 "pillow",

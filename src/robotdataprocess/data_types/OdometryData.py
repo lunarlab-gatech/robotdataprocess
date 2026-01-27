@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr
+from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import csv
 from .Data import CoordinateFrame, Data, ROSMsgLibType
 import decimal
@@ -33,7 +33,6 @@ class OdometryData(PathData):
     poses: list # Saved nav_msgs/msg/Pose for rosbags
     poses_rclpy: list # Saved nav_msgs/msg/Pose for rclpy
 
-    @typechecked
     def __init__(self, frame_id: str, child_frame_id: str, timestamps: Union[np.ndarray, list], 
                  positions: Union[np.ndarray, list], orientations: Union[np.ndarray, list], frame: CoordinateFrame):
         
@@ -52,7 +51,6 @@ class OdometryData(PathData):
     # =========================================================================  
 
     @classmethod
-    @typechecked
     def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
         """
         Creates a class structure from a ROS2 bag file with an Odometry topic.
@@ -111,7 +109,6 @@ class OdometryData(PathData):
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
-    @typechecked
     def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
                  header_included: bool, column_to_data: Union[List[int], None] = None, 
                  separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None,
@@ -187,12 +184,10 @@ class OdometryData(PathData):
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
-    @typechecked
     def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
                       header_included: bool, column_to_data: Union[List[int], None] = None):
         """
-        Creates a class structure from a text file, where the order of values
-        in the files follows ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'].
+        Creates and OdometryData class from a text file.
 
         Args:
             file_path (Path | str): Path to the file containing the odometry data.
@@ -281,7 +276,10 @@ class OdometryData(PathData):
             self.positions[i][1] += Decimal(cumulative_noise_pos['y'])
             self.positions[i][2] += Decimal(cumulative_noise_pos['z'])
 
-    @typechecked
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
     def shift_position(self, x_shift: float, y_shift: float, z_shift: float):
         """
         Shifts the positions of the odometry.
@@ -294,6 +292,10 @@ class OdometryData(PathData):
         self.positions[:,0] += Decimal(x_shift)
         self.positions[:,1] += Decimal(y_shift)
         self.positions[:,2] += Decimal(z_shift)
+
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
 
     def shift_to_start_at_identity(self):
         """
@@ -317,6 +319,10 @@ class OdometryData(PathData):
         self.positions = col_to_dec_arr(self.positions)
         self.orientations = col_to_dec_arr(self.orientations)
 
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
     def crop_data(self, start: Decimal, end: Decimal):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
 
@@ -336,8 +342,7 @@ class OdometryData(PathData):
     # ============================ Export Methods ============================= 
     # =========================================================================  
 
-    @typechecked
-    def to_csv(self, csv_path: Union[Path, str]):
+    def to_csv(self, csv_path: Union[Path, str], write_header: bool = True):
         """
         Writes the odometry data to a .csv file. Note that data will be
         saved in the following order: timestamp, pos.x, pos.y, pos.z,
@@ -346,6 +351,7 @@ class OdometryData(PathData):
         Args:
             csv_path (Path | str): Path to the output csv file.
             odom_topic (str): Topic of the Odometry messages.
+            write_header (bool): If false, skip the header row.
         Returns:
             OdometryData: Instance of this class.
         """
@@ -363,7 +369,8 @@ class OdometryData(PathData):
             writer = csv.writer(csvfile, delimiter=',')
 
             # Write the first row
-            writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
+            if write_header:
+                writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
                 
             # Write message data to the csv file
             for i in range(len(self.timestamps)):
@@ -395,28 +402,89 @@ class OdometryData(PathData):
             # Update frame
             self.frame = CoordinateFrame.FLU
 
+            # Empty poses as they might need to be recalculated
+            self.poses = []
+            self.poses_rclpy = []
+
         # Otherwise, throw an error
         else:
             raise RuntimeError(f"OdometryData class is in an unexpected frame: {self.frame}!")
     
-    @typechecked
+    def apply_transformation_left_side(self, H: np.ndarray):
+        """
+        Applies a rigid-body transformation to the entire path.
+        In terms of transfomration matricies, this multiplies this odometry
+        on the left side.
+
+        Args:
+            H: The 4x4 transformation matrix
+        """ 
+
+        # Apply the transformation
+        H_self = np.eye(4).reshape(1, 4, 4).repeat(self.len(), axis=0)  # shape (N,4,4)
+        H_self[:, :3, :3] = R.from_quat(self.orientations).as_matrix()    
+        H_self[:, :3, 3] = self.positions
+        H_output = H @ H_self
+
+        # Extract results and save
+        self.positions = H_output [:, :3, 3]
+        self.orientations = R.from_matrix(H_output[:, :3, :3]).as_quat()      
+
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
+    def apply_transformation_right_side(self, H: np.ndarray):
+        """
+        Applies a rigid-body transformation to the entire path.
+        In terms of transformation matrices, this multiplies this odometry
+        on the right side (row-vector convention).
+
+        Args:
+            H: The 4x4 transformation matrix
+        """ 
+
+        # Apply the transformation
+        H_self = np.eye(4).reshape(1, 4, 4).repeat(self.len(), axis=0)  # shape (N,4,4)
+        H_self[:, :3, :3] = R.from_quat(self.orientations).as_matrix()    
+        H_self[:, :3, 3] = self.positions
+        H_output = H_self @ H
+
+        # Extract results and save
+        self.positions = H_output [:, :3, 3]
+        self.orientations = R.from_matrix(H_output[:, :3, :3]).as_quat()      
+
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
     def _convert_frame(self, R_frame: np.ndarray):
         """ Uses a change of basis to update the positions and orientations. """
         R_frame_Q = R.from_matrix(R_frame)
         self.positions = (R_frame @ self.positions.T).T
         self._ori_change_of_basis(R_frame_Q)
 
-    @typechecked
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
     def _ori_apply_rotation(self, R_i: R):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
 
-    @typechecked
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
+
     def _ori_change_of_basis(self, R_i: R):
         """ Applies a change of basis to orientations """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i]) * R_i.inv()).as_quat()
+    
+        # Empty poses as they might need to be recalculated
+        self.poses = []
+        self.poses_rclpy = []
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
@@ -589,7 +657,7 @@ class OdometryData(PathData):
                 msg.gyro_bias.x = 0.0
                 msg.gyro_bias.y = 0.0
                 msg.gyro_bias.z = 0.0
-                msg.odometry_state = 0 # Assumes default state
+                msg.odometry_state = 0 # NOTE: Assumes default state
                 return msg
 
             elif msg_type == "Path":

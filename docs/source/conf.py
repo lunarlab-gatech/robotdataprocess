@@ -7,9 +7,9 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'robotdataprocess'
-copyright = '2025, Daniel Butterfield, Sandilya Sai Garimella'
-author = 'Daniel Butterfield, Sandilya Sai Garimella'
-release = '0.1.2'
+copyright = '2025, Lunar Lab @ Georgia Tech'
+author = 'Daniel Butterfield, Hanzhi Li, Sandilya Sai Garimella'
+release = '0.2'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

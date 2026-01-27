@@ -93,11 +93,17 @@ class _SingleDataPublisher():
         self.next_msg = None
         self._last_pub = None
 
+        # Determine whether to use shared memory
+        if self.libtype == ROSMsgLibType.ROSPY:
+            use_shared_mem = True # Leads to large speedups for ROS1
+        elif self.libtype == ROSMsgLibType.RCLPY:
+            use_shared_mem = False # Empirically, leads to large slowdowns for ROS2
+
         # Start worker processes to pre-build messages
         self.stop_event_workers = Event()
         self.workers: List[Process] = []
         for worker_id in range(self.num_workers):
-            p = Process(target=self._message_worker, args=(worker_id, self.stop_event_workers, self.stats_dict))
+            p = Process(target=self._message_worker, args=(worker_id, self.stop_event_workers, self.stats_dict, use_shared_mem))
             p.start()
             self.workers.append(p)
 
