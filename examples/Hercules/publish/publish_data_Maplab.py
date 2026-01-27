@@ -23,6 +23,8 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_right_Scene')
 
+    lidar_data.calculate_point_channels(16, -20, 20)
+
     # Crop the data
     if crop_data:
         imu_data.crop_data(Decimal('0.0'), end_time)

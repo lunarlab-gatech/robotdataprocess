@@ -248,7 +248,7 @@ class LiDARData(Data):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/PointCloud2'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg_type()!")
