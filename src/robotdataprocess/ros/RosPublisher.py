@@ -245,10 +245,10 @@ class _SingleDataPublisher():
                         except queue_module.Full:
                             time.sleep(1.0 / float(self.timer_freq))
 
-
         except BrokenPipeError:
             # Manager must have died from KeyboardInterrupt
             pass
+        self.log_msg_to_ros(f"Worker process {self.topic}_{worker_id} shutting down...", stats_dict)
     
     def _pop_msg_with_index(self, target_index: int) -> Union[Tuple, None]:
         """

@@ -36,8 +36,13 @@ class ImageDataOnDisk(ImageData):
                 return self.__class__(self.height, self.width, self.encoding, self.image_paths[idx])
 
             # Handle single integer indexing (loading the actual image)
-            path: Path = self.image_paths[idx]
-            return np.array(Image.open(str(path)), dtype=self.dtype)
+            path: Path = Path(self.image_paths[idx])
+            if path.suffix == '.npy':
+                return np.load(str(path), 'r')
+            elif path.suffix == '.png':
+                return np.array(Image.open(str(path)), dtype=self.dtype)
+            else: 
+                raise NotImplementedError(f"Unsupported file format {path.suffix} in LazyImageArray!")
 
         def __setitem__(self, idx, value):
             raise RuntimeError("This LazyPNGArray is read-only; writes are forbidden.")
@@ -99,3 +104,45 @@ class ImageDataOnDisk(ImageData):
         
         # Return an ImageDataOnDisk class
         return cls(frame_id, timestamps_sorted, cls.LazyImageArray(first_image.height, first_image.width, encoding, all_image_files_sorted))
+    
+    @classmethod
+    def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
+        """
+        Creates a class structure from .npy files, where each individual image
+        is stored in an .npy file with the timestamp as the name
+
+        Args:
+            npy_folder_path (Path | str): Path to the folder with the npy images.
+            frame_id (str): The frame where this image data was collected.
+        Returns:
+            ImageData: Instance of this class.
+        """
+
+        # Get all npy files in the designated folder (sorted)
+        all_image_files = [str(p) for p in Path(npy_folder_path).glob("*.npy")]
+
+        # Extract the timestamps and sort them
+        timestamps = col_to_dec_arr([s.split('/')[-1][:-4] for s in all_image_files])
+        sorted_indices = np.argsort(timestamps)
+        timestamps_sorted = timestamps[sorted_indices]
+
+        # Use sorted_indices to sort all_image_files in the same way
+        all_image_files_sorted = [all_image_files[i] for i in sorted_indices]
+
+        # Extract width, height, and channels
+        first_image = np.load(all_image_files_sorted[0], 'r')
+        assert len(first_image.shape) >= 2
+        assert len(first_image.shape) < 4
+        height = first_image.shape[0]
+        width = first_image.shape[1]
+        channels = 1
+        if len(first_image.shape) > 2: 
+            channels = first_image.shape[2]
+
+        # Extract mode and make sure it matches the supported type for this operation
+        encoding = ImageData.ImageEncoding.from_dtype_and_channels(first_image.dtype, channels)
+        if encoding != ImageData.ImageEncoding._32FC1:
+            raise NotImplementedError(f"Only ImageData.ImageEncoding._32FC1 mode implemented for 'from_npy_files', not {encoding}")
+
+        # Return an ImageDataOnDisk class
+        return cls(frame_id, timestamps_sorted, cls.LazyImageArray(height, width, encoding, all_image_files_sorted))

@@ -19,6 +19,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
 from typeguard import typechecked
 from typing import Union, List, Tuple, Any
 import tqdm
@@ -338,6 +339,48 @@ class OdometryData(PathData):
         self.poses = []
         self.poses_rclpy = []
 
+    def interpolate_to_hz(self, target_hz: float):
+        """
+        Linearly interpolates position and SLERPs orientation so that odometry
+        is output at the desired frequency.
+
+        Args:
+            target_hz (float): Desired output frequency in Hertz (e.g. 6.0)
+        """
+
+        # Check that target_hz is valid
+        if target_hz <= 0: raise ValueError("target_hz must be positive")
+
+        # Convert timestamps to float seconds
+        ts = dec_arr_to_float_arr(self.timestamps)
+        pos = dec_arr_to_float_arr(self.positions)
+        quat = dec_arr_to_float_arr(self.orientations)
+
+        # Create new evenly spaced timestamps
+        duration = ts[-1] - ts[0]
+        num_samples = int(np.ceil(duration * target_hz)) + 1
+        new_ts = np.linspace(ts[0], ts[-1], num_samples)
+
+        # Linear interpolation for position
+        new_pos = np.zeros((len(new_ts), 3))
+        for i in range(3):
+            new_pos[:, i] = np.interp(new_ts, ts, pos[:, i])
+
+        # Spherical Linear Interpolation of Rotations (SLERP)
+        key_rots = R.from_quat(quat)
+        slerp = Slerp(ts, key_rots)
+        new_rots = slerp(new_ts)
+        new_quat = new_rots.as_quat()
+
+        # Convert back to Decimal arrays
+        self.timestamps = col_to_dec_arr(new_ts)
+        self.positions = col_to_dec_arr(new_pos)
+        self.orientations = col_to_dec_arr(new_quat)
+
+        # Clear cached ROS messages
+        self.poses = []
+        self.poses_rclpy = []
+
     # =========================================================================
     # ============================ Export Methods ============================= 
     # =========================================================================  
@@ -507,6 +550,8 @@ class OdometryData(PathData):
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.ROSPY:
+            if msg_type == "Odometry":
+                return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Odometry')
             if msg_type == "maplab_msg/OdometryWithImuBiases":
                 return ModuleImporter.get_module_attribute('maplab_msgs.msg', 'OdometryWithImuBiases')
             elif msg_type == "Path":
@@ -530,6 +575,9 @@ class OdometryData(PathData):
             i (int): The index of the odometry data to convert.
         Raises:
             ValueError: If i is outside the data bounds.
+
+        NOTE: Currently doesn't support Twist information.
+        NOTE: Assumes zero covariances.
         """
 
         # Check to make sure index is within data bounds
@@ -603,7 +651,53 @@ class OdometryData(PathData):
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSBAGS")
             
         elif lib_type == ROSMsgLibType.ROSPY or lib_type == ROSMsgLibType.RCLPY:
-            if msg_type == "maplab_msg/OdometryWithImuBiases":
+            if msg_type == "Odometry":
+
+                Odometry = ModuleImporter.get_module_attribute('nav_msgs.msg', 'Odometry')
+                Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+                PoseWithCovariance = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'PoseWithCovariance')
+                TwistWithCovariance = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'TwistWithCovariance')
+                Pose = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Pose')
+                Point = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Point')
+                Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+                Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
+
+                msg = Odometry()
+                msg.header = Header()
+                msg.header.frame_id = self.frame_id
+                if lib_type == ROSMsgLibType.RCLPY: 
+                    Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                    msg.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+                else:
+                    rospy = ModuleImporter.get_module('rospy')
+                    msg.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
+                msg.child_frame_id = self.child_frame_id
+
+                msg.pose = PoseWithCovariance()
+                msg.pose.pose = Pose()
+                msg.pose.pose.position = Point()
+                msg.pose.pose.position.x = float(self.positions[i][0])
+                msg.pose.pose.position.y = float(self.positions[i][1])
+                msg.pose.pose.position.z = float(self.positions[i][2])
+                msg.pose.pose.orientation = Quaternion()
+                msg.pose.pose.orientation.x = float(self.orientations[i][0])
+                msg.pose.pose.orientation.y = float(self.orientations[i][1])
+                msg.pose.pose.orientation.z = float(self.orientations[i][2])
+                msg.pose.pose.orientation.w = float(self.orientations[i][3])
+                msg.pose.covariance = np.zeros(36) # NOTE: Assumes covariance of zero.
+                msg.twist = TwistWithCovariance()
+                msg.twist.twist.linear = Vector3()
+                msg.twist.twist.linear.x = 0.0  # NOTE: Currently doesn't support Twist
+                msg.twist.twist.linear.y = 0.0
+                msg.twist.twist.linear.z = 0.0
+                msg.twist.twist.angular = Vector3()
+                msg.twist.twist.angular.x = 0.0
+                msg.twist.twist.angular.y = 0.0
+                msg.twist.twist.angular.z = 0.0
+                msg.twist.covariance = np.zeros(36)
+                return msg
+            
+            elif msg_type == "maplab_msg/OdometryWithImuBiases":
                 
                 if lib_type == ROSMsgLibType.RCLPY:
                     raise ValueError("maplab_msg/OdometryWithImuBiases is not supported for RCLPY!")
