@@ -10,7 +10,7 @@ def main():
     """ Reformat data from LIO-SAM to be used as input odometry for ROMAN """
     
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.3.C"
+    dataset_version = "V2.3.AC"
     file_name = 'odometry.csv'
 
     # Do it for all files, robots, and datasets
@@ -23,7 +23,7 @@ def main():
                                         "world", "robot", CoordinateFrame.NED, True, None)
 
         # Get L->I transformation
-        if dataset_version == "V2.3.C":
+        if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC":
             if "Husky" in robot_name:
                 H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
                                             [0.0,  1.0,  0.0,  0.0],

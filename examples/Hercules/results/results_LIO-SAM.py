@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R
 def main():
     # Load the GT and estimated path data
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.3.C"
+    dataset_version = "V2.3.AC"
     file_name = 'odometry.csv'
 
     for robot_name in robot_names:
@@ -20,7 +20,7 @@ def main():
                                         "world", "robot", CoordinateFrame.FLU, True, None)
         
         # Get L->I transformation
-        if dataset_version == "V2.3.C":
+        if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC":
             if "Husky" in robot_name:
                 H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
                                             [0.0,  1.0,  0.0,  0.0],
