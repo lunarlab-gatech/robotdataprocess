@@ -8,10 +8,10 @@ from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDis
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 from typing import Union
 
-def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None]):
+def publish_data(input_dir: str, robot_name: str, crop_data: bool, start_time: Decimal, end_time: Union[Decimal, None]):
     # Check parameters
-    if crop_data and end_time is None:
-        raise ValueError("end_time required if crop_data is True!")
+    if crop_data and start_time is None:
+        raise ValueError("start_time required if crop_data is True!")
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
@@ -26,10 +26,10 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
 
     # Crop the data
     if crop_data:
-        imu_data.crop_data(Decimal('0.0'), end_time)
-        pose_data.crop_data(Decimal('0.0'), end_time)
-        left_image_data.crop_data(Decimal('0.0'), end_time)
-        right_image_data.crop_data(Decimal('0.0'), end_time)
+        imu_data.crop_data(start_time, end_time)
+        pose_data.crop_data(start_time, end_time)
+        left_image_data.crop_data(start_time, end_time)
+        right_image_data.crop_data(start_time, end_time)
 
     # Publish the data via ROS2 topics 
     publish_data_ROS_multiprocess([imu_data, pose_data, left_image_data, right_image_data], 
@@ -39,28 +39,30 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
                                   [1, 1, 3, 3],
                                    ROSMsgLibType.RCLPY, True, verbose=True)
     
-def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]): 
+def main(dataset_num: str, robot_name: str, crop_start_time: Union[float, None], crop_end_time: Union[float, None]): 
 
     # Do bookkeeping for cropping
-    if crop_end_time == None: 
+    if crop_end_time == None and crop_start_time == None: 
         crop_data = False
-        crop_end_time = None
     else: 
         crop_data = True
-        crop_end_time = Decimal(crop_end_time)
+        crop_start_time = Decimal(crop_start_time) if crop_start_time is not None else Decimal('0.0')
+        crop_end_time = Decimal(crop_end_time) if crop_end_time is not None else None
     
     # Publish the data for the specified robot
     user = getpass.getuser()
     publish_data(input_dir='/home/' + user + '/data/Hercules_datasets/' + dataset_num + '/data',
                     robot_name=robot_name,
                     crop_data=crop_data,
+                    start_time=crop_start_time,
                     end_time=crop_end_time)
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Publish Hercules data via ROS2 topics for VINS-Mono.")
     parser.add_argument('--dataset_num', type=str, default=None, help="Dataset version number (e.g., V1.6).")
     parser.add_argument('--robot_name', type=str, default=None, help="Name of the robot (e.g., Drone1).")
+    parser.add_argument('--crop_start_time', type=float, default=None, help="Optional start time (in seconds) to crop the data.")
     parser.add_argument('--crop_end_time', type=float, default=None, help="Optional end time (in seconds) to crop the data.")
     args = parser.parse_args()
 
-    main(dataset_num=args.dataset_num, robot_name=args.robot_name, crop_end_time=args.crop_end_time)
+    main(dataset_num=args.dataset_num, robot_name=args.robot_name, crop_start_time=args.crop_start_time, crop_end_time=args.crop_end_time)
