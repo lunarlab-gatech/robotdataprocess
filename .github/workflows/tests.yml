@@ -116,7 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     container:
-      image: dlittleman/robotdataprocess_ros1_noetic:0.1
+      image: dlittleman/robotdataprocess_ros1_noetic:01
       options: --user root
     env:
       SKIP_PURE_PYTHON_TESTS: "True"
