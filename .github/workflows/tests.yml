@@ -1,8 +1,12 @@
 name: Unit Tests
 
 # Only run manually to save usage minutes
-on: workflow_dispatch
-
+on:
+  workflow_dispatch: {}   # Manual trigger
+  pull_request:           # Automatic trigger on PRs
+    branches: 
+      - "**"             # Trigger on any PR branch
+      
 permissions:
   contents: read
 
