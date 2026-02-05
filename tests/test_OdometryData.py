@@ -3,12 +3,14 @@ from decimal import Decimal
 import math
 import numpy as np
 import os
+import pandas as pd
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
+from test_utils import safe_urlretrieve
 import unittest
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -208,6 +210,58 @@ class TestOdometryData(unittest.TestCase):
 
         np.testing.assert_array_equal(odom_data.positions[0].astype(float), np.array([2, 2, 3]))
         np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(float), np.array([ 0.5, -0.5, -0.5, -0.5 ]), decimal=6)
+
+    def test_to_csv(self):
+        """ Test that we can extract odometry from a ROS2 bag and save to CSV correctly. """
+
+        # Setup paths and download test bag if needed
+        path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
+        path_hercules_bag_db3 = path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
+        path_hercules_bag_yaml = path_hercules_bag / Path("metadata.yaml")
+
+        if not os.path.isfile(path_hercules_bag_db3):
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
+        if not os.path.isfile(path_hercules_bag_yaml):
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/2iu1djmhedy1j4qci53a4/metadata.yaml?rlkey=x0kb00pruubxtbaojht4ui5yl&st=9b41wq07&dl=1", path_hercules_bag_yaml)
+
+        # Define output path
+        output_file = Path(Path('.'), 'tests', 'temporary_files', 'test_OdometryData', 'test_to_csv', 'Husky2_odom.csv').absolute()
+        topic = "/hercules_node/Husky2/ground_truth/odom_local"
+
+        # Delete output file if it exists
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+        # Create output folder if it doesn't exist
+        output_folder = output_file.parent
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Load odometry from ROS2 bag and save to CSV
+        odom_data = OdometryData.from_ros2_bag(path_hercules_bag, topic, CoordinateFrame.NONE)
+        odom_data.to_csv(output_file)
+
+        # Load csv file and check values
+        df = pd.read_csv(output_file)
+
+        first_row = df.iloc[0].tolist()
+        np.testing.assert_almost_equal(first_row[0], 1749131152.801460736, 14)
+        np.testing.assert_almost_equal(first_row[1], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(first_row[2], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(first_row[3], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(first_row[4], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(first_row[5], -0.00005158343992661684751586201171875, 14)
+        np.testing.assert_almost_equal(first_row[6], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(first_row[7], 1.05546661188782309181988239288330078125E-7, 14)
+
+        random_row = df[df['timestamp'] == 1749131152.883519488].iloc[0]
+        np.testing.assert_almost_equal(random_row['x'], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(random_row['y'], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(random_row['z'], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(random_row['qw'], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(random_row['qx'], -0.000051583439926616847515106201171875, 14)
+        np.testing.assert_almost_equal(random_row['qy'], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(random_row['qz'], 1.05546661188782309181988239288330078125E-7, 14)
 
 
 if __name__ == "__main__":

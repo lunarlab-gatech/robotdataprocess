@@ -12,6 +12,3 @@ from .data_types.PathData import PathData
 # ROS Classes & Functions
 from .ros.Ros2BagWrapper import Ros2BagWrapper
 from .ros.RosPublisher import publish_data_ROS_multiprocess
-
-# Other Classes
-from .CmdLineInterface import CmdLineInterface

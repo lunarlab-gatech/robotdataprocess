@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag2 import Reader as Reader2
+from rosbags.typesys import Stores
 import shutil
 from test_utils import safe_urlretrieve
 import unittest
@@ -238,6 +240,53 @@ class TestImageDataInMemory(unittest.TestCase):
         np.testing.assert_equal(image_data.height, image_data_after.height)
         np.testing.assert_equal(image_data.width, image_data_after.width)
         np.testing.assert_equal(image_data.encoding, image_data_after.encoding)
+
+    def helper_from_ros2_bag_matches_raw_messages(self, topic, dtype, expected_shape):
+        """ Helper to verify that from_ros2_bag extracts images matching raw ROS2 messages. """
+
+        # Setup output folder
+        output_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_ros2_bag_matches_raw').absolute()
+
+        # Delete output files if they exist
+        file_path_imgs = Path(output_folder, 'imgs.npy')
+        if os.path.exists(file_path_imgs):
+            os.remove(file_path_imgs)
+        file_path_times = Path(output_folder, 'times.npy')
+        if os.path.exists(file_path_times):
+            os.remove(file_path_times)
+
+        # Extract images using from_ros2_bag
+        ImageDataInMemory.from_ros2_bag(self.path_hercules_bag, topic, output_folder)
+
+        # Read the images directly from the rosbag for comparison
+        typestore2 = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS2_HUMBLE, self.path_external_msgs_ros2)
+        ros2_msgs = []
+        with Reader2(self.path_hercules_bag) as reader2:
+            connections2 = [x for x in reader2.connections if x.topic == topic]
+            for conn2, timestamp2, rawdata2 in reader2.messages(connections=connections2):
+                ros2_msgs.append(typestore2.deserialize_cdr(rawdata2, conn2.msgtype))
+
+        # Make sure that there is at least one message to check
+        np.testing.assert_raises(AssertionError, np.testing.assert_equal, len(ros2_msgs), 0)
+
+        # Load the images and times from the .npy files
+        images = np.load(file_path_imgs, mmap_mode='r')
+        times = np.load(file_path_times)
+
+        # Make sure the number of images between both sources match
+        np.testing.assert_equal(len(images), len(ros2_msgs))
+
+        # Assert that each image & time matches exactly
+        for i in range(0, len(ros2_msgs)):
+            msg2 = ros2_msgs[i]
+            np.testing.assert_equal(times[i], msg2.header.stamp.sec + msg2.header.stamp.nanosec * 1e-9)
+            np.testing.assert_array_equal(images[i], np.frombuffer(msg2.data, dtype=dtype).reshape(expected_shape))
+
+    def test_from_ros2_bag_matches_raw_messages(self):
+        """ Ensure both RGB and Depth imagery extracted via from_ros2_bag matches raw ROS2 messages. """
+        self.helper_from_ros2_bag_matches_raw_messages("/hercules_node/Husky2/front_center_Scene/image", np.uint8, (720, 1280, 3))
+        self.helper_from_ros2_bag_matches_raw_messages("/hercules_node/Husky2/front_center_DepthPlanar/image", np.float32, (720, 1280))
+
 
 if __name__ == "__main__":
     unittest.main()

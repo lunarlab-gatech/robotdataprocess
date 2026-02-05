@@ -1,8 +1,6 @@
-import os
 import numpy as np
-import pandas as pd
+import os
 from pathlib import Path
-from robotdataprocess import CmdLineInterface
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
@@ -11,11 +9,11 @@ from test_utils import safe_urlretrieve
 import unittest
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestCmdLineInterface(unittest.TestCase):
+class TestRos2BagWrapper(unittest.TestCase):
     """
-    Test the functionality of the command line interface.
+    Test the functionality of the Ros2BagWrapper class.
     """
-    
+
     def setUp(self):
         """ Setup paths and download files that will be used for all tests. """
 
@@ -54,7 +52,7 @@ class TestCmdLineInterface(unittest.TestCase):
 
     def assert_two_msgs_match(self, ros1_bag: Path, ros2_bag: Path, topic: str):
         """ Given a topic, manually check that the values in each message match. """
-        
+
         # Setup Typestores
         typestore1 = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS1_NOETIC, self.path_external_msgs_ros1)
         typestore2 = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS2_HUMBLE, self.path_external_msgs_ros2)
@@ -179,39 +177,28 @@ class TestCmdLineInterface(unittest.TestCase):
         # Define path to a new pruned & downsampled ros2 bag
         path_hercules_bag_down = self.path_hercules_bag.parent / 'hercules_test_bag_downsampled'
 
-        # Setup a dictionary with configuration parameters 
-        config_dict = {
-            "input_bag": self.path_hercules_bag,
-            "output_bag": path_hercules_bag_down,
-            "external_msgs_path_ros2": self.path_external_msgs_ros2,
-            "external_msgs_path_ros1": self.path_external_msgs_ros1,
-            "operation_to_run": 'downsample',
-            "operation_params": {
-                "downsample": {
-                    "topics": {
-                        "/tf": 1.0,
-                        "/tf_static": 1.0,
-                        "/hercules_node/Husky1/imu/imu": 0.865,
-                        "/hercules_node/Husky2/imu/imu": 0.1,
-                        "/hercules_node/Drone1/imu/imu": 0.326,
-                        "/hercules_node/Drone2/imu/imu": 0.1342424242424,
-                        "/hercules_node/Husky1/ground_truth/odom_local": 0.709,
-                        "/hercules_node/Husky2/ground_truth/odom_local": 0.799,
-                        "/hercules_node/Drone1/ground_truth/odom_local": 0.04,
-                        "/hercules_node/Drone2/ground_truth/odom_local": 0.7,
-                        "/hercules_node/Husky1/front_center_Scene/image": 1.0,
-                        "/hercules_node/Husky1/front_center_DepthPlanar/image": 0.51,
-                        "/hercules_node/Husky2/front_center_Scene/image": 1.0,
-                        "/hercules_node/Husky2/front_center_DepthPlanar/image": 0.50003,
-                        "/hercules_node/Drone1/front_center_Scene/image": 1.0,
-                        "/hercules_node/Drone1/front_center_DepthPlanar/image": 0.5,
-                        "/hercules_node/Drone2/front_center_Scene/image": 0.0001,
-                        "/hercules_node/Drone2/front_center_DepthPlanar/image": 0.54,
-                    },
-                    "include_unmentioned_topics": False
-                }
-            }
+        # Define topic downsample ratios
+        topic_downsample_ratios = {
+            "/tf": 1.0,
+            "/tf_static": 1.0,
+            "/hercules_node/Husky1/imu/imu": 0.865,
+            "/hercules_node/Husky2/imu/imu": 0.1,
+            "/hercules_node/Drone1/imu/imu": 0.326,
+            "/hercules_node/Drone2/imu/imu": 0.1342424242424,
+            "/hercules_node/Husky1/ground_truth/odom_local": 0.709,
+            "/hercules_node/Husky2/ground_truth/odom_local": 0.799,
+            "/hercules_node/Drone1/ground_truth/odom_local": 0.04,
+            "/hercules_node/Drone2/ground_truth/odom_local": 0.7,
+            "/hercules_node/Husky1/front_center_Scene/image": 1.0,
+            "/hercules_node/Husky1/front_center_DepthPlanar/image": 0.51,
+            "/hercules_node/Husky2/front_center_Scene/image": 1.0,
+            "/hercules_node/Husky2/front_center_DepthPlanar/image": 0.50003,
+            "/hercules_node/Drone1/front_center_Scene/image": 1.0,
+            "/hercules_node/Drone1/front_center_DepthPlanar/image": 0.5,
+            "/hercules_node/Drone2/front_center_Scene/image": 0.0001,
+            "/hercules_node/Drone2/front_center_DepthPlanar/image": 0.54,
         }
+        include_unmentioned_topics = False
 
         # If bag exists from previous test, delete it
         if os.path.isdir(path_hercules_bag_down):
@@ -219,12 +206,13 @@ class TestCmdLineInterface(unittest.TestCase):
             os.remove(path_hercules_bag_down / 'metadata.yaml')
             os.rmdir(path_hercules_bag_down)
 
-        # Call the operation to write ROS1 bag
-        self.manipulator = CmdLineInterface(**config_dict)
+        # Create the bag wrapper and run the downsample operation
+        bag_wrapper = Ros2BagWrapper(self.path_hercules_bag, self.path_external_msgs_ros2)
+        bag_wrapper.downsample(path_hercules_bag_down, topic_downsample_ratios, include_unmentioned_topics)
 
         # Get topic occurances for each bag
-        topic_counts_orig = TestCmdLineInterface.count_msgs_in_ros2_bag(self.path_hercules_bag)
-        topic_counts_new = TestCmdLineInterface.count_msgs_in_ros2_bag(path_hercules_bag_down)
+        topic_counts_orig = TestRos2BagWrapper.count_msgs_in_ros2_bag(self.path_hercules_bag)
+        topic_counts_new = TestRos2BagWrapper.count_msgs_in_ros2_bag(path_hercules_bag_down)
 
         # Assert that the number of messages is now the ratio that we specified
         topics_in_orig = list(topic_counts_orig.keys())
@@ -241,10 +229,10 @@ class TestCmdLineInterface(unittest.TestCase):
             # Extract requested downsample rate
             req_downsample_rate = None
             try:
-                req_downsample_rate = config_dict['operation_params']['downsample']['topics'][topic]
-            
+                req_downsample_rate = topic_downsample_ratios[topic]
+
             # If topic is unmentioned, new count should be zero
-            except: 
+            except:
                 np.testing.assert_equal(new_count, 0)
                 np.testing.assert_raises(AssertionError, np.testing.assert_equal, orig_count, 0)
                 continue
@@ -252,7 +240,7 @@ class TestCmdLineInterface(unittest.TestCase):
             # Make sure new message count equals the request downsample rate of the original
             np.testing.assert_equal(new_count, int(np.round(orig_count * req_downsample_rate)))
 
-    def test_convert_ros2_to_ros1(self):
+    def test_export_as_ros1(self):
         """
         Test that all message types supported have their values
         correctly carried over from the ros2 bag into the ros1
@@ -262,24 +250,16 @@ class TestCmdLineInterface(unittest.TestCase):
         # Define path to new ros1 bag
         path_hercules_bag_ros1 = self.path_hercules_bag.parent / 'hercules_test_bag_pruned_3.bag'
 
-        # Setup a dictionary with configuration parameters 
-        config_dict = {
-            "input_bag": self.path_hercules_bag,
-            "output_bag": path_hercules_bag_ros1,
-            "external_msgs_path_ros2": self.path_external_msgs_ros2,
-            "external_msgs_path_ros1": self.path_external_msgs_ros1,
-            "operation_to_run": 'convert_ros2_to_ros1'
-        }
-
         # If a ROS1 bag exists from a previous test, delete it
         if os.path.isfile(path_hercules_bag_ros1):
             os.remove(path_hercules_bag_ros1)
 
-        # Call the operation to write ROS1 bag
-        self.manipulator = CmdLineInterface(**config_dict)
+        # Create the bag wrapper and run the export operation
+        bag_wrapper = Ros2BagWrapper(self.path_hercules_bag, self.path_external_msgs_ros2)
+        bag_wrapper.export_as_ros1(path_hercules_bag_ros1, self.path_external_msgs_ros1)
 
         # Read the ROS2 bag and count number of messages on each topic
-        topic_counts = TestCmdLineInterface.count_msgs_in_ros2_bag(self.path_hercules_bag)
+        topic_counts = TestRos2BagWrapper.count_msgs_in_ros2_bag(self.path_hercules_bag)
 
         # Read the ROS1 bag and count the number of messages as well
         topic_counts_ros1 = {}
@@ -305,118 +285,6 @@ class TestCmdLineInterface(unittest.TestCase):
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/hercules_node/Husky2/imu/imu')
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/tf_static')
         self.assert_two_msgs_match(path_hercules_bag_ros1, self.path_hercules_bag, '/tf')
-    
-    def test_extract_odometry_to_csv(self):
-        # Setup a dictionary with configuration parameters 
-        output_file = Path(Path('.'), 'tests', 'temporary_files', 'test_CmdLineInterface', 'test_convert_ros2_to_ros1', 'Husky2_odom.csv').absolute()
-        topic = "/hercules_node/Husky2/ground_truth/odom_local"
-        config_dict = {
-            "input_bag": self.path_hercules_bag,
-            "external_msgs_path_ros2": self.path_external_msgs_ros2,
-            "external_msgs_path_ros1": self.path_external_msgs_ros1,
-            "operation_to_run": 'extract_odometry_to_csv',
-            "operation_params": {
-                "extract_odometry_to_csv": {
-                    "topic": topic,
-                    "output_file": output_file,
-                    "add_noise": False,
-                    "xy_noise_std_per_frame": 0.0001,
-                    "z_noise_std_per_frame": 0.00001,
-                    "shift_position_xy": 50,
-                    "shift_position_z": 10,
-                }
-            }
-        }
-
-        # Delete output file if it exists
-        if os.path.exists(output_file):
-            os.remove(output_file)
-
-        # Create output folder if it doesn't exist
-        output_folder = output_file.parent
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        # Call the operation to write the csv file
-        self.manipulator = CmdLineInterface(**config_dict)
-
-        # Load csv file and check values
-        df = pd.read_csv(output_file)
-        
-        first_row = df.iloc[0].tolist()
-        np.testing.assert_almost_equal(first_row[0], 1749131152.801460736, 14)
-        np.testing.assert_almost_equal(first_row[1], -0.0000245371702476404607295989990234375, 14)
-        np.testing.assert_almost_equal(first_row[2], -0.0000033797959986259229481220245361328125, 14)
-        np.testing.assert_almost_equal(first_row[3], -1.44854152202606201171875, 14)
-        np.testing.assert_almost_equal(first_row[4], 0.99998915195465087890625, 14)
-        np.testing.assert_almost_equal(first_row[5], -0.00005158343992661684751586201171875, 14)
-        np.testing.assert_almost_equal(first_row[6], 0.004659599624574184417724609375, 14)
-        np.testing.assert_almost_equal(first_row[7], 1.05546661188782309181988239288330078125E-7, 14)
-
-        random_row = df[df['timestamp'] == 1749131152.883519488].iloc[0]
-        np.testing.assert_almost_equal(random_row['x'], -0.0000245371702476404607295989990234375, 14)
-        np.testing.assert_almost_equal(random_row['y'], -0.0000033797959986259229481220245361328125, 14)
-        np.testing.assert_almost_equal(random_row['z'], -1.44854152202606201171875, 14)
-        np.testing.assert_almost_equal(random_row['qw'], 0.99998915195465087890625, 14)
-        np.testing.assert_almost_equal(random_row['qx'], -0.000051583439926616847515106201171875, 14)
-        np.testing.assert_almost_equal(random_row['qy'], 0.004659599624574184417724609375, 14)
-        np.testing.assert_almost_equal(random_row['qz'], 1.05546661188782309181988239288330078125E-7, 14)
-
-    def helper_extract_images_to_npy_for_topic(self, topic, dtype, expected_shape):
-        # Setup a dictionary with configuration parameters 
-        output_folder = Path(Path('.'), 'tests', 'test_outputs').absolute()
-        config_dict = {
-            "input_bag": self.path_hercules_bag,
-            "external_msgs_path_ros2": self.path_external_msgs_ros2,
-            "external_msgs_path_ros1": self.path_external_msgs_ros1,
-            "operation_to_run": 'extract_images_to_npy',
-            "operation_params": {
-                "extract_images_to_npy": {
-                    "topic": topic,
-                    "output_folder": output_folder,
-                }
-            }
-        }
-
-        # Delete output file if it exists
-        file_path_imgs = Path(output_folder, 'imgs.npy')
-        if os.path.exists(file_path_imgs):
-            os.remove(file_path_imgs)
-        file_path_times = Path(output_folder, 'times.npy')
-        if os.path.exists(file_path_times):
-            os.remove(file_path_times)
-
-        # Call the operation to write the npy files
-        self.manipulator = CmdLineInterface(**config_dict)
-
-        # Read the images in the rosbag
-        typestore2 = Ros2BagWrapper._create_typestore_with_external_msgs(Stores.ROS2_HUMBLE, self.path_external_msgs_ros2)
-        ros2_msgs = []
-        with Reader2(self.path_hercules_bag) as reader2:
-            connections2 = [x for x in reader2.connections if x.topic == topic]
-            for conn2, timestamp2, rawdata2 in reader2.messages(connections=connections2):
-                ros2_msgs.append(typestore2.deserialize_cdr(rawdata2, conn2.msgtype))
-
-        # Make sure that there is at least one messages to check
-        np.testing.assert_raises(AssertionError, np.testing.assert_equal, len(ros2_msgs), 0)
-
-        # Load the images and times from the .npy files
-        images = np.load(file_path_imgs, mmap_mode='r')
-        times = np.load(file_path_times)
-
-        # Make sure the number of images between both sources match
-        np.testing.assert_equal(len(images), len(ros2_msgs))
-
-        # Assert that each image & time matches exactly
-        for i in range(0, len(ros2_msgs)):
-            msg2 = ros2_msgs[i]
-            np.testing.assert_equal(times[i], msg2.header.stamp.sec + msg2.header.stamp.nanosec * 1e-9)
-            np.testing.assert_array_equal(images[i], np.frombuffer(msg2.data, dtype=dtype).reshape(expected_shape))
-
-    def test_extract_images_to_npy(self):
-        # Ensure both RGB and Depth imagery is properly extracted to .npy files
-        self.helper_extract_images_to_npy_for_topic("/hercules_node/Husky2/front_center_Scene/image", np.uint8, (720, 1280, 3))
-        self.helper_extract_images_to_npy_for_topic("/hercules_node/Husky2/front_center_DepthPlanar/image", np.float32, (720, 1280))
 
 
 if __name__ == "__main__":
