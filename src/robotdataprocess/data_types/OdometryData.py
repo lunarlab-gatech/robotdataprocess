@@ -324,12 +324,12 @@ class OdometryData(PathData):
         self.poses = []
         self.poses_rclpy = []
 
-    def crop_data(self, start: Decimal, end: Decimal):
+    def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
 
         # Create boolean mask of data to keep
-        mask = (self.timestamps >= start) & (self.timestamps <= end)
-
+        mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
+        
         # Apply mask
         self.timestamps = self.timestamps[mask]
         self.positions = self.positions[mask]
