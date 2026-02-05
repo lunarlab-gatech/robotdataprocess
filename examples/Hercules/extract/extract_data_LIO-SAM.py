@@ -37,12 +37,19 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.4.C"
+    dataset_num = "V2.3.AP"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    robot_crop_start_times = [Decimal('1.45'), Decimal('1.00'), Decimal('1.3'), Decimal('1.3')]
-    robot_crop_end_times = [Decimal('382.85'), Decimal('390.90'), Decimal('1100.00'), Decimal('1190.35')]
+
+    if dataset_num == "V2.4.C":
+        robot_crop_start_times = [Decimal('1.45'), Decimal('1.00'), Decimal('1.3'), Decimal('1.3')]
+        robot_crop_end_times = [Decimal('382.85'), Decimal('390.90'), Decimal('1100.00'), Decimal('1190.35')]
+    elif dataset_num == "V2.3.AP":
+        robot_crop_start_times = [Decimal('1.95'), Decimal('2.15'), Decimal('1.05'), Decimal('4.70')]
+        robot_crop_end_times = [Decimal('772.15'), Decimal('741.45'), Decimal('1121.80'), Decimal('1193.80')]
+    else:
+        raise ValueError("Crop times not specified for this dataset number.")
 
     # Check validity of inputs
     assert len(robot_names) == len(robot_crop_end_times)

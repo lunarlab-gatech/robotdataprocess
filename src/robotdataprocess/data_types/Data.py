@@ -26,18 +26,20 @@ class CoordinateFrame(Enum):
     NONE = 3
 
 class ROSMsgLibType(Enum):
-    """ 
+    """
     Enum for different ROS message library types.
-     
+
     Attributes:
         ROSBAGS: Use ROS messages from the rosbags library (Pure Python library).
         RCLPY: Use ROS messages from the rclpy library (ROS2 Python client library).
         ROSPY: Use ROS messages from the rospy library (ROS1 Python client library).
+        NONE: No ROS message library (for testing purposes only).
     """
 
     ROSBAGS = 0
     RCLPY = 1
     ROSPY = 2
+    NONE = 3
 
 class Data:
     """
