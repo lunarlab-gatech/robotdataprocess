@@ -1,8 +1,8 @@
 name: Unit Tests
 
+# Only run manually to save usage minutes
 on:
-  push:
-    branches: [ "**" ]
+  workflow_dispatch:
 
 permissions:
   contents: read
