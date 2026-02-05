@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 10
     env:
       SKIP_ROS2_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
 
     steps:
     - uses: actions/checkout@v3
@@ -46,6 +47,7 @@ jobs:
     timeout-minutes: 10
     env:
       SKIP_ROS2_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
 
     steps:
     - uses: actions/checkout@v3
@@ -82,6 +84,7 @@ jobs:
       options: --user root  # optional, helps avoid permission issues
     env:
       SKIP_PURE_PYTHON_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
 
     steps:
     - uses: actions/checkout@v3
@@ -108,9 +111,44 @@ jobs:
         path: .coverage.*
         include-hidden-files: true
       
+  ros1-tests:
+    name: "Build & Test ROS1 Python Code"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: dlittleman/robotdataprocess_ros1_noetic:0.1
+      options: --user root
+    env:
+      SKIP_PURE_PYTHON_TESTS: "True"
+      SKIP_ROS2_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python3 -m pip install -e .
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest & evaluate test coverage
+      shell: bash
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        source /opt/ros/noetic/setup.bash
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+    - name: Save coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ github.job }}
+        path: .coverage.*
+        include-hidden-files: true
+
   coverage:
     name: "Merge & Upload Coverage Reports"
-    needs: [python3_8-tests, python3_10-tests, ros2-tests]
+    needs: [python3_8-tests, python3_10-tests, ros2-tests, ros1-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -134,7 +172,7 @@ jobs:
           pip install coverage
           ls -al
           pwd
-          coverage combine coverage-files/coverage-python3_8-tests/.coverage.* coverage-files/coverage-python3_10-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.*
+          coverage combine coverage-files/coverage-python3_8-tests/.coverage.* coverage-files/coverage-python3_10-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.* coverage-files/coverage-ros1-tests/.coverage.*
           coverage xml
       - name: Coveralls GitHub Action (Upload Coverage Report)
         uses: coverallsapp/github-action@v2.3.6

@@ -67,6 +67,18 @@ class Data:
         """ Returns the number of items in this data class """
         return len(self.timestamps)
     
+    # =========================================================================
+    # ========================= Manipulation Methods ========================== 
+    # =========================================================================  
+    
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
+    
+    # =========================================================================
+    # =========================== Conversion to ROS =========================== 
+    # ========================================================================= 
+
     @staticmethod
     def get_ros_msg_type(libtype: ROSMsgLibType):
         """ Will return the msgtype for the ROS message for this Data object. """
@@ -76,9 +88,9 @@ class Data:
         """ Will create and return a ROS message object. """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     
-    def crop_data(self, start: Decimal, end: Decimal):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
-        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
+    # =========================================================================
+    # ============================ Data Analysis ============================== 
+    # =========================================================================  
 
     def compute_hertz_stats(self, trim_outliers: bool = True) -> tuple[List, List, int]:
         """
@@ -115,6 +127,10 @@ class Data:
             hertz_values = hertz_values[5:-5]
 
         return hertz_diffs, hertz_values, num_zero_diffs
+    
+    # =========================================================================
+    # ============================ Visualization ============================== 
+    # =========================================================================  
 
     def hertz_analysis(self, show_plots: bool = True) -> tuple[List, List]:
         """

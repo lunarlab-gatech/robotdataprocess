@@ -275,5 +275,139 @@ class TestRosPublisher(unittest.TestCase):
         p.join()
         self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
  
+@unittest.skipIf(os.getenv("SKIP_ROS1_TESTS") == "True", "ROS1 not installed")
+class TestRosPublisherROS1(unittest.TestCase):
+
+    def util_ROS1_test(self, data: Data, topic_class: Any, topic_name: str,
+                       msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
+                       verbose: bool = False, data_msg_type: Optional[str] = None):
+
+        rospy = ModuleImporter.get_module('rospy')
+
+        # Launch the publisher before we initialize rospy
+        p = Process(target=publish_data_ROS_multiprocess, args=([data], [topic_name], [data_msg_type], [500], [1],
+                                                                ROSMsgLibType.ROSPY, False, verbose, 0.0, True))
+        p.start()
+
+        # Initialize ROS1 node for subscribing
+        rospy.init_node('test_listener', anonymous=True)
+
+        # Store received messages
+        received = []
+
+        def callback(msg):
+            received.append(msg_to_dict_fn(msg))
+            rospy.loginfo(f"Received msg {len(received)-1} at time {received[-1]['stamp']}")
+
+        # Create subscriber
+        rospy.Subscriber(topic_name, topic_class, callback)
+
+        # Spin and wait for messages
+        try:
+            start_time = time.time()
+            timeout_sec = 5.0
+            rate = rospy.Rate(10)  # 10 Hz
+            while not rospy.is_shutdown() and (time.time() - start_time) < timeout_sec:
+                rate.sleep()
+
+            # Make sure we received at least one message
+            self.assertTrue(len(received) > 0, "No messages received!")
+
+            # Make sure data is correct for each message we received
+            data_ts_floats = data.timestamps.astype(float)
+            for j in range(len(received)):
+                stamp = received[j]['stamp']
+                matches = np.where(np.isclose(data_ts_floats, stamp, atol=1e-6))[0]
+                if matches.size > 0:
+                    matched_index = int(matches[0])
+                    assert_data_dict_equal(data, matched_index, received[j])
+                else:
+                    self.fail("Received ROS Message has a timestamp that doesn't match any of the sent messages!")
+
+        finally:
+            rospy.signal_shutdown("Test complete")
+            p.join(timeout=5)
+            if p.is_alive():
+                p.terminate()
+
+    def test__run_ROS1_publisher_process(self):
+        """ Test that we can publish to ROS1 without losing data. """
+
+        # ================== Test ImageData ==================
+        file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher',
+                         'test__run_ROS2_publisher_process', 'ImageData').absolute()
+        image_data = ImageDataInMemory.from_image_files(file_path, '/cam0')
+
+        Image = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Image')
+        CvBridge = ModuleImporter.get_module_attribute('cv_bridge', 'CvBridge')
+        bridge = CvBridge()
+
+        def img_msg_to_dict_fn(msg: Image) -> dict:
+            image: NDArray = bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            return {
+                "image": image,
+                "height": msg.height,
+                "width": msg.width,
+                "encoding": msg.encoding,
+                "frame_id": msg.header.frame_id,
+                "stamp": msg.header.stamp.secs + msg.header.stamp.nsecs * 1e-9
+            }
+
+        def img_assert_data_dict_equal(data_sent: ImageData, matched_index: int, msg_received: dict):
+            np.testing.assert_array_equal(data_sent.images[matched_index], msg_received["image"])
+            np.testing.assert_equal(data_sent.height, msg_received["height"])
+            np.testing.assert_equal(data_sent.width, msg_received["width"])
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_received["encoding"]))
+            np.testing.assert_equal(data_sent.frame_id, msg_received["frame_id"])
+            np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_received["stamp"])
+
+        p = Process(target=self.util_ROS1_test, args=(image_data, Image,
+                                                       '/cam0/image_raw', img_msg_to_dict_fn, img_assert_data_dict_equal))
+        p.start()
+        p.join()
+        self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
+
+        # ================== Test ImuData ==================
+        file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher',
+                         'test__run_ROS2_publisher_process', 'ImuData', 'imu.txt').absolute()
+        imu_data = ImuData.from_txt_file(file_path, "base_link", CoordinateFrame.NED, True)
+
+        Imu = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
+
+        def imu_msg_to_dict_fn(msg: Imu) -> dict:
+            return {
+                "linear_acceleration": np.array([msg.linear_acceleration.x,
+                                                 msg.linear_acceleration.y,
+                                                 msg.linear_acceleration.z]),
+                "linear_acceleration_covariance": list(msg.linear_acceleration_covariance),
+                "angular_velocity": np.array([msg.angular_velocity.x,
+                                              msg.angular_velocity.y,
+                                              msg.angular_velocity.z]),
+                "angular_velocity_covariance": list(msg.angular_velocity_covariance),
+                "orientation": np.array([msg.orientation.x,
+                                         msg.orientation.y,
+                                         msg.orientation.z,
+                                         msg.orientation.w]),
+                "orientation_covariance": list(msg.orientation_covariance),
+                "frame_id": msg.header.frame_id,
+                "stamp": msg.header.stamp.secs + msg.header.stamp.nsecs * 1e-9
+            }
+
+        def imu_assert_data_dict_equal(data_sent: ImuData, matched_index: int, msg_received: dict):
+            np.testing.assert_array_equal(data_sent.lin_acc[matched_index].astype(float), msg_received["linear_acceleration"])
+            np.testing.assert_array_equal(np.zeros(9), msg_received["linear_acceleration_covariance"])
+            np.testing.assert_array_equal(data_sent.ang_vel[matched_index].astype(float), msg_received["angular_velocity"])
+            np.testing.assert_array_equal(np.zeros(9), msg_received["angular_velocity_covariance"])
+            np.testing.assert_array_equal(data_sent.orientations[matched_index].astype(float), msg_received["orientation"])
+            np.testing.assert_array_equal(np.zeros(9), msg_received["orientation_covariance"])
+            np.testing.assert_equal(data_sent.frame_id, msg_received["frame_id"])
+            np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_received["stamp"])
+
+        p = Process(target=self.util_ROS1_test, args=(imu_data, Imu, '/imu0', imu_msg_to_dict_fn, imu_assert_data_dict_equal, False))
+        p.start()
+        p.join()
+        self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
+
+
 if __name__ == "__main__":
     unittest.main()

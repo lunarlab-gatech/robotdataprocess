@@ -5,7 +5,7 @@
 USER=$(whoami)
 
 # Define paths
-DATASET_NUM="V2.3.AP"
+DATASET_NUM="V2.3.AC"
 BASE_DIR="/media/${USER}/T73/Hercules_datasets/${DATASET_NUM}/extract/bags_for_LIO-SAM"
 
 # Robot names (must match extract_data_LIO-SAM.py)
