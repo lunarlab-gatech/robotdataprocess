@@ -41,6 +41,7 @@ class LiDARData(Data):
         self.point_clouds = point_clouds
         self.channels = channels
         self.frame = frame
+        self.data_mask = None
 
         # Check data types
         if self.channels is not None:
@@ -202,6 +203,11 @@ class LiDARData(Data):
         This is a safe copy of the memmapped array, meaning it can be transformed and changed. 
         """
 
+        # Map index to masked index if cropping has occurred
+        if self.data_mask is not None:
+            index = int(np.where(self.data_mask)[0][index])
+
+        # Extract point cloud and channels
         pc = self.point_clouds[index].astype(np.float32, copy=True) 
         channels = None
         if self.channels is not None:
@@ -232,38 +238,22 @@ class LiDARData(Data):
 
         if self.channels is not None:
             raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
-
-        # == Calculate laser line angles (From VLP-16), with a weaved pattern between negative and positive numbers
-        # all_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
-        # neg = all_angles[all_angles < 0]
-        # pos = all_angles[all_angles > 0]
-        # zero = all_angles[all_angles == 0]
-
-        # # Interleave negatives and positives
-        # laser_angles = []
-        # for n, p in zip(neg, pos):
-        #     laser_angles.append(n)
-        #     laser_angles.append(p)
-        
-        # # If one side has one extra (odd number of channels), append it
-        # if len(neg) > len(pos):
-        #     laser_angles.append(neg[-1])
-        # elif len(pos) > len(neg):
-        #     laser_angles.append(pos[-1])
-        
-        # # If there is exactly 0, insert it in the middle
-        # if zero.size > 0:
-        #     mid = len(laser_angles) // 2
-        #     laser_angles.insert(mid, 0.0)
-
         laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
 
+        # Initialize channels list to match point_clouds indexing
+        channels: List[Optional[np.ndarray]] = [None] * len(self.point_clouds)
+
+        # Get the original indices to populate (all indices if no cropping, else only masked indices)
+        if self.data_mask is not None:
+            original_indices = np.where(self.data_mask)[0]
+        else:
+            original_indices = range(len(self.point_clouds))
+
         # Compute channels
-        channels = []
         pbar = tqdm.tqdm(total=self.len(), desc="Calculating Point Channels...", unit=" frames")
-        for i in range(self.len()):
+        for cropped_i, original_i in enumerate(original_indices):
             # Get point cloud
-            pc, _ = self.get_point_cloud_at_index(i)
+            pc, _ = self.get_point_cloud_at_index(cropped_i)
 
             # Extract dimensions
             x = pc[:, 0]
@@ -281,7 +271,7 @@ class LiDARData(Data):
             # Any point where x, y, or z is NaN gets maximum uint value
             mask_invalid = np.isnan(pc).any(axis=1)
             chan[mask_invalid] = np.iinfo(np.uint16).max
-            channels.append(chan)
+            channels[original_i] = chan
             pbar.update()
 
         self.channels = channels
@@ -307,6 +297,15 @@ class LiDARData(Data):
 
         if dense_transformation not in self.transformations:
             self.transformations.append(dense_transformation)
+
+    def crop_data(self, start: Decimal, end: Decimal):
+        """ Will crop the data so only values within [start, end] inclusive are kept. """
+
+        # Create boolean mask of data to keep (for when we get point clouds later)
+        self.data_mask = (self.timestamps >= start) & (self.timestamps <= end)
+
+        # Apply mask to Data attributes
+        self.timestamps = self.timestamps[self.data_mask]
 
     # =========================================================================
     # ============================ Visualization ============================== 

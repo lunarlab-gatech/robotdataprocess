@@ -68,6 +68,37 @@ class TestLiDARData(unittest.TestCase):
 
         np.testing.assert_array_equal(lidar_data.channels, [[40, 40, 40, 31, 25, 20],
                                                             [ 9, 15, 0, 16, 8, 65535]])
+
+        # Test that channels are calculated correctly after cropping
+        point_clouds_extended = [
+            np.array([[10, 10, 5], [10, 10, 0]]),   # index 0, timestamp 0.5 (will be cropped)
+            np.array([[ 0,  1,  2],                 # index 1, timestamp 1.0
+                      [-1, -3,  4],
+                      [ 4,  1,  2],
+                      [ 4, 10,  2],
+                      [ 4, 10,  1],
+                      [ 4, 10,  0]]),
+            np.array([[ 4, 10, -2],                 # index 2, timestamp 1.5
+                      [ 4, 10, -1],
+                      [ 0,  1, -2],
+                      [10, 10, -1],
+                      [10, 10, -3],
+                      [np.nan, np.nan, np.nan]]),
+            np.array([[10, 10, -5], [10, 10, 0]]),  # index 3, timestamp 2.0 (will be cropped)
+        ]
+        timestamps = [Decimal("0.5"), Decimal("1.0"), Decimal("1.5"), Decimal("2.0")]
+        lidar_data_cropped = LiDARData("robot", timestamps, point_clouds_extended, None, CoordinateFrame.FLU)
+
+        # Crop to keep only timestamps 1.0 and 1.5 (indices 1 and 2)
+        lidar_data_cropped.crop_data(Decimal("1.0"), Decimal("1.5"))
+        lidar_data_cropped.calculate_point_channels(41, -20, 20)
+
+        # Verify channels are calculated correctly for the cropped data
+        # Should match the original test values since we're using the same point clouds
+        _, channels_0 = lidar_data_cropped.get_point_cloud_at_index(0)
+        _, channels_1 = lidar_data_cropped.get_point_cloud_at_index(1)
+        np.testing.assert_array_equal(channels_0, [40, 40, 40, 31, 25, 20])
+        np.testing.assert_array_equal(channels_1, [ 9, 15,  0, 16,  8, 65535])
         
     def test_make_dense(self):
         """ Ensure invalid points (infinities and NaNs are removed) """
@@ -163,6 +194,62 @@ class TestLiDARData(unittest.TestCase):
         ros_msg_2 = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 1)
         self.assertEqual(ros_msg_2.header.stamp.sec, 0)
         self.assertEqual(ros_msg_2.header.stamp.nanosec, 600000000)  # 0.6 seconds
+
+    def test_crop_data(self):
+        """ Ensure crop_data correctly filters data and raises errors on out-of-bounds access. """
+
+        # Create point clouds with distinct values so we can verify correct indexing after crop
+        point_clouds = [
+            np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]),  # index 0, timestamp 0.5
+            np.array([[2.0, 2.0, 2.0], [3.0, 3.0, 3.0]]),  # index 1, timestamp 1.0
+            np.array([[4.0, 4.0, 4.0], [5.0, 5.0, 5.0]]),  # index 2, timestamp 1.5
+            np.array([[6.0, 6.0, 6.0], [7.0, 7.0, 7.0]]),  # index 3, timestamp 2.0
+            np.array([[8.0, 8.0, 8.0], [9.0, 9.0, 9.0]]),  # index 4, timestamp 2.5
+        ]
+        timestamps = [Decimal("0.5"), Decimal("1.0"), Decimal("1.5"), Decimal("2.0"), Decimal("2.5")]
+        lidar_data = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+
+        # Verify initial state
+        self.assertEqual(lidar_data.len(), 5)
+
+        # Crop data to keep only timestamps in [1.0, 2.0]
+        lidar_data.crop_data(Decimal("1.0"), Decimal("2.0"))
+
+        # Verify cropped length
+        self.assertEqual(lidar_data.len(), 3)
+
+        # Verify timestamps are correct after cropping
+        np.testing.assert_array_equal(
+            lidar_data.timestamps.astype(float),
+            [1.0, 1.5, 2.0]
+        )
+
+        # Verify that cropped indices return correct point clouds
+        # Index 0 after crop should be original index 1 (timestamp 1.0)
+        pc_0, _ = lidar_data.get_point_cloud_at_index(0)
+        np.testing.assert_array_equal(pc_0[1], [3.0, 3.0, 3.0])
+
+        # Index 1 after crop should be original index 2 (timestamp 1.5)
+        pc_1, _ = lidar_data.get_point_cloud_at_index(1)
+        np.testing.assert_array_equal(pc_1[1], [5.0, 5.0, 5.0])
+
+        # Index 2 after crop should be original index 3 (timestamp 2.0)
+        pc_2, _ = lidar_data.get_point_cloud_at_index(2)
+        np.testing.assert_array_equal(pc_2[1], [7.0, 7.0, 7.0])
+
+        # Verify that out-of-bounds index raises an error
+        with self.assertRaises(IndexError):
+            lidar_data.get_point_cloud_at_index(3)
+
+        # Verify that get_ros_msg also raises an error for out-of-bounds index
+        lidar_data.calculate_point_channels(16, -15, 15)
+        with self.assertRaises(ValueError):
+            lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 3)
+
+        # Verify that get_ros_msg works for valid index after cropping
+        ros_msg = lidar_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 2)
+        self.assertEqual(ros_msg.header.stamp.sec, 2)
+        self.assertEqual(ros_msg.header.stamp.nanosec, 0)
 
 
 if __name__ == "__main__":

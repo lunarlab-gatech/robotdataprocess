@@ -5,11 +5,8 @@ from robotdataprocess import ImuData, OdometryData, CoordinateFrame, LiDARData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from typing import Union
 
-def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None]):
-    # Check parameters
-    if crop_data and end_time is None:
-        raise ValueError("end_time required if crop_data is True!")
-    
+def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decimal):
+
     # Make directory paths
     input_path = Path(input_dir).absolute()
     output_path = input_path.parent / 'extract' / 'bags_for_LIO-SAM'
@@ -27,10 +24,9 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
     pose_data.shift_to_start_at_identity()
 
     # Crop the data
-    if crop_data:
-        imu_data.crop_data(Decimal('0.0'), end_time)
-        pose_data.crop_data(Decimal('0.0'), end_time)
-        lidar_data.crop_data(Decimal('0.0'), end_time)
+    imu_data.crop_data(start_time, end_time)
+    pose_data.crop_data(start_time, end_time)
+    lidar_data.crop_data(start_time, end_time)
 
     # Save it into a ROS2 bag
     Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
@@ -41,11 +37,12 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
     
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.3.C"
+    dataset_num = "V2.4.C"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky2"]
-    robot_crop_end_times = [None] 
+    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_crop_start_times = [Decimal('1.45'), Decimal('1.00'), Decimal('1.3'), Decimal('1.3')]
+    robot_crop_end_times = [Decimal('382.85'), Decimal('390.90'), Decimal('1100.00'), Decimal('1190.35')]
 
     # Check validity of inputs
     assert len(robot_names) == len(robot_crop_end_times)
@@ -53,12 +50,9 @@ def main():
 
     # Run extraction for each robot
     for i in range(num_robots):
-        if robot_crop_end_times[i] == None: crop_data = False
-        else: crop_data = True
-
         to_bag(input_dir=input_dir,
                robot_name=robot_names[i],
-               crop_data=crop_data,
+               start_time=robot_crop_start_times[i],
                end_time=robot_crop_end_times[i])
         
 if __name__ == "__main__":
