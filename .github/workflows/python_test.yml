@@ -168,11 +168,11 @@ jobs:
         run: |
           python3 -m pip install -e .
       - name: Merge coverage
-        run: |
+        run: | # coverage-files/coverage-ros1-tests/.coverage.*
           pip install coverage
           ls -al
           pwd
-          coverage combine coverage-files/coverage-python3_8-tests/.coverage.* coverage-files/coverage-python3_10-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.* coverage-files/coverage-ros1-tests/.coverage.*
+          coverage combine coverage-files/coverage-python3_8-tests/.coverage.* coverage-files/coverage-python3_10-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.*
           coverage xml
       - name: Coveralls GitHub Action (Upload Coverage Report)
         uses: coverallsapp/github-action@v2.3.6
