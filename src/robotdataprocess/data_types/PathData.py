@@ -7,6 +7,7 @@ from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+from ..math_utils import interpolate_poses
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -102,7 +103,6 @@ class PathData(SequentialData):
         Args:
             target_hz (float): Desired output frequency in Hertz (e.g. 6.0)
         """
-        from ..math_utils import interpolate_poses
 
         # Check that target_hz is valid
         if target_hz <= 0: raise ValueError("target_hz must be positive")
