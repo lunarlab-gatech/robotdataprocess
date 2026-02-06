@@ -287,6 +287,56 @@ class TestImageDataInMemory(unittest.TestCase):
         self.helper_from_ros2_bag_matches_raw_messages("/hercules_node/Husky2/front_center_Scene/image", np.uint8, (720, 1280, 3))
         self.helper_from_ros2_bag_matches_raw_messages("/hercules_node/Husky2/front_center_DepthPlanar/image", np.float32, (720, 1280))
 
+    def test_downscale_by_factor(self):
+        """ Test image downscaling for Mono8 images. """
+        # Create small Mono8 data (10x10)
+        imgs = np.random.randint(0, 255, (2, 10, 10), dtype=np.uint8)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs)
+
+        data.downscale_by_factor(2)
+        self.assertEqual(data.height, 5)
+        self.assertEqual(data.width, 5)
+        self.assertEqual(data.images.shape, (2, 5, 5))
+
+    def test_downscale_by_factor_invalid_scale(self):
+        """ Test that downscale_by_factor raises ValueError for invalid scale. """
+        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs)
+        with self.assertRaises(ValueError):
+            data.downscale_by_factor(3)  # 10 is not divisible by 3
+
+    def test_downscale_by_factor_non_mono8_raises(self):
+        """ Test that downscale_by_factor raises NotImplementedError for non-Mono8. """
+        imgs = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.RGB8, imgs)
+        with self.assertRaises(NotImplementedError):
+            data.downscale_by_factor(2)
+
+    def test_to_image_files_roundtrip(self):
+        """ Test saving Mono8 images to files and loading back. """
+        path = Path('.') / 'tests' / 'files' / 'test_ImageData' / 'test_from_image_files' / 'mono8'
+        image_data = ImageDataInMemory.from_image_files(path.absolute(), 'callie')
+
+        # Save to image files
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageDataInMemory' / 'test_to_image_files'
+        output = output.absolute()
+        if output.exists():
+            shutil.rmtree(output)
+        image_data.to_image_files(output)
+
+        # Load back and compare
+        image_data_loaded = ImageDataInMemory.from_image_files(output, 'callie')
+        np.testing.assert_array_equal(image_data.images, image_data_loaded.images)
+
+    def test_to_npy_unsupported_encoding(self):
+        """ Test that to_npy raises NotImplementedError for Mono8 encoding. """
+        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageDataInMemory' / 'test_to_npy_unsupported'
+        output = output.absolute()
+        with self.assertRaises(NotImplementedError):
+            data.to_npy(output)
+
 
 if __name__ == "__main__":
     unittest.main()

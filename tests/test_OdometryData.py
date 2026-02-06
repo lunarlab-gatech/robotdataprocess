@@ -264,5 +264,98 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_almost_equal(random_row['qz'], 1.05546661188782309181988239288330078125E-7, 14)
 
 
+    def test_shift_position(self):
+        """ Test that shift_position modifies positions correctly. """
+        odom = OdometryData("world", "robot", [0, 1, 2],
+                            np.array([[1.0, 2.0, 3.0],
+                                      [4.0, 5.0, 6.0],
+                                      [7.0, 8.0, 9.0]]),
+                            np.array([[0, 0, 0, 1],
+                                      [0, 0, 0, 1],
+                                      [0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        odom.shift_position(10.0, -20.0, 5.0)
+        np.testing.assert_array_almost_equal(
+            odom.positions.astype(float),
+            [[11.0, -18.0, 8.0],
+             [14.0, -15.0, 11.0],
+             [17.0, -12.0, 14.0]])
+
+    def test_add_folded_gaussian_noise(self):
+        """ Test that gaussian noise is applied and accumulated correctly. """
+        odom = OdometryData("world", "robot", [0, 1, 2],
+                            np.array([[0.0, 0.0, 0.0],
+                                      [0.0, 0.0, 0.0],
+                                      [0.0, 0.0, 0.0]]),
+                            np.array([[0, 0, 0, 1],
+                                      [0, 0, 0, 1],
+                                      [0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        np.random.seed(42)
+        odom.add_folded_guassian_noise_to_position(0.1, 0.05)
+        # Positions should have changed (all noise is positive due to abs + accumulation)
+        for i in range(3):
+            self.assertGreater(float(odom.positions[i][0]), 0.0)
+            self.assertGreater(float(odom.positions[i][1]), 0.0)
+            self.assertGreater(float(odom.positions[i][2]), 0.0)
+        # Noise should be monotonically increasing (cumulative)
+        for dim in range(3):
+            for i in range(1, 3):
+                self.assertGreater(float(odom.positions[i][dim]),
+                                   float(odom.positions[i-1][dim]))
+
+    def test_interpolate_to_hz(self):
+        """ Test interpolation to a target frequency. """
+        odom = OdometryData("world", "robot",
+                            np.array([0.0, 1.0, 2.0]),
+                            np.array([[0.0, 0.0, 0.0],
+                                      [1.0, 0.0, 0.0],
+                                      [2.0, 0.0, 0.0]]),
+                            np.array([[0, 0, 0, 1],
+                                      [0, 0, 0, 1],
+                                      [0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        odom.interpolate_to_hz(2.0)
+        # With duration=2.0 and target_hz=2.0: num_samples = ceil(2*2)+1 = 5
+        self.assertEqual(odom.len(), 5)
+        # Check positions are linearly interpolated
+        np.testing.assert_array_almost_equal(
+            odom.positions.astype(float)[:, 0],
+            [0.0, 0.5, 1.0, 1.5, 2.0])
+        # Check ValueError for non-positive hz
+        with self.assertRaises(ValueError):
+            odom2 = OdometryData("world", "robot", [0, 1],
+                                 np.array([[0, 0, 0], [1, 0, 0]]),
+                                 np.array([[0, 0, 0, 1], [0, 0, 0, 1]]),
+                                 CoordinateFrame.FLU)
+            odom2.interpolate_to_hz(0)
+        with self.assertRaises(ValueError):
+            odom3 = OdometryData("world", "robot", [0, 1],
+                                 np.array([[0, 0, 0], [1, 0, 0]]),
+                                 np.array([[0, 0, 0, 1], [0, 0, 0, 1]]),
+                                 CoordinateFrame.FLU)
+            odom3.interpolate_to_hz(-1.0)
+
+    def test_to_csv_existing_file_raises(self):
+        """ Test that to_csv raises ValueError when file already exists. """
+        odom = OdometryData("world", "robot", [0],
+                            np.array([[1.0, 2.0, 3.0]]),
+                            np.array([[0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        existing_file = Path(__file__).absolute()
+        with self.assertRaises(ValueError):
+            odom.to_csv(existing_file)
+
+    def test_from_csv_reorder_data(self):
+        """ Test the reorder_data=True branch in from_csv. """
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_csv', 'odomGT.csv').absolute()
+        odom = OdometryData.from_csv(file_path, "odom", "base_link",
+                                      CoordinateFrame.FLU, True, None,
+                                      reorder_data=True)
+        # Data should still be in order (it was already ordered)
+        for i in range(odom.len() - 1):
+            self.assertLess(odom.timestamps[i], odom.timestamps[i+1])
+
+
 if __name__ == "__main__":
     unittest.main()
