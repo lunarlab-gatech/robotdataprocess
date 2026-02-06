@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ..Data import Data, ROSMsgLibType
+from ..Data import ROSMsgLibType
+from ..SequentialData import SequentialData
 import decimal
 from decimal import Decimal
 from enum import Enum
@@ -12,7 +13,7 @@ from typing import Union, Any
 from rosbags.typesys import Stores, get_typestore
 
 @typechecked
-class ImageData(Data):
+class ImageData(SequentialData):
     """ Generic ImageData class that should be overwritten by children """
 
     # Define image encodings enumeration

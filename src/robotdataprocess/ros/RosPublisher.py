@@ -1,4 +1,5 @@
-from ..data_types.Data import Data, ROSMsgLibType
+from ..data_types.Data import ROSMsgLibType
+from ..data_types.SequentialData import SequentialData
 from ..data_types.ImageData.ImageData import ImageData
 from ..ModuleImporter import ModuleImporter
 import multiprocessing
@@ -59,7 +60,7 @@ class _SingleDataPublisher():
         stats_dict: Dictionary for processes to put publishing statistics for printing.
     """
 
-    def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: Data, topic_name: str, 
+    def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: SequentialData, topic_name: str, 
                  type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                  verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
         
@@ -433,7 +434,7 @@ class _SingleDataPublisher():
                 self.next_msg = None
 
 @typechecked
-def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
+def _run_ROS_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker. 
@@ -443,7 +444,7 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
     try:
         import rospy
         class SingleDataPublisherROS1():
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float,stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float,stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
                 self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
         node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
@@ -455,7 +456,7 @@ def _run_ROS_publisher_process(data: Data, topic_name: str, type: Union[str, Non
         print(traceback.format_exc())
 
 @typechecked
-def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, 
+def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, 
                                 num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
@@ -468,7 +469,7 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
 
         # Wrapper class that is also a ROS2 Node, so that we are in compliance with rclpy design.
         class SingleDataPublisherROS2(Node):
-            def __init__(self, data: Data, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
+            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
                          verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
                 self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
@@ -490,7 +491,7 @@ def _run_ROS2_publisher_process(data: Data, topic_name: str, type: Union[str, No
         print(traceback.format_exc())
 
 @typechecked
-def publish_data_ROS_multiprocess(data_list: List[Data], data_topics: List[str], data_msg_type: List[Union[str, None]],
+def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: List[str], data_msg_type: List[Union[str, None]],
                                   data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
                                   verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False) -> None:
     """

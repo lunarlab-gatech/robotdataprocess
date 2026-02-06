@@ -1,5 +1,6 @@
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-from .Data import Data, CoordinateFrame, ROSMsgLibType
+from .Data import CoordinateFrame, ROSMsgLibType
+from .SequentialData import SequentialData
 import decimal
 from decimal import Decimal
 from ..ModuleImporter import ModuleImporter
@@ -18,7 +19,7 @@ from typing import Union, Any, Optional, List
 import tqdm
 
 @typechecked
-class ImuData(Data):
+class ImuData(SequentialData):
 
     # Define IMU-specific data attributes
     lin_acc: NDArray

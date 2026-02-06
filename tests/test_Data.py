@@ -5,7 +5,8 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
-from robotdataprocess.data_types.Data import Data, CoordinateFrame, ROSMsgLibType
+from robotdataprocess.data_types.Data import CoordinateFrame, ROSMsgLibType
+from robotdataprocess.data_types.SequentialData import SequentialData
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -33,13 +34,13 @@ class TestROSMsgLibType(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestData(unittest.TestCase):
+class TestSequentialData(unittest.TestCase):
     """ Test the Data base class. """
 
     def test_init_valid_timestamps(self):
         """ Test Data initialization with valid sequential timestamps. """
         timestamps = [Decimal("0.1"), Decimal("0.2"), Decimal("0.3")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         self.assertEqual(data.frame_id, "test_frame")
         self.assertEqual(len(data.timestamps), 3)
@@ -48,7 +49,7 @@ class TestData(unittest.TestCase):
     def test_init_with_numpy_array(self):
         """ Test Data initialization with numpy array timestamps. """
         timestamps = np.array([0.1, 0.2, 0.3])
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         self.assertEqual(data.frame_id, "test_frame")
         self.assertEqual(len(data.timestamps), 3)
@@ -58,48 +59,48 @@ class TestData(unittest.TestCase):
         # Timestamps out of order
         timestamps = [Decimal("0.3"), Decimal("0.2"), Decimal("0.1")]
         with self.assertRaises(ValueError):
-            Data("test_frame", timestamps)
+            SequentialData("test_frame", timestamps)
 
     def test_init_duplicate_timestamps_raises(self):
         """ Test that duplicate timestamps raise ValueError. """
         timestamps = [Decimal("0.1"), Decimal("0.1"), Decimal("0.2")]
         with self.assertRaises(ValueError):
-            Data("test_frame", timestamps)
+            SequentialData("test_frame", timestamps)
 
     def test_init_single_timestamp(self):
         """ Test Data initialization with single timestamp (no validation needed). """
         timestamps = [Decimal("0.1")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
         self.assertEqual(data.len(), 1)
 
     def test_init_empty_timestamps(self):
         """ Test Data initialization with empty timestamps. """
         timestamps = []
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
         self.assertEqual(data.len(), 0)
 
     def test_len(self):
         """ Test len() returns correct number of timestamps. """
         timestamps = [Decimal("0.1"), Decimal("0.2"), Decimal("0.3"), Decimal("0.4")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
         self.assertEqual(data.len(), 4)
 
     def test_get_ros_msg_type_raises(self):
         """ Test get_ros_msg_type raises NotImplementedError. """
         with self.assertRaises(NotImplementedError):
-            Data.get_ros_msg_type(ROSMsgLibType.ROSBAGS)
+            SequentialData.get_ros_msg_type(ROSMsgLibType.ROSBAGS)
 
     def test_get_ros_msg_raises(self):
         """ Test get_ros_msg raises NotImplementedError. """
         timestamps = [Decimal("0.1"), Decimal("0.2")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
         with self.assertRaises(NotImplementedError):
             data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
 
     def test_crop_data_raises(self):
         """ Test crop_data raises NotImplementedError. """
         timestamps = [Decimal("0.1"), Decimal("0.2")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
         with self.assertRaises(NotImplementedError):
             data.crop_data(Decimal("0.1"), Decimal("0.2"))
 
@@ -112,7 +113,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test compute_hertz_stats with basic valid data without trimming. """
         # Create timestamps at 10 Hz (0.1s intervals)
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(20)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values, num_zero_diffs = data.compute_hertz_stats(trim_outliers=False)
 
@@ -132,7 +133,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test compute_hertz_stats trims outliers when there are enough samples. """
         # Create 20 timestamps (19 differences, should trim to 9 after removing first/last 5)
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(20)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values, num_zero_diffs = data.compute_hertz_stats(trim_outliers=True)
 
@@ -144,7 +145,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test compute_hertz_stats raises ValueError when trimming requested but not enough data. """
         # Only 4 timestamps (3 differences, not enough to trim)
         timestamps = [Decimal("0.1"), Decimal("0.2"), Decimal("0.3"), Decimal("0.4")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         with self.assertRaises(ValueError):
             data.compute_hertz_stats(trim_outliers=True)
@@ -153,7 +154,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test compute_hertz_stats raises ValueError at boundary (exactly 10 differences). """
         # 11 timestamps = 10 differences, should still raise (need > 10)
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(11)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         with self.assertRaises(ValueError):
             data.compute_hertz_stats(trim_outliers=True)
@@ -161,7 +162,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
     def test_compute_hertz_stats_insufficient_data(self):
         """ Test compute_hertz_stats raises ValueError with < 2 samples. """
         timestamps = [Decimal("0.1")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         with self.assertRaises(ValueError):
             data.compute_hertz_stats()
@@ -169,7 +170,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
     def test_compute_hertz_stats_empty_data(self):
         """ Test compute_hertz_stats raises ValueError with empty data. """
         timestamps = []
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         with self.assertRaises(ValueError):
             data.compute_hertz_stats()
@@ -177,7 +178,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
     def test_hertz_analysis_without_plots(self):
         """ Test hertz_analysis returns correct data with show_plots=False. """
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(20)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values = data.hertz_analysis(show_plots=False)
 
@@ -188,7 +189,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
     def test_hertz_analysis_insufficient_data(self):
         """ Test hertz_analysis raises ValueError with < 2 samples. """
         timestamps = [Decimal("0.1")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         with self.assertRaises(ValueError):
             data.hertz_analysis(show_plots=False)
@@ -197,7 +198,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test compute_hertz_stats with varying time intervals. """
         # Timestamps with varying intervals
         timestamps = [Decimal("0.0"), Decimal("0.1"), Decimal("0.3"), Decimal("0.4"), Decimal("1.0")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values, num_zero_diffs = data.compute_hertz_stats(trim_outliers=False)
 
@@ -212,7 +213,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         """ Test that hertz_diffs and hertz_values are sorted. """
         # Create timestamps with varying intervals that will result in unsorted diffs
         timestamps = [Decimal("0.0"), Decimal("0.5"), Decimal("0.6"), Decimal("0.65"), Decimal("1.0")]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values, _ = data.compute_hertz_stats(trim_outliers=False)
 
@@ -227,7 +228,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
         # We can't easily create zero differences in Data due to validation,
         # but we can test the warning path by mocking compute_hertz_stats
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(20)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         # Mock compute_hertz_stats to return data with zero diffs
         with patch.object(data, 'compute_hertz_stats', return_value=(
@@ -251,7 +252,7 @@ class TestDataHertzAnalysis(unittest.TestCase):
     def test_hertz_analysis_with_plots_mocked(self, mock_show):
         """ Test hertz_analysis visualization code path with mocked matplotlib. """
         timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(20)]
-        data = Data("test_frame", timestamps)
+        data = SequentialData("test_frame", timestamps)
 
         hertz_diffs, hertz_values = data.hertz_analysis(show_plots=True)
 

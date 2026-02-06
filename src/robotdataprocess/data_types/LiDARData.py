@@ -18,11 +18,12 @@ from typing import Union, List, Tuple, Optional, Any, Callable
 
 from ..conversion_utils import col_to_dec_arr
 from ..ModuleImporter import ModuleImporter
-from .Data import Data, CoordinateFrame, ROSMsgLibType
+from .Data import CoordinateFrame, ROSMsgLibType
+from .SequentialData import SequentialData
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
 
 @typechecked
-class LiDARData(Data):
+class LiDARData(SequentialData):
     """
     LiDAR Data class that contains LiDAR-specific attributes and methods.
     Inherits from the generic Data class.

@@ -4,7 +4,8 @@ import numpy as np
 import os
 from pathlib import Path
 from robotdataprocess import LiDARData, CoordinateFrame, ImuData, OdometryData
-from robotdataprocess.data_types.Data import Data, ROSMsgLibType
+from robotdataprocess.data_types.Data import ROSMsgLibType
+from robotdataprocess.data_types.SequentialData import SequentialData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.data_types.OdometryData import PATH_SLICE_STEP
@@ -19,7 +20,7 @@ import unittest
 @unittest.skipIf(os.getenv("SKIP_ROS2_TESTS") == "True", "ROS2 not installed")
 class TestRosPublisher(unittest.TestCase):
 
-    def util_ROS2_test(self, data: Data, topic_class: Any, topic_name: str, 
+    def util_ROS2_test(self, data: SequentialData, topic_class: Any, topic_name: str, 
                        msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
                        verbose: bool = False, data_msg_type:  Optional[str] = None):
         
@@ -278,7 +279,7 @@ class TestRosPublisher(unittest.TestCase):
 @unittest.skipIf(os.getenv("SKIP_ROS1_TESTS") == "True", "ROS1 not installed")
 class TestRosPublisherROS1(unittest.TestCase):
 
-    def util_ROS1_test(self, data: Data, topic_class: Any, topic_name: str,
+    def util_ROS1_test(self, data: SequentialData, topic_class: Any, topic_name: str,
                        msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
                        verbose: bool = False, data_msg_type: Optional[str] = None):
 
