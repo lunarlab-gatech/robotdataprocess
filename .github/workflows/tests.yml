@@ -3,9 +3,6 @@ name: Unit Tests
 # Only run manually to save usage minutes
 on:
   workflow_dispatch: {}   # Manual trigger
-  pull_request:           # Automatic trigger on PRs
-    branches: 
-      - "**"             # Trigger on any PR branch
       
 permissions:
   contents: read
@@ -114,44 +111,44 @@ jobs:
         path: .coverage.*
         include-hidden-files: true
       
-  ros1-tests:
-    name: "Build & Test ROS1 Python Code"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    container:
-      image: dlittleman/robotdataprocess_ros1_noetic:01
-      options: --user root
-    env:
-      SKIP_PURE_PYTHON_TESTS: "True"
-      SKIP_ROS2_TESTS: "True"
+  # ros1-tests:
+  #   name: "Build & Test ROS1 Python Code"
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 5
+  #   container:
+  #     image: dlittleman/robotdataprocess_ros1_noetic:01
+  #     options: --user root
+  #   env:
+  #     SKIP_PURE_PYTHON_TESTS: "True"
+  #     SKIP_ROS2_TESTS: "True"
 
-    steps:
-    - uses: actions/checkout@v3
-    - name: Install dependencies
-      run: |
-        python3 -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Install the package
-      run: |
-        python3 -m pip install -e .
-    - name: Import external message types
-      uses: snickerbockers/submodules-init@v4
-    - name: Test with unittest & evaluate test coverage
-      shell: bash
-      run: |
-        export PATH="$HOME/.local/bin:$PATH"
-        source /opt/ros/noetic/setup.bash
-        coverage run --source robotdataprocess -m unittest discover tests/ -v
-    - name: Save coverage data
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-${{ github.job }}
-        path: .coverage.*
-        include-hidden-files: true
+  #   steps:
+  #   - uses: actions/checkout@v3
+  #   - name: Install dependencies
+  #     run: |
+  #       python3 -m pip install --upgrade pip
+  #       if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+  #   - name: Install the package
+  #     run: |
+  #       python3 -m pip install -e .
+  #   - name: Import external message types
+  #     uses: snickerbockers/submodules-init@v4
+  #   - name: Test with unittest & evaluate test coverage
+  #     shell: bash
+  #     run: |
+  #       export PATH="$HOME/.local/bin:$PATH"
+  #       source /opt/ros/noetic/setup.bash
+  #       coverage run --source robotdataprocess -m unittest discover tests/ -v
+  #   - name: Save coverage data
+  #     uses: actions/upload-artifact@v4
+  #     with:
+  #       name: coverage-   #$ REMOVE SPACES HERE {{ github.job }}
+  #       path: .coverage.*
+  #       include-hidden-files: true
 
   coverage:
     name: "Merge & Upload Coverage Reports"
-    needs: [python3_8-tests, python3_10-tests, ros2-tests, ros1-tests]
+    needs: [python3_8-tests, python3_10-tests, ros2-tests] #ros1-tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

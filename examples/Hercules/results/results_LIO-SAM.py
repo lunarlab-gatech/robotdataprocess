@@ -1,3 +1,4 @@
+from decimal import Decimal
 import getpass
 import numpy as np
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
@@ -6,21 +7,38 @@ from scipy.spatial.transform import Rotation as R
 def main():
     # Load the GT and estimated path data
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.3.AC"
+    dataset_version = "V2.4.C"
     file_name = 'odometry.csv'
 
     for robot_name in robot_names:
         print("\n=== Processing results for robot:", robot_name)
         user = getpass.getuser()
         dataset_folder = '/media/' + user + '/T73/Hercules_datasets/' + dataset_version
-                    
+        
+        # Load the data
         est_data = OdometryData.from_csv(dataset_folder + '/results/LIO-SAM/' + robot_name + '/' + file_name, 
                                         "world", "robot", CoordinateFrame.NED, True, None)
         gt_data = OdometryData.from_csv(dataset_folder + "/extract/files_for_roman_baseline/" + robot_name + '/poseGT.csv', 
                                         "world", "robot", CoordinateFrame.FLU, True, None)
         
+        # Crop the GT data to match the estimated data time range
+        if dataset_version == "V2.4.C":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('382.85'), Decimal('390.90'), Decimal('1100.00'), Decimal('1190.35')]
+        elif dataset_version == "V2.3.AP":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('772.15'), Decimal('741.45'), Decimal('1121.80'), Decimal('1193.80')]
+        elif dataset_version == "V2.3.AC":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('1125.00'), Decimal('1118.80'), Decimal('1025.50'), Decimal('892.60')]
+        else:
+            raise ValueError("Crop times not specified for this dataset number.")
+        
+        gt_data.crop_data(robot_crop_start_times[robot_names.index(robot_name)], 
+                          robot_crop_end_times[robot_names.index(robot_name)])
+            
         # Get L->I transformation
-        if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC":
+        if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC" or dataset_version == "V2.4.C":
             if "Husky" in robot_name:
                 H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
                                             [0.0,  1.0,  0.0,  0.0],
