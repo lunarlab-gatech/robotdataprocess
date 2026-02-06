@@ -6,9 +6,11 @@ from decimal import Decimal
 from enum import Enum
 from ...ModuleImporter import ModuleImporter
 import numpy as np
+from numpy.lib.format import open_memmap
 from pathlib import Path
 from typeguard import typechecked
 from typing import Union, Any
+import tqdm
 from rosbags.typesys import Stores, get_typestore
 
 @typechecked
@@ -123,6 +125,53 @@ class ImageData(Data):
         # Apply mask
         self.timestamps = self.timestamps[mask]
         self.images = self.images[mask]
+
+    # =========================================================================
+    # ============================ Export Methods ============================= 
+    # ========================================================================= 
+
+    def to_npy(self, output_folder_path: Union[Path, str]):
+        """
+        Saves each image in this ImageData into three files:
+        
+        - imgs.npy (with image data)
+        - times.npy (with timestamps)
+        - attributes.txt
+
+        Args:
+            output_folder_path (Path | str): The folder to save the .npy file at.
+        """
+
+        # Setup the output directory
+        output_path = Path(output_folder_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Check that the encoding is supported
+        if self.encoding != ImageData.ImageEncoding.RGB8 and self.encoding != ImageData.ImageEncoding._32FC1:
+            raise NotImplementedError(f"Only RGB8 & 32FC1 images have been tested for export, not {self.encoding}")
+
+        # Get dtype and channels
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
+
+        # Save images into memory-mapped array
+        shape = (self.len(), self.height, self.width) if channels == 1 else (self.len(), self.height, self.width, channels)
+        img_memmap = open_memmap(str(Path(output_folder_path) / "imgs.npy"), dtype=dtype, shape=shape, mode='w+')
+        pbar = tqdm.tqdm(total=self.len(), desc="Saving Images...", unit=" images")
+        for i in range(self.len()):
+            img_memmap[i] = self.images[i]
+            pbar.update()
+        img_memmap.flush()
+
+        # Save the timestamps
+        np.save(str(Path(output_folder_path) / "times.npy"), self.timestamps.astype(np.float128), allow_pickle=False)
+
+        # Save attributes
+        with open(str(Path(output_folder_path) / "attributes.txt"), "w") as f:
+            f.write(f"image_shape: ({self.height},{self.width})\n")
+            f.write(f"frame_id: {self.frame_id}\n")
+            f.write(f"height: {self.height}\n")
+            f.write(f"width: {self.width}\n")
+            f.write(f"encoding: {self.encoding}\n")
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
