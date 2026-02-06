@@ -252,5 +252,21 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.header.stamp.nanosec, 0)
 
 
+    def test_calculate_point_channels_already_exists(self):
+        """ Test that RuntimeError is raised when channels already calculated. """
+        pc = [np.array([[1.0, 2.0, 3.0]])]
+        channels = [np.array([0], dtype=np.uint16)]
+        lidar = LiDARData("robot", [0], pc, channels, CoordinateFrame.FLU)
+        with self.assertRaises(RuntimeError):
+            lidar.calculate_point_channels(16, -15, 15)
+
+    def test_get_ros_msg_no_channels_raises(self):
+        """ Test RuntimeError when channels are None (not yet calculated). """
+        pc = [np.array([[1.0, 2.0, 3.0]])]
+        lidar = LiDARData("robot", [0], pc, None, CoordinateFrame.FLU)
+        with self.assertRaises(RuntimeError):
+            lidar.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

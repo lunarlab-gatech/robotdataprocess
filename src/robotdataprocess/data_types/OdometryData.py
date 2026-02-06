@@ -19,7 +19,6 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Slerp
 from typeguard import typechecked
 from typing import Union, List, Tuple, Any
 import tqdm
@@ -47,9 +46,14 @@ class OdometryData(PathData):
         if len(self.timestamps) != len(self.positions) or len(self.positions) != len(self.orientations):
             raise ValueError("Lengths of timestamp, position, and orientation arrays are not equal!")
 
+    def _invalidate_cache(self):
+        """ Clears cached ROS message data after mutations. """
+        self.poses = []
+        self.poses_rclpy = []
+
     # =========================================================================
-    # ============================ Class Methods ============================== 
-    # =========================================================================  
+    # ============================ Class Methods ==============================
+    # =========================================================================
 
     @classmethod
     def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
@@ -277,113 +281,11 @@ class OdometryData(PathData):
             self.positions[i][1] += Decimal(cumulative_noise_pos['y'])
             self.positions[i][2] += Decimal(cumulative_noise_pos['z'])
 
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def shift_position(self, x_shift: float, y_shift: float, z_shift: float):
-        """
-        Shifts the positions of the odometry.
-
-        Args:
-            x_shift (float): Shift in x-axis.
-            y_shift (float): Shift in y_axis.
-            z_shift (float): Shift in z_axis.
-        """
-        self.positions[:,0] += Decimal(x_shift)
-        self.positions[:,1] += Decimal(y_shift)
-        self.positions[:,2] += Decimal(z_shift)
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def shift_to_start_at_identity(self):
-        """
-        Alter the positions and orientations based so that the first pose 
-        starts at Identity.
-        """
-
-        # Get pose of first robot position w.r.t world
-        R_o = R.from_quat(self.orientations[0]).as_matrix()
-        T_o = np.expand_dims(self.positions[0], axis=1)
-        
-        # Calculate the inverse (pose of world w.r.t first robot location)
-        R_inv = R_o.T
-
-        # Rotate positions and orientations
-        self.positions = (R_inv @ (self.positions.T - T_o).astype(float)).T
-        for i in range(self.len()):
-            self.orientations[i] = R.from_matrix((R_inv @ R.from_quat(self.orientations[i]).as_matrix())).as_quat()
-
-        # Convert back to decimal array
-        self.positions = col_to_dec_arr(self.positions)
-        self.orientations = col_to_dec_arr(self.orientations)
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
-
-        # Create boolean mask of data to keep
-        mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
-        
-        # Apply mask
-        self.timestamps = self.timestamps[mask]
-        self.positions = self.positions[mask]
-        self.orientations = self.orientations[mask]
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def interpolate_to_hz(self, target_hz: float):
-        """
-        Linearly interpolates position and SLERPs orientation so that odometry
-        is output at the desired frequency.
-
-        Args:
-            target_hz (float): Desired output frequency in Hertz (e.g. 6.0)
-        """
-
-        # Check that target_hz is valid
-        if target_hz <= 0: raise ValueError("target_hz must be positive")
-
-        # Convert timestamps to float seconds
-        ts = dec_arr_to_float_arr(self.timestamps)
-        pos = dec_arr_to_float_arr(self.positions)
-        quat = dec_arr_to_float_arr(self.orientations)
-
-        # Create new evenly spaced timestamps
-        duration = ts[-1] - ts[0]
-        num_samples = int(np.ceil(duration * target_hz)) + 1
-        new_ts = np.linspace(ts[0], ts[-1], num_samples)
-
-        # Linear interpolation for position
-        new_pos = np.zeros((len(new_ts), 3))
-        for i in range(3):
-            new_pos[:, i] = np.interp(new_ts, ts, pos[:, i])
-
-        # Spherical Linear Interpolation of Rotations (SLERP)
-        key_rots = R.from_quat(quat)
-        slerp = Slerp(ts, key_rots)
-        new_rots = slerp(new_ts)
-        new_quat = new_rots.as_quat()
-
-        # Convert back to Decimal arrays
-        self.timestamps = col_to_dec_arr(new_ts)
-        self.positions = col_to_dec_arr(new_pos)
-        self.orientations = col_to_dec_arr(new_quat)
-
-        # Clear cached ROS messages
-        self.poses = []
-        self.poses_rclpy = []
+        self._invalidate_cache()
 
     # =========================================================================
-    # ============================ Export Methods ============================= 
-    # =========================================================================  
+    # ============================ Export Methods =============================
+    # =========================================================================
 
     def to_csv(self, csv_path: Union[Path, str], write_header: bool = True):
         """
@@ -424,114 +326,8 @@ class OdometryData(PathData):
                 pbar.update(1)
 
     # =========================================================================
-    # =========================== Frame Conversions =========================== 
-    # ========================================================================= 
-    def to_FLU_frame(self):
-        # If we are already in the FLU frame, return
-        if self.frame == CoordinateFrame.FLU:
-            print("Data already in FLU coordinate frame, returning...")
-            return
-
-        # If in NED, run the conversion
-        elif self.frame == CoordinateFrame.NED:
-            # Define the rotation matrix
-            R_NED = np.array([[1,  0,  0],
-                              [0, -1,  0],
-                              [0,  0, -1]])
-
-            # Do a change of basis to update the frame
-            self._convert_frame(R_NED)
-
-            # Update frame
-            self.frame = CoordinateFrame.FLU
-
-            # Empty poses as they might need to be recalculated
-            self.poses = []
-            self.poses_rclpy = []
-
-        # Otherwise, throw an error
-        else:
-            raise RuntimeError(f"OdometryData class is in an unexpected frame: {self.frame}!")
-    
-    def apply_transformation_left_side(self, H: np.ndarray):
-        """
-        Applies a rigid-body transformation to the entire path.
-        In terms of transfomration matricies, this multiplies this odometry
-        on the left side.
-
-        Args:
-            H: The 4x4 transformation matrix
-        """ 
-
-        # Apply the transformation
-        H_self = np.eye(4).reshape(1, 4, 4).repeat(self.len(), axis=0)  # shape (N,4,4)
-        H_self[:, :3, :3] = R.from_quat(self.orientations).as_matrix()    
-        H_self[:, :3, 3] = self.positions
-        H_output = H @ H_self
-
-        # Extract results and save
-        self.positions = H_output [:, :3, 3]
-        self.orientations = R.from_matrix(H_output[:, :3, :3]).as_quat()      
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def apply_transformation_right_side(self, H: np.ndarray):
-        """
-        Applies a rigid-body transformation to the entire path.
-        In terms of transformation matrices, this multiplies this odometry
-        on the right side (row-vector convention).
-
-        Args:
-            H: The 4x4 transformation matrix
-        """ 
-
-        # Apply the transformation
-        H_self = np.eye(4).reshape(1, 4, 4).repeat(self.len(), axis=0)  # shape (N,4,4)
-        H_self[:, :3, :3] = R.from_quat(self.orientations).as_matrix()    
-        H_self[:, :3, 3] = self.positions
-        H_output = H_self @ H
-
-        # Extract results and save
-        self.positions = H_output [:, :3, 3]
-        self.orientations = R.from_matrix(H_output[:, :3, :3]).as_quat()      
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def _convert_frame(self, R_frame: np.ndarray):
-        """ Uses a change of basis to update the positions and orientations. """
-        R_frame_Q = R.from_matrix(R_frame)
-        self.positions = (R_frame @ self.positions.T).T
-        self._ori_change_of_basis(R_frame_Q)
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def _ori_apply_rotation(self, R_i: R):
-        """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
-        for i in range(self.len()):
-            self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
-
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
-    def _ori_change_of_basis(self, R_i: R):
-        """ Applies a change of basis to orientations """
-        for i in range(self.len()):
-            self.orientations[i] = (R_i * R.from_quat(self.orientations[i]) * R_i.inv()).as_quat()
-    
-        # Empty poses as they might need to be recalculated
-        self.poses = []
-        self.poses_rclpy = []
-
+    # =========================== Conversion to ROS ===========================
     # =========================================================================
-    # =========================== Conversion to ROS =========================== 
-    # ========================================================================= 
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> Any:

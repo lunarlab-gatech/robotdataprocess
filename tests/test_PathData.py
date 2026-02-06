@@ -1,10 +1,14 @@
+from copy import deepcopy
+from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
 from robotdataprocess.conversion_utils import col_to_dec_arr
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
 from robotdataprocess.data_types.PathData import PathData
+from scipy.spatial.transform import Rotation as R
 import unittest
+import unittest.mock
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestPathData(unittest.TestCase):
@@ -222,6 +226,256 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(concatenated_path.positions, col_to_dec_arr(expected_positions))
         np.testing.assert_array_equal(concatenated_path.orientations, col_to_dec_arr(expected_orientations))
         self.assertEqual(concatenated_path.frame, expected_frame)
+
+    @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
+    def test_visualize_basic(self, mock_plt):
+        """ Test that visualize runs without error (mocked matplotlib). """
+        mock_fig = unittest.mock.MagicMock()
+        mock_ax = unittest.mock.MagicMock()
+        mock_plt.figure.return_value = mock_fig
+        mock_fig.add_subplot.return_value = mock_ax
+
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 1.0, 0.0],
+                                [1.0, 1.0, 0.0],
+                                [2.0, 1.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        # Should not raise
+        path1.visualize([path2], ['Path1', 'Path2'], axes_length=1.0, axes_interval=1)
+        mock_plt.show.assert_called()
+
+    def test_visualize_error_cases(self):
+        """ Test that visualize raises errors for mismatched titles, axes_length, axes_interval. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        # Wrong number of titles
+        with self.assertRaises(ValueError):
+            path1.visualize([], ['Title1', 'Title2'])
+
+    @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
+    def test_visualize_list_axes_params(self, mock_plt):
+        """ Test that visualize raises errors for mismatched list sizes of axes_length and axes_interval. """
+        mock_fig = unittest.mock.MagicMock()
+        mock_ax = unittest.mock.MagicMock()
+        mock_plt.figure.return_value = mock_fig
+        mock_fig.add_subplot.return_value = mock_ax
+
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        # axes_length list wrong size
+        with self.assertRaises(ValueError):
+            path1.visualize([], ['Title1'], axes_length=[1.0, 2.0])
+
+        # axes_interval list wrong size
+        with self.assertRaises(ValueError):
+            path1.visualize([], ['Title1'], axes_interval=[1, 2])
+
+    @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
+    def test_calculate_trajectory_errors_with_visualization(self, mock_plt):
+        """ Test the visualize=True path in calculate_trajectory_errors. """
+        mock_fig = unittest.mock.MagicMock()
+        mock_ax = unittest.mock.MagicMock()
+        mock_plt.figure.return_value = mock_fig
+        mock_fig.add_subplot.return_value = mock_ax
+
+        file_path = Path(__file__).parent / 'files' / 'test_PathData' / 'test_calculate_trajectory_errors'
+        gt_data = OdometryData.from_csv(file_path / 'poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
+        est_data = OdometryData.from_csv(file_path / 'poseEst.csv', "world", "robot", CoordinateFrame.FLU, True, None)
+
+        results_dict = PathData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+        # Verify we still get results
+        self.assertIn('APE', results_dict)
+        # Verify matplotlib was invoked
+        mock_plt.show.assert_called()
+
+    # =========================================================================
+    # ====== Post-refactor tests: moved methods tested on PathData directly ===
+    # =========================================================================
+
+    def test_crop_data_pathdata(self):
+        """ Test crop_data on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.5, 1.0, 1.5, 2.0, 2.5], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1],
+                                   [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path.crop_data(Decimal('1.0'), Decimal('2.0'))
+        self.assertEqual(path.len(), 3)
+        np.testing.assert_array_equal(path.timestamps.astype(float), [1.0, 1.5, 2.0])
+        np.testing.assert_array_equal(path.positions.astype(float),
+                                      [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+
+    def test_shift_position_pathdata(self):
+        """ Test shift_position on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path.shift_position(10.0, -20.0, 5.0)
+        np.testing.assert_array_almost_equal(
+            path.positions.astype(float),
+            [[11.0, -18.0, 8.0], [14.0, -15.0, 11.0]])
+
+    def test_shift_to_start_at_identity_pathdata(self):
+        """ Test shift_to_start_at_identity on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[5.0, 5.0, 5.0],
+                                [6.0, 5.0, 5.0],
+                                [7.0, 5.0, 5.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path.shift_to_start_at_identity()
+        # First position should be at origin
+        np.testing.assert_array_almost_equal(path.positions[0].astype(float), [0.0, 0.0, 0.0])
+        # Second position should be shifted by [1, 0, 0]
+        np.testing.assert_array_almost_equal(path.positions[1].astype(float), [1.0, 0.0, 0.0])
+
+    def test_interpolate_to_hz_pathdata(self):
+        """ Test interpolate_to_hz on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1],
+                                   [0, 0, 0, 1],
+                                   [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path.interpolate_to_hz(2.0)
+        self.assertEqual(path.len(), 5)
+        np.testing.assert_array_almost_equal(
+            path.positions.astype(float)[:, 0],
+            [0.0, 0.5, 1.0, 1.5, 2.0])
+
+        # Test ValueError for non-positive hz
+        path2 = PathData("r", np.array([0.0, 1.0], dtype=object),
+                          np.array([[0, 0, 0], [1, 0, 0]], dtype=object),
+                          np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+                          CoordinateFrame.FLU)
+        with self.assertRaises(ValueError):
+            path2.interpolate_to_hz(0)
+
+    def test_to_FLU_frame_pathdata(self):
+        """ Test to_FLU_frame on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0],
+                                [4.0, 5.0, 6.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.NED
+        )
+        path.to_FLU_frame()
+        self.assertEqual(path.frame, CoordinateFrame.FLU)
+        # NED->FLU: y negated, z negated
+        np.testing.assert_array_almost_equal(
+            path.positions[0].astype(float), [1.0, -2.0, -3.0])
+
+        # Calling again should be a no-op
+        path_copy = deepcopy(path)
+        path.to_FLU_frame()
+        np.testing.assert_array_almost_equal(
+            path.positions[0].astype(float),
+            path_copy.positions[0].astype(float))
+
+        # Unsupported frame
+        path.frame = CoordinateFrame.ENU
+        with self.assertRaises(RuntimeError):
+            path.to_FLU_frame()
+
+    def test_apply_transformation_pathdata(self):
+        """ Test apply_transformation_left_side and right_side on PathData directly. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array([[-0.7071068, 0, 0, 0.7071068]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        H = np.array([[0.0, -1.0,  0.0,  1.0],
+                       [1.0,  0.0,  0.0,  0.0],
+                       [0.0,  0.0,  1.0,  0.0],
+                       [0.0,  0.0,  0.0,  1.0]])
+
+        path.apply_transformation_left_side(H)
+        np.testing.assert_array_almost_equal(
+            path.positions[0].astype(float), [-1.0, 1.0, 3.0])
+        np.testing.assert_array_almost_equal(
+            path.orientations[0].astype(float), [0.5, 0.5, -0.5, -0.5], decimal=5)
+
+        # Test right side
+        path2 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array([[-0.7071068, 0, 0, 0.7071068]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path2.apply_transformation_right_side(H)
+        np.testing.assert_array_almost_equal(
+            path2.positions[0].astype(float), [2.0, 2.0, 3.0])
+        np.testing.assert_array_almost_equal(
+            path2.orientations[0].astype(float), [0.5, -0.5, -0.5, -0.5], decimal=5)
+
+    def test_invalidate_cache_is_noop_on_pathdata(self):
+        """ Verify _invalidate_cache is a no-op on PathData (no crash, no side effects). """
+        path = PathData("r", np.array([0.0], dtype=object),
+                         np.array([[0, 0, 0]], dtype=object),
+                         np.array([[0, 0, 0, 1]], dtype=object),
+                         CoordinateFrame.FLU)
+        # Should not raise
+        path._invalidate_cache()
+        self.assertFalse(hasattr(path, 'poses'))
+
 
 if __name__ == "__main__":
     unittest.main()
