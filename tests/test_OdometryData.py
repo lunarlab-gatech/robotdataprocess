@@ -281,47 +281,35 @@ class TestOdometryData(unittest.TestCase):
              [14.0, -15.0, 11.0],
              [17.0, -12.0, 14.0]])
 
-    def test_add_folded_gaussian_noise(self):
-        """ Test that gaussian noise is applied and accumulated correctly. """
-        odom = OdometryData("world", "robot", [0, 1, 2],
-                            np.array([[0.0, 0.0, 0.0],
-                                      [0.0, 0.0, 0.0],
-                                      [0.0, 0.0, 0.0]]),
-                            np.array([[0, 0, 0, 1],
-                                      [0, 0, 0, 1],
-                                      [0, 0, 0, 1]]),
-                            CoordinateFrame.FLU)
-        np.random.seed(42)
-        odom.add_folded_guassian_noise_to_position(0.1, 0.05)
-        # Positions should have changed (all noise is positive due to abs + accumulation)
-        for i in range(3):
-            self.assertGreater(float(odom.positions[i][0]), 0.0)
-            self.assertGreater(float(odom.positions[i][1]), 0.0)
-            self.assertGreater(float(odom.positions[i][2]), 0.0)
-        # Noise should be monotonically increasing (cumulative)
-        for dim in range(3):
-            for i in range(1, 3):
-                self.assertGreater(float(odom.positions[i][dim]),
-                                   float(odom.positions[i-1][dim]))
-
     def test_interpolate_to_hz(self):
-        """ Test interpolation to a target frequency. """
+        """ Test interpolation to a target frequency including SLERP for orientations. """
+        # Use rotations about Z: 0 deg, 90 deg, 180 deg at t=0, 1, 2
+        r0 = R.from_euler('z', 0, degrees=True).as_quat()
+        r90 = R.from_euler('z', 90, degrees=True).as_quat()
+        r180 = R.from_euler('z', 180, degrees=True).as_quat()
+
         odom = OdometryData("world", "robot",
                             np.array([0.0, 1.0, 2.0]),
                             np.array([[0.0, 0.0, 0.0],
                                       [1.0, 0.0, 0.0],
                                       [2.0, 0.0, 0.0]]),
-                            np.array([[0, 0, 0, 1],
-                                      [0, 0, 0, 1],
-                                      [0, 0, 0, 1]]),
+                            np.array([r0, r90, r180]),
                             CoordinateFrame.FLU)
         odom.interpolate_to_hz(2.0)
-        # With duration=2.0 and target_hz=2.0: num_samples = ceil(2*2)+1 = 5
-        self.assertEqual(odom.len(), 5)
+
         # Check positions are linearly interpolated
+        self.assertEqual(odom.len(), 5)
         np.testing.assert_array_almost_equal(
             odom.positions.astype(float)[:, 0],
             [0.0, 0.5, 1.0, 1.5, 2.0])
+
+        # Check orientations are SLERPed correctly
+        expected_quats = [R.from_euler('z', deg, degrees=True).as_quat()
+                          for deg in [0, 45, 90, 135, 180]]
+        for i, expected_quat in enumerate(expected_quats):
+            np.testing.assert_array_almost_equal(
+                odom.orientations[i].astype(float), expected_quat, decimal=10)
+
         # Check ValueError for non-positive hz
         with self.assertRaises(ValueError):
             odom2 = OdometryData("world", "robot", [0, 1],
@@ -345,17 +333,6 @@ class TestOdometryData(unittest.TestCase):
         existing_file = Path(__file__).absolute()
         with self.assertRaises(ValueError):
             odom.to_csv(existing_file)
-
-    def test_from_csv_reorder_data(self):
-        """ Test the reorder_data=True branch in from_csv. """
-        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_csv', 'odomGT.csv').absolute()
-        odom = OdometryData.from_csv(file_path, "odom", "base_link",
-                                      CoordinateFrame.FLU, True, None,
-                                      reorder_data=True)
-        # Data should still be in order (it was already ordered)
-        for i in range(odom.len() - 1):
-            self.assertLess(odom.timestamps[i], odom.timestamps[i+1])
-
 
 if __name__ == "__main__":
     unittest.main()

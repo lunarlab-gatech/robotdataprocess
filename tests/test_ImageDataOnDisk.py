@@ -27,10 +27,12 @@ class TestImageDataOnDisk(unittest.TestCase):
         """ Test LazyImageArray slicing, boolean masking, setitem, shape, dtype, len. """
         folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
         data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        mem_data = ImageDataInMemory.from_image_files(folder_path, 'optical')
 
         # Test len
         original_len = len(data.images)
         self.assertGreater(original_len, 0)
+        self.assertEqual(original_len, len(mem_data.images))
 
         # Test shape property
         shape = data.images.shape
@@ -40,34 +42,47 @@ class TestImageDataOnDisk(unittest.TestCase):
         dtype = data.images.dtype
         self.assertIsNotNone(dtype)
 
-        # Test single integer indexing (loads actual image)
-        img = data.images[0]
-        self.assertIsInstance(img, np.ndarray)
+        # Test single integer indexing matches InMemory
+        for i in range(original_len):
+            np.testing.assert_array_equal(data.images[i], mem_data.images[i])
 
-        # Test slicing
-        sliced = data.images[0:1]
+        # Test slicing returns correct data
+        sliced = data.images[0:2]
         self.assertIsInstance(sliced, ImageDataOnDisk.LazyImageArray)
-        self.assertEqual(len(sliced), 1)
+        self.assertEqual(len(sliced), 2)
+        for i in range(len(sliced)):
+            np.testing.assert_array_equal(sliced[i], mem_data.images[i])
 
-        # Test boolean masking
-        mask = np.array([True] + [False] * (original_len - 1))
+        # Test boolean masking returns correct data
+        mask = np.array([True, False, True] + [False] * (original_len - 3)) if original_len >= 3 \
+            else np.array([True] + [False] * (original_len - 1))
         masked = data.images[mask]
         self.assertIsInstance(masked, ImageDataOnDisk.LazyImageArray)
-        self.assertEqual(len(masked), 1)
+        mem_masked = mem_data.images[mask]
+        self.assertEqual(len(masked), len(mem_masked))
+        for i in range(len(masked)):
+            np.testing.assert_array_equal(masked[i], mem_masked[i])
 
         # Test __setitem__ raises RuntimeError
         with self.assertRaises(RuntimeError):
             data.images[0] = np.zeros((10, 10))
 
     def test_from_npy_files(self):
-        """ Test loading 32FC1 npy files from disk. """
+        """ Test loading 32FC1 npy files from disk matches ImageDataInMemory. """
         folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
         data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
-        self.assertEqual(data.encoding, ImageDataOnDisk.ImageEncoding._32FC1)
-        self.assertGreater(data.len(), 0)
-        # Verify a single image can be loaded
-        img = data.images[0]
-        self.assertEqual(img.shape, (data.height, data.width))
+        mem_data = ImageDataInMemory.from_npy_files(folder, 'depth_cam')
+
+        # Verify metadata matches
+        self.assertEqual(data.encoding, mem_data.encoding)
+        self.assertEqual(data.height, mem_data.height)
+        self.assertEqual(data.width, mem_data.width)
+        self.assertEqual(data.len(), mem_data.len())
+        np.testing.assert_array_equal(data.timestamps, mem_data.timestamps)
+
+        # Verify every image matches InMemory
+        for i in range(data.len()):
+            np.testing.assert_array_equal(data.images[i], mem_data.images[i])
 
 
 if __name__ == "__main__":

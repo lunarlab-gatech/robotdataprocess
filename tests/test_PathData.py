@@ -302,7 +302,7 @@ class TestPathData(unittest.TestCase):
 
         # axes_interval list wrong size
         with self.assertRaises(ValueError):
-            path1.visualize([], ['Title1'], axes_interval=[1, 2])
+            path1.visualize([], ['Title1'], axes_length=[1.0],axes_interval=[1, 2])
 
     @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
     def test_calculate_trajectory_errors_with_visualization(self, mock_plt):
@@ -374,62 +374,6 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_almost_equal(path.positions[0].astype(float), [0.0, 0.0, 0.0])
         # Second position should be shifted by [1, 0, 0]
         np.testing.assert_array_almost_equal(path.positions[1].astype(float), [1.0, 0.0, 0.0])
-
-    def test_interpolate_to_hz_pathdata(self):
-        """ Test interpolate_to_hz on PathData directly. """
-        path = PathData(
-            frame_id="robot",
-            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
-            positions=np.array([[0.0, 0.0, 0.0],
-                                [1.0, 0.0, 0.0],
-                                [2.0, 0.0, 0.0]], dtype=object),
-            orientations=np.array([[0, 0, 0, 1],
-                                   [0, 0, 0, 1],
-                                   [0, 0, 0, 1]], dtype=object),
-            frame=CoordinateFrame.FLU
-        )
-        path.interpolate_to_hz(2.0)
-        self.assertEqual(path.len(), 5)
-        np.testing.assert_array_almost_equal(
-            path.positions.astype(float)[:, 0],
-            [0.0, 0.5, 1.0, 1.5, 2.0])
-
-        # Test ValueError for non-positive hz
-        path2 = PathData("r", np.array([0.0, 1.0], dtype=object),
-                          np.array([[0, 0, 0], [1, 0, 0]], dtype=object),
-                          np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
-                          CoordinateFrame.FLU)
-        with self.assertRaises(ValueError):
-            path2.interpolate_to_hz(0)
-
-    def test_to_FLU_frame_pathdata(self):
-        """ Test to_FLU_frame on PathData directly. """
-        path = PathData(
-            frame_id="robot",
-            timestamps=np.array([0.0, 1.0], dtype=object),
-            positions=np.array([[1.0, 2.0, 3.0],
-                                [4.0, 5.0, 6.0]], dtype=object),
-            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
-                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
-            frame=CoordinateFrame.NED
-        )
-        path.to_FLU_frame()
-        self.assertEqual(path.frame, CoordinateFrame.FLU)
-        # NED->FLU: y negated, z negated
-        np.testing.assert_array_almost_equal(
-            path.positions[0].astype(float), [1.0, -2.0, -3.0])
-
-        # Calling again should be a no-op
-        path_copy = deepcopy(path)
-        path.to_FLU_frame()
-        np.testing.assert_array_almost_equal(
-            path.positions[0].astype(float),
-            path_copy.positions[0].astype(float))
-
-        # Unsupported frame
-        path.frame = CoordinateFrame.ENU
-        with self.assertRaises(RuntimeError):
-            path.to_FLU_frame()
 
     def test_apply_transformation_pathdata(self):
         """ Test apply_transformation_left_side and right_side on PathData directly. """

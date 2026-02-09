@@ -1,4 +1,5 @@
-from ..data_types.Data import Data, ROSMsgLibType
+from ..data_types.Data import ROSMsgLibType
+from ..data_types.SequentialData import SequentialData
 from collections import defaultdict
 from decimal import Decimal
 import glob
@@ -337,7 +338,7 @@ class Ros2BagWrapper:
     
     @staticmethod
     @typechecked
-    def write_data_to_rosbag(bag_path: Union[Path, str], data_list: List[Data], 
+    def write_data_to_rosbag(bag_path: Union[Path, str], data_list: List[SequentialData], 
                              data_topics: List[str], data_msg_type: List[Union[str, None]],
                              external_msgs_path: Union[Path, str, None]):
         """
