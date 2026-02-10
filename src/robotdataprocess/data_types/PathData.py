@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
-from .Data import Data, CoordinateFrame
+from .Data import CoordinateFrame
+from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+from ..math_utils import interpolate_poses
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -14,12 +16,11 @@ from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial.transform import Slerp
 from typeguard import typechecked
 from typing import Union, Tuple, List
 import tqdm
 
-class PathData(Data):
+class PathData(SequentialData):
 
     positions: NDArray[Decimal] # meters (x, y, z)
     orientations: NDArray[Decimal] # quaternions (x, y, z, w)
@@ -116,16 +117,8 @@ class PathData(Data):
         num_samples = int(np.ceil(duration * target_hz)) + 1
         new_ts = np.linspace(ts[0], ts[-1], num_samples)
 
-        # Linear interpolation for position
-        new_pos = np.zeros((len(new_ts), 3))
-        for i in range(3):
-            new_pos[:, i] = np.interp(new_ts, ts, pos[:, i])
-
-        # Spherical Linear Interpolation of Rotations (SLERP)
-        key_rots = R.from_quat(quat)
-        slerp = Slerp(ts, key_rots)
-        new_rots = slerp(new_ts)
-        new_quat = new_rots.as_quat()
+        # Interpolate poses
+        new_pos, new_quat = interpolate_poses(ts, pos, quat, new_ts)
 
         # Convert back to Decimal arrays
         self.timestamps = col_to_dec_arr(new_ts)
@@ -321,16 +314,12 @@ class PathData(Data):
     @typechecked
     def visualize(self, otherList: list[PathData], titles: list[str], axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000):
         """
-        Visualizes this PathData (and all others included in otherList)
-        on a single plot.
+        Visualizes this PathData (and all others included in otherList) on a single plot.
 
         Args:
             otherList (list[PathData]): All other PathData objects whose path should also be visualized on this plot.
             titles (list[str]): Titles for each PathData object, starting with self.
-
         """
-
-        print("Warning! This code has not been unit tested yet!")
 
         def draw_axes(data: PathData, axes_length: int, axes_interval: int):
             """Helper function that visualizes orientation along the trajectory path with axes."""

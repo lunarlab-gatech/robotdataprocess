@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import csv
-from .Data import CoordinateFrame, Data, ROSMsgLibType
+from .Data import CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from evo.core import geometry
@@ -244,45 +244,6 @@ class OdometryData(PathData):
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
-    # =========================================================================
-    # ========================= Manipulation Methods ========================== 
-    # =========================================================================  
-    
-    def add_folded_guassian_noise_to_position(self, xy_noise_std_per_frame: float,
-            z_noise_std_per_frame: float):
-        """
-        This method simulates odometry drift by adding folded gaussian noise
-        to the odometry positions on a per frame basis. It also accumulates
-        it over time. NOTE: It completely ignores the timestamps, and the "folded
-        guassian noise" distribution stds might not align with the stds of the 
-        guassian used internally, so this is not a robust function at all.
-
-        Args:
-            xy_noise_std_per_frame (float): Standard deviation of the gaussian 
-                distribution for xy, whose output is then run through abs().
-            z_noise_std_per_frame (float): Same as above, but for z.
-        """
-
-        # Track cumulative noise for each field
-        cumulative_noise_pos = {'x': 0.0, 'y': 0.0, 'z': 0.0}
-
-        # For each position
-        for i in range(len(self.timestamps)):
-
-            # Sample noise and accumulate
-            noise_pos = {'x': np.random.normal(0, xy_noise_std_per_frame),
-                        'y': np.random.normal(0, xy_noise_std_per_frame),
-                        'z': np.random.normal(0, z_noise_std_per_frame)}
-            for key in cumulative_noise_pos:
-                cumulative_noise_pos[key] += abs(noise_pos[key])
-
-            # Update positions
-            self.positions[i][0] += Decimal(cumulative_noise_pos['x'])
-            self.positions[i][1] += Decimal(cumulative_noise_pos['y'])
-            self.positions[i][2] += Decimal(cumulative_noise_pos['z'])
-
-        self._invalidate_cache()
-
     # =========================================================================
     # ============================ Export Methods =============================
     # =========================================================================

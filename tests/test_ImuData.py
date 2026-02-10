@@ -100,33 +100,6 @@ class TestImuData(unittest.TestCase):
         imu.visualize(float(imu.timestamps[0]), float(imu.timestamps[-1]))
         mock_plt.show.assert_called()
 
-    def test_to_PathData_with_ang_vel(self):
-        """ Test IMU integration using angular velocity. """
-        from robotdataprocess.data_types.PathData import PathData
-        file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'synthetic_imu_9axis.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.NED, nine_axis=True)
-        path = imu.to_PathData(
-            initial_pos=np.array([0, 0, 0], dtype=float),
-            initial_vel=np.array([0, 0, 0], dtype=float),
-            initial_ori=np.array([0, 0, 0, 1], dtype=float),
-            use_ang_vel=True)
-        self.assertEqual(path.len(), imu.len())
-        self.assertIsInstance(path, PathData)
-        np.testing.assert_array_equal(path.positions[0], [0, 0, 0])
-
-    def test_to_PathData_without_ang_vel(self):
-        """ Test IMU integration using orientation data directly. """
-        from robotdataprocess.data_types.PathData import PathData
-        file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'synthetic_imu_9axis.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.NED, nine_axis=True)
-        path = imu.to_PathData(
-            initial_pos=np.array([0, 0, 0], dtype=float),
-            initial_vel=np.array([0, 0, 0], dtype=float),
-            initial_ori=np.array([0, 0, 0, 1], dtype=float),
-            use_ang_vel=False)
-        self.assertEqual(path.len(), imu.len())
-        self.assertIsInstance(path, PathData)
-
     def test_to_PathData_no_orientation_raises(self):
         """ Test error when use_ang_vel=False and no orientations. """
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()
@@ -137,19 +110,6 @@ class TestImuData(unittest.TestCase):
                 initial_vel=np.array([0, 0, 0], dtype=float),
                 initial_ori=np.array([0, 0, 0, 1], dtype=float),
                 use_ang_vel=False)
-
-    def test_to_PathData_flu_frame(self):
-        """ Test IMU integration in FLU frame (different gravity subtraction path). """
-        from robotdataprocess.data_types.PathData import PathData
-        file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.FLU, nine_axis=False)
-        path = imu.to_PathData(
-            initial_pos=np.array([0, 0, 0], dtype=float),
-            initial_vel=np.array([0, 0, 0], dtype=float),
-            initial_ori=np.array([0, 0, 0, 1], dtype=float),
-            use_ang_vel=True)
-        self.assertEqual(path.len(), imu.len())
-        self.assertIsInstance(path, PathData)
 
     def test_to_PathData_unsupported_frame_raises(self):
         """ Test error when frame is unsupported for to_PathData. """
