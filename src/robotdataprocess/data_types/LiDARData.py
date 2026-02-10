@@ -299,6 +299,30 @@ class LiDARData(SequentialData):
         if dense_transformation not in self.transformations:
             self.transformations.append(dense_transformation)
 
+    def to_FLU_frame(self):
+        """
+        Adds a transformation so that point clouds returned by
+        get_point_cloud_at_index are rotated into the FLU coordinate frame.
+        """
+        if self.frame == CoordinateFrame.FLU:
+            print("Data already in FLU coordinate frame, returning...")
+            return
+
+        elif self.frame == CoordinateFrame.NED:
+            R_NED_to_FLU = np.array([[1,  0,  0],
+                                      [0, -1,  0],
+                                      [0,  0, -1]], dtype=np.float32)
+
+            def ned_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
+                pts = (R_NED_to_FLU @ pts.T).T
+                return pts, channels
+
+            self.transformations.append(ned_to_flu)
+            self.frame = CoordinateFrame.FLU
+
+        else:
+            raise RuntimeError(f"LiDARData class is in an unexpected frame: {self.frame}!")
+
     def crop_data(self, start: Decimal, end: Decimal):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
 

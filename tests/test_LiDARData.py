@@ -25,21 +25,23 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(lidar_data.get_point_cloud_at_index(2)[0][-1], [5.671111583709717, 9.91832280305971e-7, 2.6444828510284424])
         np.testing.assert_equal(len(lidar_data.point_clouds), 3)
 
-    # def test_to_FLU_frame(self):
-    #     """ Ensure our transformations are correct """
+    def test_to_FLU_frame(self):
+        """ Ensure NED-to-FLU transformation flips Y and Z when getting point clouds. """
+        point_cloud = [np.array([[ 0.0,  1.0,  2.0],
+                                  [-1.0, -3.0,  4.0]], dtype=np.float32)]
+        lidar_data = LiDARData("robot", [Decimal("1.0")], point_cloud, None, CoordinateFrame.NED)
+        lidar_data.to_FLU_frame()
 
-    #     point_cloud_simple = [[ 0,  1, 2], [-1, -3, 4]]
-    #     lidar_data = LiDARData("robot", [0], point_cloud_simple, None, CoordinateFrame.NED)
-    #     lidar_data.to_FLU_frame()
+        self.assertEqual(lidar_data.frame, CoordinateFrame.FLU)
 
-    #     # Assert that the transformation completed successfully
-    #     expected_pc = np.array([[[ 0, -1, -2], [-1,  3, -4]]])
-    #     np.testing.assert_array_equal(lidar_data.point_clouds, expected_pc)
+        pc, _ = lidar_data.get_point_cloud_at_index(0)
+        expected_pc = np.array([[ 0.0, -1.0, -2.0],
+                                [-1.0,  3.0, -4.0]], dtype=np.float32)
+        np.testing.assert_array_almost_equal(pc, expected_pc)
 
-    #     # Make sure it doesn't change when we call it again
-    #     lidar_data.to_FLU_frame()
-    #     expected_pc = np.array([[[ 0, -1, -2], [-1,  3, -4]]])
-    #     np.testing.assert_array_equal(lidar_data.point_clouds, expected_pc)
+        # Calling again should be a no-op (already FLU)
+        lidar_data.to_FLU_frame()
+        self.assertEqual(len(lidar_data.transformations), 1)
 
     def test_visualize(self):
         """ Just ensure that this code doesn't crash. """
