@@ -63,6 +63,9 @@ if __name__ == "__main__":
     elif args.dataset_num == "V2.3.AC":
         robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
         robot_crop_end_times = [Decimal('1125.00'), Decimal('1118.80'), Decimal('1025.50'), Decimal('892.60')]
+    elif args.dataset_num == "V2.3.C":
+        robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+        robot_crop_end_times = [Decimal('4105.00'), Decimal('4105.00'), Decimal('4105.00'), Decimal('4105.00')]
     else:
         raise ValueError("Crop times not specified for this dataset number.")
     
