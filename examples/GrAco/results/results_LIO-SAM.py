@@ -39,7 +39,7 @@ def main():
         est_data.apply_transformation_right_side(H_L_to_I_in_ENU)
 
         # Calculate RMS ATE, among other metrics
-        metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1,   
+        metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
                                                                             visualize=True, axes_interval=[5000, 50])
         print("\nMetrics for file: ", file_name)
         print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])

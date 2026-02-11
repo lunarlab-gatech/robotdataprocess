@@ -19,7 +19,7 @@ def main():
                                             "world", "robot", CoordinateFrame.FLU, True, None)
 
             # Calculate RMS ATE, among other metrics
-            metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+            metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
             print("\nMetrics for file: ", file_name)
             print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
             print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])

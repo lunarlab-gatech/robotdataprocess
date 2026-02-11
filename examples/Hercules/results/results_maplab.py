@@ -19,7 +19,7 @@ def main():
         est_data_lst: list[OdometryData] = [est_data_husky1, est_data_husky2]
         for est_data in est_data_lst:
             est_data.timestamps = est_data.timestamps / Decimal('1e9')  # Convert from ns to s
-        est_data_husky2.visualize([est_data_husky1], ["Drone1 Maplab Results","Husky1 Maplab Results"], 10, 40)
+        est_data_husky2.visualize_3D([est_data_husky1], ["Drone1 Maplab Results","Husky1 Maplab Results"], 10, 40)
 
         # Load the ground truth data
         gt_data_husky1 = OdometryData.from_csv('/media/' + user + '/T731/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/Husky1/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
@@ -50,9 +50,9 @@ def main():
             print(f"Individual Results for {name}")
             print(f"{'='*50}")
 
-            est_data.visualize([gt_data], [f"{name} Maplab Results", f"{name} Ground Truth"], [10, 10], [40, 1000])
+            est_data.visualize_3D([gt_data], [f"{name} Maplab Results", f"{name} Ground Truth"], [10, 10], [40, 1000])
 
-            metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+            metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
             print(f"{name} RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
             print(f"{name} RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
             print(f"{name} RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
@@ -68,9 +68,9 @@ def main():
         est_data_combined: OdometryData = PathData.concatenate_PathData(est_data_lst).to_OdometryData('odom', 'base_link')
         gt_data_combined: PathData = PathData.concatenate_PathData(gt_data_lst)
 
-        est_data_combined.visualize([gt_data_combined], ["Drone1+Husky1 Maplab Results", "Ground Truth"], [10, 10], [40, 1000])
+        est_data_combined.visualize_3D([gt_data_combined], ["Drone1+Husky1 Maplab Results", "Ground Truth"], [10, 10], [40, 1000])
 
-        metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data_combined, est_data_combined, max_diff=0.1, visualize=True)
+        metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data_combined, est_data_combined, max_diff=0.1, visualize=True)
         print("Combined RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("Combined RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
         print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])

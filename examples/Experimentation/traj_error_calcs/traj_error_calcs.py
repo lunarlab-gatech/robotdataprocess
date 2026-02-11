@@ -14,14 +14,14 @@ def main():
     # robot2odom.visualize([], ["R2 Odom"], axes_interval=100, axes_length=5.0)
 
     print("ROBOT 1 METRICS:")
-    metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(robot1gt, robot1odom, max_diff=0.1, visualize=True, axes_length=0.01)
+    metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(robot1gt, robot1odom, max_diff=0.1, visualize=True, axes_length=0.01)
     print("Combined RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
     print("Combined RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
     print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
     print("Combined RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
 
     print("ROBOT 2 METRICS:")
-    metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(robot2gt, robot2odom, max_diff=0.1, visualize=True, axes_length=0.01)
+    metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(robot2gt, robot2odom, max_diff=0.1, visualize=True, axes_length=0.01)
     print("Combined RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
     print("Combined RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
     print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
@@ -38,7 +38,7 @@ def main():
 
     #est_data_combined.visualize([gt_data_combined], ["Drone1 + Husky1 Maplab Results", "Ground Truth"], [10, 10], [40, 1000])
 
-    metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data_combined, est_data_combined, max_diff=0.1, visualize=True, axes_length=0.01)
+    metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data_combined, est_data_combined, max_diff=0.1, visualize=True, axes_length=0.01)
     print("Combined RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
     print("Combined RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
     print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])

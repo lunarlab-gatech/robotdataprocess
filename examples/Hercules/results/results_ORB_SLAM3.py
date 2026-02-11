@@ -15,7 +15,7 @@ def main():
 
     #est_data.visualize([gt_data], ["ORB_SLAM 3 Estimated Trajectory", "GT"], axes_interval=10000, axes_length=1)
     
-    metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1,   
+    metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
                                                                         visualize=True, axes_interval=5000, axes_length=1)
     print("\nMetrics for file: ", file_name)
     print("Robot: ", "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])

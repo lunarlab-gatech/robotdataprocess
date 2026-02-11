@@ -42,7 +42,7 @@ def main():
     maplab._ori_apply_rotation(R_result)
 
     # Visualizes the positions and orientations
-    maplab.visualize([vicon], ['Maplab', 'VICON'])
+    maplab.visualize_3D([vicon], ['Maplab', 'VICON'])
 
 if __name__ == "__main__":
     main()

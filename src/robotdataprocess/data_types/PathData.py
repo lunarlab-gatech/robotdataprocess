@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
 from .Data import CoordinateFrame
@@ -8,9 +9,11 @@ from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
 from ..math_utils import interpolate_poses
+import matplotlib.colors as mcolors
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 import numpy as np
-from numpy.typing import NDArray
 from pathlib import Path
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
@@ -20,15 +23,15 @@ from typeguard import typechecked
 from typing import Union, Tuple, List
 import tqdm
 
+@typechecked
 class PathData(SequentialData):
 
-    positions: NDArray[Decimal] # meters (x, y, z)
-    orientations: NDArray[Decimal] # quaternions (x, y, z, w)
+    positions: np.ndarray # meters (x, y, z)
+    orientations: np.ndarray # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
-    @typechecked
-    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
-                 positions: Union[np.ndarray, list], orientations: Union[np.ndarray, list], 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, List], 
+                 positions: Union[np.ndarray, List], orientations: Union[np.ndarray, List], 
                  frame: CoordinateFrame):
         super().__init__(frame_id, timestamps)
         self.positions = col_to_dec_arr(positions)
@@ -227,7 +230,6 @@ class PathData(SequentialData):
     # =========================================================================
 
     @classmethod
-    @typechecked
     def from_ros2_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame) -> PathData:
         """
         Creates a class structure from a ROS2 bag file with a Path topic.
@@ -311,14 +313,147 @@ class PathData(SequentialData):
     # ============================ Visualization ============================== 
     # =========================================================================  
 
-    @typechecked
-    def visualize(self, otherList: list[PathData], titles: list[str], axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000):
+    @staticmethod
+    def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str], 
+                     save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0, 
+                     show_grid: bool = False, legend: bool = True,
+                     no_border: bool = False, background_image_path: str | None = None, 
+                     background_image_x_edge: float | None = None,):
+        """
+        Plot all PathData objects on a 2D XY plane.
+        
+        Args:
+            dataList: All PathData objects to plot.
+            isGTList: Whether or not each PathData object is GT.
+            colorList: Colors to assign to each PathData object (as hex strings starting with #).
+            nameList: Robot names corresponding to each PathData object.
+            save_path: If provided, figure will be saved to the location. Otherwise, show the figure.
+            no_background: If true, plot with a transparent background.
+            line_width: Width of trajectory lines in the plot.
+            show_grid: Whether to draw a grid on the plot.
+            legend: If true, include a legend.
+            no_border: If true, remove the x & y axes.
+            background_image_path: Path to an image to plot in the background; It is assumed
+                that the center of the image corresponds to x=0 & y=0 in the PataData frames.
+            background_image_x_edge: The distance in meters from center of image to the x edge.
+        """
+
+        # Check lengths of arguments
+        if len(dataList) != len(isGTList) or len(dataList) != len(colorList) or len(dataList) != len(nameList):
+            raise ValueError("Lengths of all Lists must be equal!")
+        num_data_objs = len(dataList)
+
+        # Convert hex colors to a palette with varying lightness
+        paletteList = []
+        for c in colorList:
+            # Convert base color to HLS
+            rgb = mcolors.to_rgb(c)
+            h, _, s = colorsys.rgb_to_hls(*rgb)
+
+            # Generate similar colors with varying lightness
+            lightnesses = np.linspace(0.3, 0.8, 20)
+            paletteList.append([colorsys.hls_to_rgb(h, li, s) for li in lightnesses])
+
+        # Draw a plot where the trajectories from different robots have slightly different color
+        fig, axs = plt.subplots(1, 1)
+        if no_background:
+            fig.patch.set_facecolor('white')
+            axs.set_facecolor('none')
+        else:
+            fig.patch.set_facecolor('white')
+            axs.set_facecolor("#F0F0F0")
+
+        # Draw background image
+        if background_image_path is not None:
+            img = mpimg.imread(background_image_path)
+            if background_image_x_edge:
+                x_extent_meters = background_image_x_edge
+                h, w = img.shape[0], img.shape[1]
+                y_extent_meters = x_extent_meters / w * h
+                extent = [-x_extent_meters, x_extent_meters, -y_extent_meters, y_extent_meters]
+                axs.imshow(img, extent=extent, origin="upper", alpha=1.0, zorder=0)
+            else:
+                raise ValueError("Extent must be provided with Background image size via background_image_x_edge.")
+
+        # Calculate trajectory bounds
+        all_x = np.concatenate([dec_arr_to_float_arr(path.positions[:,0]) for path in dataList])
+        all_y = np.concatenate([dec_arr_to_float_arr(path.positions[:,1]) for path in dataList])
+        padding_x = (all_x.max() - all_x.min()) * 0.05
+        padding_y = (all_y.max() - all_y.min()) * 0.05
+        x_min, x_max = all_x.min() - padding_x, all_x.max() + padding_x
+        y_min, y_max = all_y.min() - padding_y, all_y.max() + padding_y
+
+        # Plot the trajectories
+        for i in range(num_data_objs):
+            label = nameList[i] + (" (GT)" if isGTList[i] else " (Est.)")
+            linestyle = ("dotted" if isGTList[i] else None)
+            color = (paletteList[i][3] if isGTList[i] else paletteList[i][9])
+            axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1], 
+                     label=label, color=color, linewidth=line_width, linestyle=linestyle)
+    
+        # Calculate the current aspect ratio and make it match the target
+        target_ar = 1.5  
+        current_width = x_max - x_min
+        current_height = y_max - y_min
+        current_ar = current_width / current_height
+
+        if current_ar > target_ar:
+            target_height = current_width / target_ar
+            diff = target_height - current_height
+            y_min -= diff / 2
+            y_max += diff / 2
+        elif current_ar < target_ar:
+            target_width = current_height * target_ar
+            diff = target_width - current_width
+            x_min -= diff / 2
+            x_max += diff / 2
+
+        # Set the new limits that respect the aspect ratio
+        axs.set_xlim(x_min, x_max)
+        axs.set_ylim(y_min, y_max)
+        axs.set_aspect('equal', adjustable='box')
+        
+        # Make the tick spacing match
+        yticks = axs.get_yticks()
+        if len(yticks) > 1:
+            y_spacing = yticks[1] - yticks[0]
+            axs.xaxis.set_major_locator(MultipleLocator(y_spacing))
+
+        # Adjust the spines
+        for spine in axs.spines.values():
+            spine.set_edgecolor('black')
+            spine.set_linewidth(0.75)
+
+        # Add Grid if Desired
+        if show_grid:
+            axs.grid(True, color="gray", linestyle="--", linewidth=0.5, alpha=0.7)
+        else:
+            axs.grid(False)
+
+        # Add labels
+        axs.set_xlabel("X (meters)")
+        axs.set_ylabel("Y (meters)")
+
+        # Additional configurable parameters
+        if legend:
+            axs.legend()
+        if no_border:
+            axs.set_axis_off()
+
+        # Save/Plot the results
+        if save_path is not None:
+            plt.savefig(save_path, format="pdf")
+        else:
+            plt.show()
+        plt.close(fig)
+
+    def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000):
         """
         Visualizes this PathData (and all others included in otherList) on a single plot.
 
         Args:
-            otherList (list[PathData]): All other PathData objects whose path should also be visualized on this plot.
-            titles (list[str]): Titles for each PathData object, starting with self.
+            otherList (List[PathData]): All other PathData objects whose path should also be visualized on this plot.
+            titles (List[str]): Titles for each PathData object, starting with self.
         """
 
         def draw_axes(data: PathData, axes_length: int, axes_interval: int):
@@ -439,7 +574,7 @@ class PathData(SequentialData):
     # ========================================================================= 
 
     @staticmethod
-    def make_start_and_end_times_match(est: list[PathData], gt: list[PathData]) -> tuple[list[PathData], list[PathData]]:
+    def make_start_and_end_times_match(est: list[PathData], gt: list[PathData]) -> Tuple[list[PathData], list[PathData]]:
         """ 
         For pairs of lists of PathData objects, extract each pair by index and 
         ensure that the first and last timestamps match by extending the data
@@ -529,13 +664,40 @@ class PathData(SequentialData):
             all_orientations = np.concatenate((all_orientations, path_data.orientations), axis=0)
 
         return PathData(frame_id, all_timestamps, all_positions, all_orientations, frame)
+    
+    @staticmethod
+    def seperate_PathData(original_PathDatas: list[PathData], merged_PathData: PathData) -> list[PathData]:
+        """
+        Inverse of concatenate_PathData(); needs the original objects to know the timestamps
+        that each trajectory is found on.
+        """
+
+        # Calculate the start and end times for the beginning of each robots data
+        start_times: list[float] = []
+        end_times: list[float] = []
+        for i in range(len(original_PathDatas)): 
+            pd: PathData = original_PathDatas[i]
+            if i == 0:
+                start_times.append(pd.timestamps[0])
+                end_times.append(pd.timestamps[-1])
+            else:
+                start_times.append(end_times[-1] + 1)
+                end_times.append(pd.timestamps[-1] - pd.timestamps[0] + end_times[-1] + 1)
+
+        # Make deep copies of trajectories
+        merged_PathData_copies: list[PathData] = [copy.deepcopy(merged_PathData) for _ in range(len(original_PathDatas))]
+
+        # Reduce trajectories to the specific time that covers each robot
+        for i, pd in enumerate(merged_PathData_copies):
+            pd.crop_data(Decimal(start_times[i]), Decimal(end_times[i]))
+        return merged_PathData_copies
 
     @staticmethod
-    def calculate_trajectory_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
-                                    axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000) -> dict:
+    def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
+            axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000) -> Tuple[dict, PathData, PathData]:
         """
         Utilizing the evo library, calculates a variety of trajectory error metrics
-        and returns them in a dictionary.
+        and returns them in a dictionary. Also returns aligned PathData objects.
 
         Parameters:
             max_diff: maximum absolute time difference allowed between associated timestamps
@@ -552,24 +714,24 @@ class PathData(SequentialData):
         est_traj_align: PoseTrajectory3D = copy.deepcopy(est_traj)
         est_traj_align.align(gt_traj, correct_scale=False, correct_only_scale=False) 
 
-        path_pair: tuple[PoseTrajectory3D, PoseTrajectory3D] = (gt_traj, est_traj_align)
+        path_pair: Tuple[PoseTrajectory3D, PoseTrajectory3D] = (gt_traj, est_traj_align)
 
         # Calculate various error metrics using evo, including APE and RPE
-        all_pose_relations: list[metrics.PoseRelation] = [metrics.PoseRelation.full_transformation, # dimensionless
+        all_pose_relations: List[metrics.PoseRelation] = [metrics.PoseRelation.full_transformation, # dimensionless
                                                           metrics.PoseRelation.translation_part, # meters
                                                           metrics.PoseRelation.rotation_part, # dimensionless
                                                           metrics.PoseRelation.rotation_angle_deg, # degrees
                                                           metrics.PoseRelation.rotation_angle_rad, # radians
                                                           metrics.PoseRelation.point_distance, # meters
                                                           metrics.PoseRelation.point_distance_error_ratio] # percent
-        all_statistic_types: list[metrics.StatisticsType] = [metrics.StatisticsType.rmse,
+        all_statistic_types: List[metrics.StatisticsType] = [metrics.StatisticsType.rmse,
                                                              metrics.StatisticsType.mean,
                                                              metrics.StatisticsType.median,
                                                              metrics.StatisticsType.std,
                                                              metrics.StatisticsType.min,
                                                              metrics.StatisticsType.max,
                                                              metrics.StatisticsType.sse]
-        all_metrics: list[metrics.PE] = [metrics.APE, metrics.RPE]
+        all_metrics: List = [metrics.APE, metrics.RPE]
         dict_all_results: dict = {}
         for metric in all_metrics:
             dict_metric: dict = {}
@@ -592,15 +754,14 @@ class PathData(SequentialData):
                 dict_metric[pose_relation.name] = dict_relation
             
             dict_all_results[metric.__name__] = dict_metric
+            
+        # Convert the aligned trajectory data back to PathData objects
+        est_traj_align_pathdata = PathData.from_evo(est_traj_align, est_path.frame_id, est_path.frame)
+        gt_traj_pathdata = PathData.from_evo(gt_traj, gt_path.frame_id, gt_path.frame)
 
         # Visualize the aligned trajectories if desired
         if visualize:
-            
-            # Convert est_traj_align back to PathData
-            est_traj_align_pathdata: PathData = PathData.from_evo(est_traj_align, gt_path.frame_id, gt_path.frame)
-
-            # Visualize the aligned trajectories with specified axes length and interval
-            gt_path.visualize([est_traj_align_pathdata], ['Ground Truth', 'Estimated (Aligned)'], 
+            gt_traj_pathdata.visualize_3D([est_traj_align_pathdata], ['Ground Truth', 'Estimated (Aligned)'], 
                               axes_interval=axes_interval, axes_length=axes_length)
-
-        return dict_all_results
+        
+        return dict_all_results, est_traj_align_pathdata, gt_traj_pathdata

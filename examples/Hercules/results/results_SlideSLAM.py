@@ -22,7 +22,7 @@ def main():
             est_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_0.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
             est_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/results/slideslam/' + robot_names_merged + '/' + robot_name + '/trajectory_1.csv', "odom", 'base_link', CoordinateFrame.NED, True, [7, 0, 1, 2, 6, 3, 4, 5], reorder_data=True)
             est_data_lst: list[OdometryData] = [est_data_robot0, est_data_robot1]
-            est_data_robot0.visualize([est_data_robot1], [robot0_name + " Results", robot1_name + " Results"], 10, 40)
+            est_data_robot0.visualize_3D([est_data_robot1], [robot0_name + " Results", robot1_name + " Results"], 10, 40)
 
             # Load the ground truth data
             gt_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot0_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
@@ -35,7 +35,7 @@ def main():
             gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
 
             # # Calculate RMS ATE, among other metrics
-            metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+            metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
             print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
             print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
 

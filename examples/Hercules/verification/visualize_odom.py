@@ -26,7 +26,7 @@ def main():
     # Visualize it
     robot_names_alt = [robot_names[0] + "(VINS-Mono Loop)", robot_names[0] +"(VINS-Mono No Loop)"]
     print(len(data[1:]))
-    data[0].visualize(data[1:], robot_names + robot_names_alt)
+    data[0].visualize_3D(data[1:], robot_names + robot_names_alt)
 
 if __name__ == "__main__":
     main()

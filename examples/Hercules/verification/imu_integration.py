@@ -26,7 +26,7 @@ def main():
     print("Initial Orientation (quat xyzw): ", initial_ori)
 
     odom_data: OdometryData = imu_data.to_PathData(initial_pos, initial_vel, None, use_ang_vel=False).to_OdometryData('world', robot_name + '/base_link')
-    odom_data.visualize([gt_odom_data], ["IMU Derived Odometry", "Ground Truth Odometry"], axes_interval=5000, axes_length=10.0)
+    odom_data.visualize_3D([gt_odom_data], ["IMU Derived Odometry", "Ground Truth Odometry"], axes_interval=5000, axes_length=10.0)
 
 if __name__ == "__main__":
     main()

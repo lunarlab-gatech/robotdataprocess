@@ -22,7 +22,7 @@ class TestPathData(unittest.TestCase):
         est_data = OdometryData.from_csv(file_path / 'poseEst.csv', "world", "robot", CoordinateFrame.FLU, True, None)
 
         # Calculate all metrics
-        results_dict: dict = PathData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1)
+        results_dict: dict = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1)
         
         # Make sure the values match what we expect
         np.testing.assert_almost_equal(results_dict['APE']['translation_part']['rmse'], 0.43900241699624326, 12)
@@ -259,7 +259,7 @@ class TestPathData(unittest.TestCase):
         )
 
         # Should not raise
-        path1.visualize([path2], ['Path1', 'Path2'], axes_length=1.0, axes_interval=1)
+        path1.visualize_3D([path2], ['Path1', 'Path2'], axes_length=1.0, axes_interval=1)
         mock_plt.show.assert_called()
 
     def test_visualize_error_cases(self):
@@ -276,7 +276,7 @@ class TestPathData(unittest.TestCase):
 
         # Wrong number of titles
         with self.assertRaises(ValueError):
-            path1.visualize([], ['Title1', 'Title2'])
+            path1.visualize_3D([], ['Title1', 'Title2'])
 
     @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
     def test_visualize_list_axes_params(self, mock_plt):
@@ -298,11 +298,11 @@ class TestPathData(unittest.TestCase):
 
         # axes_length list wrong size
         with self.assertRaises(ValueError):
-            path1.visualize([], ['Title1'], axes_length=[1.0, 2.0])
+            path1.visualize_3D([], ['Title1'], axes_length=[1.0, 2.0])
 
         # axes_interval list wrong size
         with self.assertRaises(ValueError):
-            path1.visualize([], ['Title1'], axes_length=[1.0],axes_interval=[1, 2])
+            path1.visualize_3D([], ['Title1'], axes_length=[1.0],axes_interval=[1, 2])
 
     @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
     def test_calculate_trajectory_errors_with_visualization(self, mock_plt):
@@ -316,7 +316,7 @@ class TestPathData(unittest.TestCase):
         gt_data = OdometryData.from_csv(file_path / 'poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
         est_data = OdometryData.from_csv(file_path / 'poseEst.csv', "world", "robot", CoordinateFrame.FLU, True, None)
 
-        results_dict = PathData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+        results_dict = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
         # Verify we still get results
         self.assertIn('APE', results_dict)
         # Verify matplotlib was invoked

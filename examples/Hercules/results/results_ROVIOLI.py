@@ -28,7 +28,7 @@ def main():
         est_data._ori_change_of_basis(R_NED_Q)
 
         # Calculate RMS ATE, among other metrics
-        metrics_dictionary: dict = OdometryData.calculate_trajectory_errors(gt_data, est_data, max_diff=0.1, visualize=True, axes_length=1, axes_interval=100)
+        metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True, axes_length=1, axes_interval=100)
         print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
 
