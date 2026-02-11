@@ -410,6 +410,76 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_almost_equal(
             path2.orientations[0].astype(float), [0.5, -0.5, -0.5, -0.5], decimal=5)
 
+    def test_round_timestamps(self):
+        """ Test that round_timestamps correctly rounds Decimal timestamps. """
+
+        # Create a PathData object with high-precision timestamps
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([1.123456789, 2.987654321, 3.555555555], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        original_positions = path.positions.copy()
+        original_orientations = path.orientations.copy()
+
+        # Round to 3 decimal places
+        path.round_timestamps(3)
+
+        # Verify timestamps are rounded
+        self.assertEqual(path.timestamps[0], Decimal('1.123'))
+        self.assertEqual(path.timestamps[1], Decimal('2.988'))
+        self.assertEqual(path.timestamps[2], Decimal('3.556'))
+
+        # Verify positions and orientations are unchanged
+        np.testing.assert_array_equal(path.positions, original_positions)
+        np.testing.assert_array_equal(path.orientations, original_orientations)
+
+    def test_round_timestamps_zero_decimals(self):
+        """ Test rounding to 0 decimal places. """
+
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([1.4, 2.5, 3.6], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path.round_timestamps(0)
+        self.assertEqual(path.timestamps[0], Decimal('1'))
+        self.assertEqual(path.timestamps[1], Decimal('2'))
+        self.assertEqual(path.timestamps[2], Decimal('4'))
+
+    def test_round_timestamps_invalidates_odom_cache(self):
+        """ Test that round_timestamps calls _invalidate_cache, clearing OdometryData's cached poses. """
+
+        odom = OdometryData(
+            frame_id="world",
+            child_frame_id="robot",
+            timestamps=np.array([1.111111, 2.222222, 3.333333], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        # Simulate cached poses
+        odom.poses = ["fake_pose_1", "fake_pose_2", "fake_pose_3"]
+        odom.poses_rclpy = ["fake_rclpy_1", "fake_rclpy_2"]
+
+        # Round timestamps should clear the cache
+        odom.round_timestamps(2)
+
+        self.assertEqual(odom.poses, [])
+        self.assertEqual(odom.poses_rclpy, [])
+        self.assertEqual(odom.timestamps[0], Decimal('1.11'))
+        self.assertEqual(odom.timestamps[1], Decimal('2.22'))
+        self.assertEqual(odom.timestamps[2], Decimal('3.33'))
+
     def test_invalidate_cache_is_noop_on_pathdata(self):
         """ Verify _invalidate_cache is a no-op on PathData (no crash, no side effects). """
         path = PathData("r", np.array([0.0], dtype=object),

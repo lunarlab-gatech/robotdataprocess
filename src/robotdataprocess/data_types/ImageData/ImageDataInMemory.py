@@ -25,9 +25,13 @@ class ImageDataInMemory(ImageData):
                  height: int, width: int, encoding: ImageData.ImageEncoding, images: np.ndarray):
         super().__init__(frame_id, timestamps, height, width, encoding, images)
 
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataInMemory. """
+        pass
+
     # =========================================================================
-    # ============================ Class Methods ============================== 
-    # =========================================================================  
+    # ============================ Class Methods ==============================
+    # =========================================================================
 
     @classmethod
     def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):

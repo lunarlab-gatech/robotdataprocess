@@ -1,14 +1,14 @@
 from __future__ import annotations
-from xml.parsers.expat import errors
 
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from ..math_utils import interpolate_poses
-from .Data import Data, CoordinateFrame
+from .Data import Data
 from decimal import Decimal
 import json
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, StrMethodFormatter
 import numpy as np
-from numpy.typing import NDArray
 from .PathData import PathData
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -29,10 +29,12 @@ class LoopClosureData(Data):
     translations: np.ndarray  # (N, 3) translation vectors
     orientations: np.ndarray  # (N, 4) quaternions in xyzw format
     num_loop_closures: int
+    detected_inliers: np.ndarray # (N,) boolean array indicating inlier loop closures
 
     @typechecked
     def __init__(self, timestamps_a: Union[np.ndarray, list], timestamps_b: Union[np.ndarray, list],
-                 names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list]):
+                 names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list],
+                 detected_inliers: Union[np.ndarray, list, None] = None):
                  
         super().__init__(frame_id="")
         self.timestamps_a = col_to_dec_arr(timestamps_a)
@@ -41,6 +43,8 @@ class LoopClosureData(Data):
         self.translations = col_to_dec_arr(translations)
         self.orientations = col_to_dec_arr(orientations)
         self.num_loop_closures = len(self.timestamps_a)
+        if detected_inliers is not None:
+            self.detected_inliers = np.array(detected_inliers, dtype=bool)
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -84,7 +88,116 @@ class LoopClosureData(Data):
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
+            detected_inliers=None,
         )
+
+    @classmethod
+    def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
+                 names_override: Union[tuple[str, str], None] = None) -> LoopClosureData:
+        """
+        Creates a LoopClosureData instance from a g2o file containing
+        EDGE_SE3:QUAT entries, using a timestamp file to map keyframe
+        indices to real timestamps.
+
+        GTSAM symbol keys are decoded as (character << 56 | index). The
+        character is converted to a robot id ('a' -> 0, 'b' -> 1, etc.)
+        and used together with the index to look up the timestamp from
+        the time file.
+
+        The g2o quaternion order is (qx, qy, qz, qw), which matches the
+        xyzw convention used by this class.
+
+        Args:
+            g2o_path: Path to the .g2o file.
+            time_path: Path to the timestamp file. Each line has:
+                robot_id keyframe_id timestamp_ns [ignored...]
+            names_override: If passed, this tuple of (name_a, name_b) will
+                be used for all loop closures instead of decoding from keys.
+
+        Returns:
+            LoopClosureData instance.
+        """
+        # Build lookup: (robot_id, keyframe_id) -> timestamp in seconds
+        time_lookup: dict[tuple[int, int], Decimal] = {}
+        with open(str(time_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                robot_id = int(parts[0])
+                keyframe_id = int(parts[1])
+                timestamp_ns = Decimal(parts[2])
+                time_lookup[(robot_id, keyframe_id)] = timestamp_ns / Decimal("1000000000")
+
+        timestamps_a = []
+        timestamps_b = []
+        names = []
+        translations = []
+        orientations = []
+
+        with open(str(g2o_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if not line.startswith("EDGE_SE3:QUAT"):
+                    raise ValueError(
+                        f"Expected EDGE_SE3:QUAT but got: {line.split()[0]}"
+                    )
+
+                parts = line.split()
+                # parts[0]    = "EDGE_SE3:QUAT"
+                # parts[1]    = key1
+                # parts[2]    = key2
+                # parts[3:6]  = px, py, pz
+                # parts[6:10] = qx, qy, qz, qw
+                # parts[10:]  = upper-triangular information matrix (21 values)
+
+                key1 = int(parts[1])
+                key2 = int(parts[2])
+
+                # Decode GTSAM Symbol keys
+                char1 = chr(key1 >> 56)
+                idx1 = key1 & ((1 << 56) - 1)
+                char2 = chr(key2 >> 56)
+                idx2 = key2 & ((1 << 56) - 1)
+
+                # Map character to robot index ('a' -> 0, 'b' -> 1, ...)
+                robot_id1 = ord(char1) - ord('a')
+                robot_id2 = ord(char2) - ord('a')
+
+                timestamps_a.append(time_lookup[(robot_id1, idx1)])
+                timestamps_b.append(time_lookup[(robot_id2, idx2)])
+                if names_override is not None:
+                    names.append(names_override)
+                else:
+                    names.append((char1, char2))
+
+                px, py, pz = float(parts[3]), float(parts[4]), float(parts[5])
+                qx, qy, qz, qw = float(parts[6]), float(parts[7]), float(parts[8]), float(parts[9])
+
+                translations.append([px, py, pz])
+                orientations.append([qx, qy, qz, qw])
+
+        return cls(
+            timestamps_a=np.array(timestamps_a, dtype=object),
+            timestamps_b=np.array(timestamps_b, dtype=object),
+            names=names,
+            translations=np.array(translations, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+            detected_inliers=None,
+        )
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    def round_timestamps(self, decimals: int):
+        """ Rounds all timestamps to the specified number of decimal places. """
+        quantize_val = Decimal(10) ** -decimals
+        self.timestamps_a = np.array([ts.quantize(quantize_val) for ts in self.timestamps_a])
+        self.timestamps_b = np.array([ts.quantize(quantize_val) for ts in self.timestamps_b])
 
     # =========================================================================
     # ============================ Error Methods ==============================
@@ -171,93 +284,71 @@ class LoopClosureData(Data):
 
         new_pos, new_quat = interpolate_poses(ts_float, pos_float, quat_float, target)
         return new_pos[0], new_quat[0]
+    
+    # =========================================================================
+    # ===================== Multi LoopClosureData Methods =====================
+    # =========================================================================
+
+    def label_inliers_via_other_LoopClosureData(self, other: LoopClosureData) -> None:
+        """
+        Label loop closures as inliers if they are also detected in another
+        LoopClosureData instance. The ``other`` object is assumed to be a
+        subset of ``self`` — every loop closure in ``other`` must have a
+        matching entry in ``self``. A ValueError is raised if any loop closure
+        in ``other`` cannot be matched.
+
+        This modifies the detected_inliers attribute in place.
+
+        Matches are checked by name pairs, timestamps, translations, and
+        orientations. Quaternion sign ambiguity is handled: q and -q are
+        treated as equivalent.
+
+        Note: Swapped name pairs ((A,B) vs (B,A)) are NOT matched. Both
+        LoopClosureData instances must use the same robot1-to-robot2
+        convention for loop closures to be identified as inliers.
+
+        Args:
+            other: Another LoopClosureData instance that is a subset of self;
+                unaffected by this method.
+
+        Raises:
+            ValueError: If any loop closure in ``other`` is not found in
+                ``self``, violating the subset assumption.
+        """
+
+        matched_other_indices = set()
+        inliers = []
+
+        for i in range(self.num_loop_closures):
+            is_inlier = False
+            for j in range(other.num_loop_closures):
+                if (self.names[i] == other.names[j] and
+                    self.timestamps_a[i] == other.timestamps_a[j] and
+                    self.timestamps_b[i] == other.timestamps_b[j] and
+                    np.allclose(dec_arr_to_float_arr(self.translations[i]),
+                                dec_arr_to_float_arr(other.translations[j]),
+                                atol=1e-4)):
+                    q_self = dec_arr_to_float_arr(self.orientations[i])
+                    q_other = dec_arr_to_float_arr(other.orientations[j])
+                    if (np.allclose(q_self, q_other, atol=1e-4) or
+                        np.allclose(q_self, -q_other, atol=1e-4)):
+                        is_inlier = True
+                        matched_other_indices.add(j)
+                        break
+
+            inliers.append(is_inlier)
+
+        self.detected_inliers = np.array(inliers, dtype=bool)
+
+        num_matched = int(np.sum(self.detected_inliers))
+        if num_matched < other.num_loop_closures:
+            raise ValueError(
+                f"Only {num_matched} of {other.num_loop_closures} loop closures in other were found in self (other must be a subset of self)."
+            )
 
     # =========================================================================
     # ============================ Visualization ==============================
     # =========================================================================
-
-    @staticmethod
-    def visualize_errors(errors: List[dict], labels: List[str], show_plots: bool = True, bins: int = 60,) -> Tuple[plt.Figure, plt.Figure]:
-        """
-        Plot histograms of translation and rotation errors.
-
-        Args:
-            errors: List of dicts from calculate_errors with "translation_errors" and
-                "rotation_errors" keys.
-            show_plots: If True, display plots. Set to False for testing.
-        """
-
-        if len(labels) != len(errors):
-            raise ValueError("Labels must have the same length as errors!")
-
-        sns.set_theme(
-            style="whitegrid",
-            context="talk",
-            palette="tab10",
-        )
-
-        fig1, ax1 = plt.subplots(figsize=(10, 6))
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-
-        # Collect all data for shared bins
-        all_trans = np.concatenate(
-            [np.asarray(e["translation_errors"]) for e in errors]
-        )
-        all_rot = np.concatenate(
-            [np.asarray(e["rotation_errors"]) for e in errors]
-        )
-
-        trans_bins = np.histogram_bin_edges(all_trans, bins=bins)
-        rot_bins = np.histogram_bin_edges(all_rot, bins=bins)
-
-        palette = sns.color_palette("tab10", len(errors))
-
-        for err, label, color in zip(errors, labels, palette):
-            sns.histplot(
-                err["translation_errors"],
-                bins=trans_bins,
-                stat="count",
-                alpha=0.45,
-                color=color,
-                edgecolor="black",
-                linewidth=0.8,
-                ax=ax1,
-                label=label,
-            )
-
-            sns.histplot(
-                err["rotation_errors"],
-                bins=rot_bins,
-                stat="count",
-                alpha=0.45,
-                color=color,
-                edgecolor="black",
-                linewidth=0.8,
-                ax=ax2,
-                label=label,
-            )
-
-        # Translation plot formatting
-        ax1.set_title("Loop Closure Translation Error Distribution")
-        ax1.set_xlabel("Translation Error (m)")
-        ax1.set_ylabel("Count")
-        ax1.legend(title="Run")
-        sns.despine(ax=ax1)
-
-        # Rotation plot formatting
-        ax2.set_title("Loop Closure Rotation Error Distribution")
-        ax2.set_xlabel("Rotation Error (degrees)")
-        ax2.set_ylabel("Count")
-        ax2.legend(title="Run")
-        sns.despine(ax=ax2)
-
-        fig1.tight_layout()
-        fig2.tight_layout()
-
-        if show_plots:
-            plt.show()
-
-        return fig1, fig2
 
     @staticmethod
     def visualize_success_rate(
@@ -428,6 +519,7 @@ class LoopClosureData(Data):
     def visualize_error_scatter(
         errors: List[dict],
         labels: List[str],
+        inlier_masks: List[np.ndarray] = None,
         show_plots: bool = True,
         max_translation_frac: float = 1.0,
         max_rotation_frac: float = 1.0,
@@ -438,11 +530,18 @@ class LoopClosureData(Data):
         Y-axis: rotation error
         Each dict in errors gets a separate color.
 
+        If inlier_masks is provided, inliers are plotted with inlier_marker
+        and outliers with the per-run marker from markers. If inlier_masks is
+        None or a particular entry is None, all points use the outlier marker.
+
         Axes automatically expand to include all points with a small margin.
         """
 
         if len(labels) != len(errors):
             raise ValueError("labels must have the same length as errors")
+
+        if inlier_masks is not None and len(inlier_masks) != len(errors):
+            raise ValueError("inlier_masks must have the same length as errors")
 
         if not (0 < max_translation_frac <= 1.0):
             raise ValueError("max_translation_frac must be in (0, 1]")
@@ -450,9 +549,13 @@ class LoopClosureData(Data):
         if not (0 < max_rotation_frac <= 1.0):
             raise ValueError("max_rotation_frac must be in (0, 1]")
 
+        if inlier_masks is None:
+            inlier_masks = [None] * len(errors)
+
         sns.set_theme(style="whitegrid", context="talk", palette="tab10")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        palette = sns.color_palette("tab10", len(errors))
+        sns.set_context("poster", font_scale=1.0)
+        fig, ax = plt.subplots(figsize=(20, 20))
+        palette = sns.color_palette("bright", len(errors))
 
         # Collect all translation and rotation errors
         all_trans = np.concatenate([np.asarray(e["translation_errors"]) for e in errors])
@@ -468,32 +571,128 @@ class LoopClosureData(Data):
         y_min = np.min(all_rot) * 0.95
         y_max = np.max(all_rot) * 1.05
 
-        for err, label, color in zip(errors, labels, palette):
+        legend_handles = []
+        for err, label, color, inlier_mask in zip(errors, labels, palette, inlier_masks):
             trans_err = np.asarray(err["translation_errors"])
             rot_err = np.asarray(err["rotation_errors"])
 
-            # Mask points beyond the max fraction
-            mask = (trans_err <= x_max) & (rot_err <= y_max)
-            ax.scatter(
-                trans_err[mask],
-                rot_err[mask],
-                alpha=0.8,
-                s=200,            # bigger Xs
-                color=color,
-                label=label,
-                marker='x',
-                edgecolors='none',
-                clip_on=False
-            )
+            # 1. Calculate how many points fall inside the highlighted square
+            # Square bounds: Translation <= 1.0, Rotation <= 5.0
+            in_box_mask = (trans_err <= 1.0) & (rot_err <= 5.0)
+            num_in_box = np.sum(in_box_mask)
+            total_points = len(trans_err)
 
-        ax.set_title("Loop Closure Errors Scatter Plot (Log-Log)")
+            # Avoid division by zero if a list is empty
+            percent_in_box = (num_in_box / total_points * 100) if total_points > 0 else 0
+
+            # Mask points beyond the max fraction for plotting
+            vis_mask = (trans_err <= x_max) & (rot_err <= y_max)
+
+            # Split into outliers (all points if no inlier_mask) and inliers
+            if inlier_mask is not None:
+                outlier_mask = vis_mask & ~inlier_mask
+                inlier_vis_mask = vis_mask & inlier_mask
+            else:
+                outlier_mask = vis_mask
+                inlier_vis_mask = np.zeros(len(trans_err), dtype=bool)
+
+            # Calculate # of inliers
+            if inlier_mask is not None:
+                num_inliers = np.sum(inlier_mask)
+
+            # Outliers
+            ax.scatter(
+                trans_err[outlier_mask], rot_err[outlier_mask],
+                alpha=0.8, s=200, color=color,
+                marker='x', edgecolors='none', clip_on=False, zorder=5,
+            )
+            # Inliers (same color, different marker, no extra legend entry)
+            if np.any(inlier_vis_mask):
+                ax.scatter(
+                    trans_err[inlier_vis_mask], rot_err[inlier_vis_mask],
+                    alpha=0.8, s=800, color=color,
+                    marker='*', edgecolors='none', clip_on=False, zorder=5,
+                )
+
+            # Save the legend entry
+            updated_label = f"{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target )"
+            if inlier_mask is not None:
+                updated_label += f" - Num Inliers: {num_inliers}"
+            legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label)
+)
+
+        ax.set_title("Loop Closure Errors Scatter Plot (Log-Log)", fontsize=24)
         ax.set_xlabel("Translation Error (m)")
         ax.set_ylabel("Rotation Error (degrees)")
+        
+        # Set log scale
         ax.set_xscale('log')
         ax.set_yscale('log')
+
+        # Define exactly which "multipliers" get a tick and a label
+        subs_to_show = [1.0, 2.0, 4.0, 6.0, 8.0]
+        locator = LogLocator(base=10.0, subs=subs_to_show, numticks=100)
+        ax.xaxis.set_major_locator(locator)
+        ax.yaxis.set_major_locator(locator)
+
+        # Use the 'g' formatter to ensure 0.1 shows as "0.1" and not "0"
+        formatter = StrMethodFormatter('{x:g}')
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+
+        # Add the Highlighted Square
+        import matplotlib.patches as patches
+        rect = patches.Rectangle((1e-6, 1e-6), 1.0, 5.0, linewidth=0, facecolor='yellow', alpha=0.2, zorder=0)
+        legend_handles.append(Patch(facecolor='yellow', alpha=0.4, edgecolor='none', label='Successful Loop Closures (<=1m, <=5°)'))
+        ax.add_patch(rect)
+
+        # Place ticks at EVERY digit (1-9) so the grid lines exist
+        all_subs = np.arange(1, 10) 
+        locator = LogLocator(base=10.0, subs=all_subs, numticks=100)
+        ax.xaxis.set_major_locator(locator)
+        ax.yaxis.set_major_locator(locator)
+
+        # Use the 'g' formatter for clean decimals
+        formatter = StrMethodFormatter('{x:g}')
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+
+        # Force a draw so Matplotlib generates the tick objects
+        fig.canvas.draw()
+
+        # Loop through and style: Grid thickness + Label visibility
+        for axis in [ax.xaxis, ax.yaxis]:
+            for tick in axis.get_major_ticks():
+                val = tick.get_loc()
+                log_val = np.log10(val)
+                
+                # Check if it's a power of 10 (1, 10, 100, 0.1, etc)
+                is_power_of_10 = np.isclose(log_val, np.round(log_val), atol=1e-9)
+                
+                # Determine the "leading digit" (e.g., 0.02 -> 2, 40 -> 4)
+                # This handles floating point math safely
+                leading_digit = int(round(val / 10**np.floor(log_val + 1e-9)))
+
+                # --- GRID STYLING ---
+                if is_power_of_10:
+                    tick.gridline.set_linewidth(2.5)
+                    tick.gridline.set_color('#666666')
+                    tick.gridline.set_alpha(0.8)
+                else:
+                    tick.gridline.set_linewidth(2.5)
+                    tick.gridline.set_color("#CCCCCCD8")
+                    tick.gridline.set_alpha(0.5)
+
+        plt.setp(ax.get_xticklabels(), rotation=90, horizontalalignment='center')
+
+        # --- LABEL VISIBILITY ---
+        # Show labels for powers of 10 (1) and even numbers (2, 4, 6, 8)
+        # Hide labels for odd numbers (3, 5, 7, 9)
+        if leading_digit in [3, 5, 7, 9]:
+            tick.label1.set_visible(False)
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
-        ax.legend(title="Run")
+        ax.legend(title="Run", handles=legend_handles, frameon=True)
         sns.despine(ax=ax)
         fig.tight_layout()
 
@@ -501,7 +700,3 @@ class LoopClosureData(Data):
             plt.show()
 
         return fig
-
-
-
-

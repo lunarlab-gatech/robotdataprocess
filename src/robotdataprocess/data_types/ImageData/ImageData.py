@@ -104,9 +104,13 @@ class ImageData(SequentialData):
         self.encoding = encoding
         self.images = images
 
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in ImageData. """
+        pass
+
     # =========================================================================
-    # ============================ Class Methods ============================== 
-    # =========================================================================  
+    # ============================ Class Methods ==============================
+    # =========================================================================
 
     @classmethod
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageData:

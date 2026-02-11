@@ -31,9 +31,19 @@ class SequentialData(Data):
         """ Returns the number of items in this data class """
         return len(self.timestamps)
 
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in SequentialData. """
+        pass
+
     # =========================================================================
     # ========================= Manipulation Methods ==========================
     # =========================================================================
+
+    def round_timestamps(self, decimals: int):
+        """ Rounds all timestamps to the specified number of decimal places. """
+        quantize_val = Decimal(10) ** -decimals
+        self.timestamps = np.array([ts.quantize(quantize_val) for ts in self.timestamps])
+        self._invalidate_cache()
 
     def crop_data(self, start: Decimal, end: Decimal):
         """ Will crop the data so only values within [start, end] inclusive are kept. """

@@ -126,6 +126,77 @@ class TestLoopClosureDataFromJson(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataFromG2o(unittest.TestCase):
+    """Test from_g2o loading."""
+
+    TEST_DIR = Path(__file__).parent / 'files' / 'test_LoopClosureData' / 'test_from_g20'
+    G2O_PATH = TEST_DIR / 'inlier_lc_inter_robot.g2o'
+    TIME_PATH = TEST_DIR / 'odom_all.time.txt'
+
+    def test_from_g2o_count(self):
+        """Load the test g2o file and verify loop closure count."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+        self.assertEqual(lc_data.num_loop_closures, 8)
+
+    def test_from_g2o_first_entry(self):
+        """Verify first entry values: key1=a:0, key2=b:0."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+
+        # a:0 -> robot_id=0, keyframe=0 -> 50000000 ns = 0.05 s
+        # b:0 -> robot_id=1, keyframe=0 -> 50000000 ns = 0.05 s
+        expected_ts_a = Decimal("50000000") / Decimal("1000000000")
+        expected_ts_b = Decimal("50000000") / Decimal("1000000000")
+        self.assertEqual(lc_data.timestamps_a[0], expected_ts_a)
+        self.assertEqual(lc_data.timestamps_b[0], expected_ts_b)
+        self.assertEqual(lc_data.names[0], ("a", "b"))
+
+        # Translation
+        np.testing.assert_almost_equal(float(lc_data.translations[0][0]), -0.344539, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[0][1]), -9.20917, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[0][2]), 2.02169, 5)
+
+        # Orientation (xyzw)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][0]), 0.0171068, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][1]), 0.0252338, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][2]), -0.00721471, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][3]), 0.999509, 5)
+
+    def test_from_g2o_timestamps(self):
+        """Verify timestamp lookup for multiple entries."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+
+        # Second entry: a:601 -> (0,601) -> 100200000000 ns = 100.2 s
+        #               b:601 -> (1,601) -> 100200000000 ns = 100.2 s
+        expected_ts_a_1 = Decimal("100200000000") / Decimal("1000000000")
+        expected_ts_b_1 = Decimal("100200000000") / Decimal("1000000000")
+        self.assertEqual(lc_data.timestamps_a[1], expected_ts_a_1)
+        self.assertEqual(lc_data.timestamps_b[1], expected_ts_b_1)
+
+        # Fourth entry: a:1638 -> (0,1638) -> 273050000000 ns = 273.05 s
+        #               b:0    -> (1,0)    -> 50000000 ns = 0.05 s
+        expected_ts_a_3 = Decimal("273050000000") / Decimal("1000000000")
+        expected_ts_b_3 = Decimal("50000000") / Decimal("1000000000")
+        self.assertEqual(lc_data.timestamps_a[3], expected_ts_a_3)
+        self.assertEqual(lc_data.timestamps_b[3], expected_ts_b_3)
+
+    def test_from_g2o_all_names(self):
+        """All loop closures should be between robots 'a' and 'b'."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+
+        for name_pair in lc_data.names:
+            self.assertEqual(name_pair, ("a", "b"))
+
+    def test_from_g2o_invalid_edge_type_raises(self):
+        """Lines not starting with EDGE_SE3:QUAT should raise ValueError."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.g2o') as f:
+            f.write("VERTEX_SE3:QUAT 0 0 0 0 0 0 0 1\n")
+            f.flush()
+            with self.assertRaises(ValueError):
+                LoopClosureData.from_g2o(f.name, self.TIME_PATH)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataCalculateErrors(unittest.TestCase):
     """Test calculate_errors with known poses."""
 
@@ -272,6 +343,241 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLabelInliersViaOtherLoopClosureData(unittest.TestCase):
+    """Test label_inliers_via_other_LoopClosureData."""
+
+    def _make_lc(self, timestamps_a, timestamps_b, names, translations, orientations):
+        return LoopClosureData(
+            timestamps_a=np.array(timestamps_a, dtype=object),
+            timestamps_b=np.array(timestamps_b, dtype=object),
+            names=names,
+            translations=np.array(translations, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+        )
+
+    def test_exact_match(self):
+        """Loop closures with identical fields are labelled as inliers."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0"), Decimal("2.0")],
+            timestamps_b=[Decimal("1.5"), Decimal("2.5")],
+            names=[("A", "B"), ("A", "B")],
+            translations=[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+        np.testing.assert_array_equal(lc_self.detected_inliers, [True, False])
+
+    def test_no_match_raises(self):
+        """Unmatched loop closures in other should raise ValueError."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("9.0")],
+            timestamps_b=[Decimal("9.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        with self.assertRaises(ValueError):
+            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+    def test_different_translation_raises(self):
+        """Same timestamps and names but different translation should raise."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[99.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        with self.assertRaises(ValueError):
+            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+    def test_different_orientation_raises(self):
+        """Same timestamps and names but different orientation should raise."""
+        r_90z = R.from_euler('z', 90, degrees=True).as_quat().tolist()
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[r_90z],
+        )
+
+        with self.assertRaises(ValueError):
+            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+    def test_swapped_names_raises(self):
+        """Swapped name pairs (A,B) vs (B,A) should raise."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.5")],
+            timestamps_b=[Decimal("1.0")],
+            names=[("B", "A")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        with self.assertRaises(ValueError):
+            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+    def test_numerical_imprecision_still_matches(self):
+        """Values differing by tiny floating-point noise should still match."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0 + 1e-12, 2.0 - 1e-12, 3.0]],
+            orientations=[[0.0, 0.0, 1e-13, 1.0]],
+        )
+
+        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+        np.testing.assert_array_equal(lc_self.detected_inliers, [True])
+
+    def test_negated_quaternion_matches(self):
+        """q and -q represent the same rotation and should match."""
+        q = [0.1, 0.2, 0.3, 0.9327379053088816]  # normalized quaternion
+        q_neg = [-x for x in q]
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[q],
+        )
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0")],
+            timestamps_b=[Decimal("1.5")],
+            names=[("A", "B")],
+            translations=[[1.0, 2.0, 3.0]],
+            orientations=[q_neg],
+        )
+
+        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+        np.testing.assert_array_equal(lc_self.detected_inliers, [True])
+
+    def test_multiple_inliers(self):
+        """Multiple loop closures can be labelled as inliers at once."""
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0"), Decimal("2.0"), Decimal("3.0")],
+            timestamps_b=[Decimal("1.5"), Decimal("2.5"), Decimal("3.5")],
+            names=[("A", "B"), ("A", "B"), ("A", "B")],
+            translations=[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 3,
+        )
+        # other contains first and third but not second
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("3.0"), Decimal("1.0")],
+            timestamps_b=[Decimal("3.5"), Decimal("1.5")],
+            names=[("A", "B"), ("A", "B")],
+            translations=[[3.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+
+        np.testing.assert_array_equal(lc_self.detected_inliers, [True, False, True])
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataRoundTimestamps(unittest.TestCase):
+    """Test round_timestamps method."""
+
+    def _make_lc(self, timestamps_a, timestamps_b):
+        return LoopClosureData(
+            timestamps_a=np.array(timestamps_a, dtype=object),
+            timestamps_b=np.array(timestamps_b, dtype=object),
+            names=[("A", "B")] * len(timestamps_a),
+            translations=np.array([[0.0, 0.0, 0.0]] * len(timestamps_a), dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]] * len(timestamps_a), dtype=object),
+        )
+
+    def test_round_to_two_decimals(self):
+        """Timestamps should be rounded to the specified number of decimal places."""
+        lc = self._make_lc(
+            timestamps_a=[Decimal("1.23456"), Decimal("2.78901")],
+            timestamps_b=[Decimal("3.45678"), Decimal("4.12345")],
+        )
+
+        lc.round_timestamps(2)
+
+        self.assertEqual(lc.timestamps_a[0], Decimal("1.23"))
+        self.assertEqual(lc.timestamps_a[1], Decimal("2.79"))
+        self.assertEqual(lc.timestamps_b[0], Decimal("3.46"))
+        self.assertEqual(lc.timestamps_b[1], Decimal("4.12"))
+
+    def test_round_to_zero_decimals(self):
+        """Rounding to 0 decimal places should give whole numbers."""
+        lc = self._make_lc(
+            timestamps_a=[Decimal("1.5"), Decimal("2.4")],
+            timestamps_b=[Decimal("3.6"), Decimal("4.3")],
+        )
+
+        lc.round_timestamps(0)
+
+        self.assertEqual(lc.timestamps_a[0], Decimal("2"))
+        self.assertEqual(lc.timestamps_a[1], Decimal("2"))
+        self.assertEqual(lc.timestamps_b[0], Decimal("4"))
+        self.assertEqual(lc.timestamps_b[1], Decimal("4"))
+
+    def test_num_loop_closures_unchanged(self):
+        """Rounding should not change the number of loop closures."""
+        lc = self._make_lc(
+            timestamps_a=[Decimal("1.111"), Decimal("2.222"), Decimal("3.333")],
+            timestamps_b=[Decimal("4.444"), Decimal("5.555"), Decimal("6.666")],
+        )
+
+        lc.round_timestamps(1)
+
+        self.assertEqual(lc.num_loop_closures, 3)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataVisualization(unittest.TestCase):
     """Test visualization methods don't crash."""
 
@@ -280,14 +586,6 @@ class TestLoopClosureDataVisualization(unittest.TestCase):
             "translation_errors": np.array([0.1, 0.5, 1.0, 2.0, 3.0, 0.3]),
             "rotation_errors": np.array([1.0, 5.0, 10.0, 20.0, 45.0, 2.0]),
         }
-
-    def test_visualize_errors(self):
-        errors = self._make_errors()
-        fig1, fig2 = LoopClosureData.visualize_errors([errors], labels=["A"], show_plots=False)
-        self.assertIsNotNone(fig1)
-        self.assertIsNotNone(fig2)
-        import matplotlib.pyplot as plt
-        plt.close('all')
 
     def test_visualize_success_rate(self):
         errors = self._make_errors()

@@ -47,9 +47,13 @@ class ImuData(SequentialData):
             or (self.orientations is not None and len(self.ang_vel) != len(self.orientations)):
             raise ValueError("Lengths of timestamp, lin_acc, ang_vel, and orientation arrays are not equal!")
 
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in ImuData. """
+        pass
+
     # =========================================================================
-    # ============================ Class Methods ============================== 
-    # =========================================================================  
+    # ============================ Class Methods ==============================
+    # =========================================================================
 
     @classmethod
     @typechecked

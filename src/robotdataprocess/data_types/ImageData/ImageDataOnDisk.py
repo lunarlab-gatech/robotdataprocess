@@ -68,9 +68,13 @@ class ImageDataOnDisk(ImageData):
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], images: ImageDataOnDisk.LazyImageArray):
         super().__init__(frame_id, timestamps, images.height, images.width, images.encoding, images)
 
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataOnDisk. """
+        pass
+
     # =========================================================================
-    # ============================ Class Methods ============================== 
-    # =========================================================================  
+    # ============================ Class Methods ==============================
+    # =========================================================================
 
     @classmethod
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageDataOnDisk:
