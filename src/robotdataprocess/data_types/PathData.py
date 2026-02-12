@@ -498,13 +498,13 @@ class PathData(SequentialData):
 
             # 4. Styling
             main_color = "#373737"
-            pe_text = [path_effects.withStroke(linewidth=3, foreground='white')]
+            pe_text = [path_effects.withStroke(linewidth=2.5, foreground='white')]
             pe_line = [path_effects.withStroke(linewidth=5, foreground='white')]
             
-            line_params = {'color': main_color, 'transform': ax.transAxes, 'lw': 2.0, 
+            line_params = {'color': main_color, 'transform': ax.transAxes, 'lw': 3.0, 
                         'path_effects': pe_line, 'solid_capstyle': 'round', 'zorder': 10}
             text_params = {'color': main_color, 'transform': ax.transAxes, 'ha': 'right', 
-                        'path_effects': pe_text, 'fontsize': 15, 'weight': 'black', 'zorder': 11}
+                        'path_effects': pe_text, 'fontsize': 18, 'weight': 'black', 'zorder': 11}
 
             # --- DRAW METRIC (TOP) ---
             m_start_x = end_x - frac_m
@@ -534,7 +534,7 @@ class PathData(SequentialData):
         # Draw a google maps scale bar
         if google_maps_scale_bar:
             range_m = x_max - x_min
-            target_length = range_m * 0.2
+            target_length = range_m * 0.25
             if target_length < 10: suggested_length = target_width
             else: suggested_length = int(round(target_length / 10.0)) * 10
             add_google_maps_scale(axs, suggested_length, google_maps_scale_bar_loc)
