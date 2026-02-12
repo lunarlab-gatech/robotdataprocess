@@ -77,10 +77,10 @@ def main():
         "Drone2": "UAV2"
     }
     robot_name_to_color: dict = {
-        "UGV1": "#5FF598",
-        "UGV2": "#F5756E",
-        "UAV1": "#F5DA62",
-        "UAV2": "#6262F5",
+        "UGV1": "#1EE15F",
+        "UGV2": "#E11E28",
+        "UAV1": "#F0F02A",
+        "UAV2": "#1B0ED5",
     }
 
     # Plot the results in 2D (Configuration for Figure 10)
@@ -89,8 +89,8 @@ def main():
     nameList =  [name_map[robot0_name], name_map[robot0_name], name_map[robot1_name], name_map[robot1_name]]
     colorList = [robot_name_to_color[name] for name in nameList]
     PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True, 
-                        background_image_path=image_path, background_image_x_edge=x_edge,
-                        save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
+                       background_image_path=image_path, background_image_x_edge=x_edge,
+                       save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
     
     # Configuration for Figure 2
     # PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=4.0, show_grid=False, 

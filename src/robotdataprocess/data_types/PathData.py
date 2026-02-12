@@ -8,9 +8,11 @@ from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+import math
 from ..math_utils import interpolate_poses
 import matplotlib.colors as mcolors
 import matplotlib.image as mpimg
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import numpy as np
@@ -317,8 +319,10 @@ class PathData(SequentialData):
     def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str], 
                      save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0, 
                      show_grid: bool = False, legend: bool = True,
-                     no_border: bool = False, background_image_path: str | None = None, 
-                     background_image_x_edge: float | None = None,):
+                     no_border: bool = False, disable_x_label: bool = False, disable_y_label: bool = False,
+                     google_maps_scale_bar: bool = False, google_maps_scale_bar_loc: str ="bottom-right",
+                     background_image_path: str | None = None,
+                     background_image_x_edge: float | None = None, ax: plt.Axes | None = None,):
         """
         Plot all PathData objects on a 2D XY plane.
         
@@ -328,14 +332,20 @@ class PathData(SequentialData):
             colorList: Colors to assign to each PathData object (as hex strings starting with #).
             nameList: Robot names corresponding to each PathData object.
             save_path: If provided, figure will be saved to the location. Otherwise, show the figure.
+                This does nothing if ax is not None.
             no_background: If true, plot with a transparent background.
             line_width: Width of trajectory lines in the plot.
             show_grid: Whether to draw a grid on the plot.
             legend: If true, include a legend.
             no_border: If true, remove the x & y axes.
+            disable_x_label: Remove the x label.
+            disable_y_label: Remove the y label.
+            google_maps_scale_bar: Whether to add a Google Maps-like scale bar onto the plot.
+            google_maps_scale_bar_loc: Location for the scale bar.
             background_image_path: Path to an image to plot in the background; It is assumed
                 that the center of the image corresponds to x=0 & y=0 in the PataData frames.
             background_image_x_edge: The distance in meters from center of image to the x edge.
+            ax: If passed, plot is drawn onto these axes instead of on a new figure.
         """
 
         # Check lengths of arguments
@@ -354,8 +364,14 @@ class PathData(SequentialData):
             lightnesses = np.linspace(0.3, 0.8, 20)
             paletteList.append([colorsys.hls_to_rgb(h, li, s) for li in lightnesses])
 
-        # Draw a plot where the trajectories from different robots have slightly different color
-        fig, axs = plt.subplots(1, 1)
+        # Create the figure or use the provided axes
+        created_fig = False
+        if ax is None:
+            fig, axs = plt.subplots(1, 1)
+            created_fig = True
+        else:
+            axs = ax
+            fig = axs.figure
         if no_background:
             fig.patch.set_facecolor('white')
             axs.set_facecolor('none')
@@ -431,8 +447,10 @@ class PathData(SequentialData):
             axs.grid(False)
 
         # Add labels
-        axs.set_xlabel("X (meters)")
-        axs.set_ylabel("Y (meters)")
+        if not disable_x_label:
+            axs.set_xlabel("X (meters)")
+        if not disable_y_label:
+            axs.set_ylabel("Y (meters)")
 
         # Additional configurable parameters
         if legend:
@@ -440,12 +458,96 @@ class PathData(SequentialData):
         if no_border:
             axs.set_axis_off()
 
+        # Helper function to make a Google Maps like Scale Bar
+        def add_google_maps_scale(ax, length_m: float, location: str):
+            # Metric calculations
+            metric_label = f"{int(length_m)} m" if length_m < 1000 else f"{length_m/1000:.1g} km"
+            
+            # American calculations
+            exact_ft = length_m * 3.28084
+            if exact_ft < 5280:
+                rounded_ft = int(exact_ft // 25) * 25
+                if rounded_ft == 0: 
+                    rounded_ft = 25 
+                american_label = f"{rounded_ft} ft"
+                american_width_m = rounded_ft / 3.28084
+            else:
+                miles = exact_ft / 5280
+                rounded_mi = math.floor(miles * 10) / 10.0
+                if rounded_mi == 0: rounded_mi = 0.1
+                american_label = f"{rounded_mi:.1f} mi"
+                american_width_m = rounded_mi * 1609.34
+
+            # 3. Geometry Setup
+            xmin, xmax = ax.get_xlim()
+            range_m = xmax - xmin
+            
+            tick_h = 0.025
+            if location == "bottom-right":
+                end_x = 0.93
+                y_center = 0.12
+            elif location == "top-right":
+                end_x = 0.93
+                y_center = 0.88
+            else:
+                raise ValueError("location must be 'top-right' or 'bottom-right'")
+            
+            # Fractional widths for both bars
+            frac_m = length_m / range_m
+            frac_am = american_width_m / range_m
+
+            # 4. Styling
+            main_color = "#373737"
+            pe_text = [path_effects.withStroke(linewidth=3, foreground='white')]
+            pe_line = [path_effects.withStroke(linewidth=5, foreground='white')]
+            
+            line_params = {'color': main_color, 'transform': ax.transAxes, 'lw': 2.0, 
+                        'path_effects': pe_line, 'solid_capstyle': 'round', 'zorder': 10}
+            text_params = {'color': main_color, 'transform': ax.transAxes, 'ha': 'right', 
+                        'path_effects': pe_text, 'fontsize': 15, 'weight': 'black', 'zorder': 11}
+
+            # --- DRAW METRIC (TOP) ---
+            m_start_x = end_x - frac_m
+            am_start_x = end_x - frac_am
+            # Horizontal and L-brackets (upward)
+            ax.plot([m_start_x, end_x], [y_center, y_center], **line_params)
+            ax.plot([m_start_x, m_start_x], [y_center, y_center + tick_h], **line_params)
+            ax.plot([end_x, end_x], [y_center, y_center + tick_h], **line_params)
+            ax.text(am_start_x + 0.9 * (end_x - am_start_x), y_center + 0.01, metric_label, va='bottom', **text_params)
+
+            # --- DRAW AMERICAN (BOTTOM) ---
+            # Horizontal and L-brackets (downward)
+            ax.plot([am_start_x, end_x], [y_center, y_center], **line_params)
+            ax.plot([am_start_x, am_start_x], [y_center, y_center - tick_h], **line_params)
+            ax.plot([end_x, end_x], [y_center, y_center - tick_h], **line_params)
+            ax.text(am_start_x + 0.9 * (end_x - am_start_x), y_center - 0.018, american_label, va='top', **text_params)
+
+            # Re-draw grey lines on top to clean up the white stroke overlaps
+            clean_params = {'color': main_color, 'transform': ax.transAxes, 'lw': 2.5, 'zorder': 12}
+            ax.plot([m_start_x, end_x], [y_center, y_center], **clean_params)
+            ax.plot([m_start_x, m_start_x], [y_center, y_center + tick_h], **clean_params)
+            ax.plot([end_x, end_x], [y_center, y_center + tick_h], **clean_params)
+            ax.plot([am_start_x, end_x], [y_center, y_center], **clean_params)
+            ax.plot([am_start_x, am_start_x], [y_center, y_center - tick_h], **clean_params)
+            ax.plot([end_x, end_x], [y_center, y_center - tick_h], **clean_params)
+
+        # Draw a google maps scale bar
+        if google_maps_scale_bar:
+            range_m = x_max - x_min
+            target_length = range_m * 0.2
+            if target_length < 10: suggested_length = target_width
+            else: suggested_length = int(round(target_length / 10.0)) * 10
+            add_google_maps_scale(axs, suggested_length, google_maps_scale_bar_loc)
+
         # Save/Plot the results
-        if save_path is not None:
-            plt.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=0)
-        else:
-            plt.show()
-        plt.close(fig)
+        if created_fig:
+            if save_path is not None:
+                fig.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=0)
+            else:
+                plt.show()
+            plt.close(fig)
+
+        return axs
 
     def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000):
         """
@@ -710,6 +812,7 @@ class PathData(SequentialData):
         est_traj: PoseTrajectory3D = est_path.to_evo()
 
         gt_traj, est_traj = sync.associate_trajectories(gt_traj, est_traj, max_diff)
+
 
         est_traj_align: PoseTrajectory3D = copy.deepcopy(est_traj)
         est_traj_align.align(gt_traj, correct_scale=False, correct_only_scale=False) 
