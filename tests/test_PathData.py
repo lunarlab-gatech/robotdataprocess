@@ -22,7 +22,7 @@ class TestPathData(unittest.TestCase):
         est_data = OdometryData.from_csv(file_path / 'poseEst.csv', "world", "robot", CoordinateFrame.FLU, True, None)
 
         # Calculate all metrics
-        results_dict: dict = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1)
+        results_dict, _, _ = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1)
         
         # Make sure the values match what we expect
         np.testing.assert_almost_equal(results_dict['APE']['translation_part']['rmse'], 0.43900241699624326, 12)
@@ -316,7 +316,7 @@ class TestPathData(unittest.TestCase):
         gt_data = OdometryData.from_csv(file_path / 'poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
         est_data = OdometryData.from_csv(file_path / 'poseEst.csv', "world", "robot", CoordinateFrame.FLU, True, None)
 
-        results_dict = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
+        results_dict, _, _ = PathData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
         # Verify we still get results
         self.assertIn('APE', results_dict)
         # Verify matplotlib was invoked

@@ -83,13 +83,19 @@ def main():
         "UAV2": "#6262F5",
     }
 
-    # Plot the results in 2D
+    # Plot the results in 2D (Configuration for Figure 10)
     dataList =  [est_data_align_robot0, gt_data_align_robot0,  est_data_align_robot1,  gt_data_align_robot1]
     isGTList =  [                False,                 True,                  False,                  True]
     nameList =  [name_map[robot0_name], name_map[robot0_name], name_map[robot1_name], name_map[robot1_name]]
     colorList = [robot_name_to_color[name] for name in nameList]
     PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True, 
-                        background_image_path=image_path, background_image_x_edge=x_edge)
+                        background_image_path=image_path, background_image_x_edge=x_edge,
+                        save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
+    
+    # Configuration for Figure 2
+    # PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=4.0, show_grid=False, 
+    #                     background_image_path=image_path, background_image_x_edge=x_edge, legend=False, no_border=True,
+    #                     save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
 
 if __name__ == "__main__":
     main()

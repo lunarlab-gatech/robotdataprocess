@@ -442,7 +442,7 @@ class PathData(SequentialData):
 
         # Save/Plot the results
         if save_path is not None:
-            plt.savefig(save_path, format="pdf")
+            plt.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=0)
         else:
             plt.show()
         plt.close(fig)
