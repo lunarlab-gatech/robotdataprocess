@@ -39,6 +39,23 @@ class ImageDataInMemory(ImageData):
     # ============================ Class Methods ==============================
     # =========================================================================
 
+    @staticmethod
+    def _decode_image_msg(msg: object, encoding: ImageData.ImageEncoding, height: int, width: int):
+        """
+        Helper method that decodes image data from a ROS2 Image message.
+
+        Args:
+            msg (object): The ROS2 Image message.
+            encoding (ImageEncoding): The encoding of the image data.
+            height (int): Height of the image.
+            width (int): Width of the image .
+        """
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
+        if channels > 1:
+            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels)) 
+        else:
+            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))
+
     @classmethod
     def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):
         """
@@ -296,57 +313,3 @@ class ImageDataInMemory(ImageData):
     # =========================================================================
     # ============================ Export Methods ============================= 
     # ========================================================================= 
-
-    def to_image_files(self, output_folder_path: Union[Path, str]):
-        """
-        Saves each image in this ImageData instance to the specified folder,
-        using the timestamps as filenames in .png format (lossless compression).
-
-        Args:
-            output_folder_path (Path | str): The folder to save images into.
-        """
-
-        # Setup the output directory
-        output_path = Path(output_folder_path)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # Check that the encoding is Mono8
-        if self.encoding != ImageData.ImageEncoding.Mono8:
-            raise NotImplementedError(f"Only Mono8 encoding currently supported for export, not {self.encoding}")
-
-        # Setup a progress bar
-        pbar = tqdm.tqdm(total=self.images.shape[0], desc="Saving Images...", unit=" images")
-
-        # Save each image
-        for i, timestamp in enumerate(self.timestamps):
-            # Format timestamp to match input expectations
-            filename = f"{timestamp:.9f}" + ".png"
-            file_path = output_path / filename
-
-            # Save as lossless PNG with default compression
-            img = Image.fromarray(self.images[i], mode="L")
-            img.save(file_path, format="PNG", compress_level=1)
-            pbar.update()
-
-        pbar.close()
-
-    # =========================================================================
-    # ============================ Image Decoding ============================= 
-    # ========================================================================= 
-
-    @staticmethod
-    def _decode_image_msg(msg: object, encoding: ImageData.ImageEncoding, height: int, width: int):
-        """
-        Helper method that decodes image data from a ROS2 Image message.
-
-        Args:
-            msg (object): The ROS2 Image message.
-            encoding (ImageEncoding): The encoding of the image data.
-            height (int): Height of the image.
-            width (int): Width of the image .
-        """
-        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
-        if channels > 1:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels)) 
-        else:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))

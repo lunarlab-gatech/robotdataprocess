@@ -2,7 +2,11 @@ import numpy as np
 import os
 import unittest
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 from robotdataprocess.data_types.Data import ROSMsgLibType
+from pathlib import Path
+import shutil
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -182,6 +186,110 @@ class TestImageData(unittest.TestCase):
 
         with self.assertRaises(NotImplementedError):
             image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+    def test_to_image_files_roundtrip_in_memory(self):
+        """ Test saving Mono8 images to files and loading back (in-memory). """
+        path = Path('.') / 'tests' / 'files' / 'test_ImageData' / 'test_from_image_files' / 'mono8'
+        image_data = ImageDataInMemory.from_image_files(path.absolute(), 'callie')
+
+        # Save to image files
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_image_files_in_memory'
+        output = output.absolute()
+        if output.exists():
+            shutil.rmtree(output)
+        image_data.to_image_files(output)
+
+        # Load back and compare
+        image_data_loaded = ImageDataInMemory.from_image_files(output, 'callie')
+        self.assertEqual(image_data.frame_id, image_data_loaded.frame_id)
+        self.assertEqual(image_data.height, image_data_loaded.height)
+        self.assertEqual(image_data.width, image_data_loaded.width)
+        self.assertEqual(image_data.encoding, image_data_loaded.encoding)
+        np.testing.assert_array_equal(image_data.timestamps, image_data_loaded.timestamps)
+        np.testing.assert_array_equal(image_data.images, image_data_loaded.images)
+
+    def test_to_image_files_roundtrip_on_disk(self):
+        """ Test saving Mono8 images to files and loading back (on-disk). """
+        path = Path('.') / 'tests' / 'files' / 'test_ImageData' / 'test_from_image_files' / 'mono8'
+        image_data = ImageDataOnDisk.from_image_files(path.absolute(), 'callie')
+
+        # Save to image files
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_image_files_on_disk'
+        output = output.absolute()
+        if output.exists():
+            shutil.rmtree(output)
+        image_data.to_image_files(output)
+
+        # Load back and compare
+        image_data_loaded = ImageDataOnDisk.from_image_files(output, 'callie')
+
+        self.assertEqual(image_data.frame_id, image_data_loaded.frame_id)
+        self.assertEqual(image_data.height, image_data_loaded.height)
+        self.assertEqual(image_data.width, image_data_loaded.width)
+        self.assertEqual(image_data.encoding, image_data_loaded.encoding)
+        np.testing.assert_array_equal(image_data.timestamps, image_data_loaded.timestamps)
+
+        # Check that the images are the same by loading them
+        for i in range(len(image_data.images)):
+            np.testing.assert_array_equal(image_data.images[i], image_data_loaded.images[i])
+
+    def test_to_image_files_rgb(self):
+        """ Test saving RGB8 images to files for both in-memory and on-disk. """
+        # Create a dummy RGB image
+        path = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'rgb_source'
+        if path.exists():
+            shutil.rmtree(path)
+        path.mkdir(parents=True, exist_ok=True)
+        
+        timestamps = np.array([0.1, 0.2])
+        images = np.random.randint(0, 255, size=(2, 10, 10, 3), dtype=np.uint8)
+
+        # Create in-memory data
+        image_data_mem = ImageDataInMemory("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
+        
+        # Save to files
+        output_mem = path / "in_memory"
+        image_data_mem.to_image_files(output_mem)
+
+        # Load back and check
+        loaded_mem = ImageDataInMemory.from_image_files(output_mem, "test_frame")
+        self.assertEqual(image_data_mem.frame_id, loaded_mem.frame_id)
+        self.assertEqual(image_data_mem.height, loaded_mem.height)
+        self.assertEqual(image_data_mem.width, loaded_mem.width)
+        self.assertEqual(image_data_mem.encoding, loaded_mem.encoding)
+        np.testing.assert_array_almost_equal(image_data_mem.timestamps, loaded_mem.timestamps)
+        np.testing.assert_array_equal(images, loaded_mem.images)
+
+        # Create on-disk data from the same initial files
+        for i, ts in enumerate(timestamps):
+            from PIL import Image
+            img = Image.fromarray(images[i], 'RGB')
+            img.save(path / f"{ts:.9f}.png")
+
+        image_data_disk = ImageDataOnDisk.from_image_files(path, "test_frame")
+        
+        # Save to files
+        output_disk = path / "on_disk"
+        image_data_disk.to_image_files(output_disk)
+
+        # Load back and check
+        loaded_disk = ImageDataOnDisk.from_image_files(output_disk, "test_frame")
+        self.assertEqual(image_data_disk.frame_id, loaded_disk.frame_id)
+        self.assertEqual(image_data_disk.height, loaded_disk.height)
+        self.assertEqual(image_data_disk.width, loaded_disk.width)
+        self.assertEqual(image_data_disk.encoding, loaded_disk.encoding)
+        np.testing.assert_array_almost_equal(image_data_disk.timestamps, loaded_disk.timestamps)
+        for i in range(len(images)):
+            np.testing.assert_array_equal(images[i], loaded_disk.images[i])
+
+    def test_to_npy_unsupported_encoding(self):
+        """ Test that to_npy raises NotImplementedError for Mono8 encoding. """
+        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_npy_unsupported'
+        output = output.absolute()
+        with self.assertRaises(NotImplementedError):
+            data.to_npy(output)
 
 
 if __name__ == "__main__":

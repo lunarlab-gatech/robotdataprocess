@@ -9,6 +9,7 @@ from ...ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.lib.format import open_memmap
 from pathlib import Path
+from PIL import Image
 from typeguard import typechecked
 from typing import Union, Any
 import tqdm
@@ -177,6 +178,47 @@ class ImageData(SequentialData):
             f.write(f"height: {self.height}\n")
             f.write(f"width: {self.width}\n")
             f.write(f"encoding: {self.encoding}\n")
+
+    def to_image_files(self, output_folder_path: Union[Path, str]):
+        """
+        Saves each image in this ImageData instance to the specified folder,
+        using the timestamps as filenames in .png format (lossless compression).
+
+        Args:
+            output_folder_path (Path | str): The folder to save images into.
+        """
+
+        # Setup the output directory
+        output_path = Path(output_folder_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Check that the encoding is Mono8
+        if self.encoding != ImageData.ImageEncoding.Mono8 and self.encoding != ImageData.ImageEncoding.RGB8:
+            raise NotImplementedError(f"Only Mono8 and RGB8 encoding currently supported for export, not {self.encoding}")
+
+        # Setup a progress bar
+        pbar = tqdm.tqdm(total=self.len(), desc="Saving Images...", unit=" images")
+
+        # Save each image
+        for i, timestamp in enumerate(self.timestamps):
+            # Format timestamp to match input expectations
+            filename = f"{timestamp:.9f}" + ".png"
+            file_path = output_path / filename
+
+            # Determine mode
+            if self.encoding == ImageData.ImageEncoding.Mono8:
+                mode = "L"
+            elif self.encoding == ImageData.ImageEncoding.RGB8:
+                mode = "RGB"
+            else:
+                raise Exception("Should have been caught already!")
+
+            # Save as lossless PNG with default compression
+            img = Image.fromarray(self.images[i], mode=mode)
+            img.save(file_path, format="PNG", compress_level=1)
+            pbar.update()
+
+        pbar.close()
 
     # =========================================================================
     # =========================== Conversion to ROS =========================== 
