@@ -142,7 +142,7 @@ jobs:
     - name: Save coverage data
       uses: actions/upload-artifact@v4
       with:
-        name: coverage-{{ github.job }}
+        name: coverage-${{ github.job }}
         path: .coverage.*
         include-hidden-files: true
 
