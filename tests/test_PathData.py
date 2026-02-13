@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')
+
 from copy import deepcopy
 from decimal import Decimal
 import numpy as np
@@ -7,6 +10,8 @@ from robotdataprocess.conversion_utils import col_to_dec_arr
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
 from robotdataprocess.data_types.PathData import PathData
 from scipy.spatial.transform import Rotation as R
+import matplotlib.pyplot as plt
+import tempfile
 import unittest
 import unittest.mock
 
@@ -489,6 +494,182 @@ class TestPathData(unittest.TestCase):
         # Should not raise
         path._invalidate_cache()
         self.assertFalse(hasattr(path, 'poses'))
+
+    # =========================================================================
+    # ================ visualize_2D Tests (lines 353-555) =====================
+    # =========================================================================
+
+    def test_visualize_2D_mismatched_list_lengths(self):
+        """ Test ValueError when input lists have different lengths. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D([path], [True, False], ['#FF0000'], ['robot'])
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D([path], [True], ['#FF0000', '#0000FF'], ['robot'])
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D([path], [True], ['#FF0000'], ['robot', 'robot2'])
+
+    def test_visualize_2D_invalid_gt_color_lightness(self):
+        """ Test ValueError for out-of-range gt_color_lightness_range_val. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D([path], [True], ['#FF0000'], ['robot'],
+                                  gt_color_lightness_range_val=-1)
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D([path], [True], ['#FF0000'], ['robot'],
+                                  gt_color_lightness_range_val=20)
+
+    def test_visualize_2D_save_to_file(self):
+        """ Test 2D visualization saving to PDF with GT and Est paths. """
+        path1 = PathData(
+            frame_id="robot1",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 1.0, 0.0], [1.0, 2.0, 0.0], [2.0, 1.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            tmp_path = f.name
+        try:
+            axs = PathData.visualize_2D(
+                [path1, path2], [True, False], ['#FF0000', '#0000FF'],
+                ['Robot1', 'Robot2'], save_path=tmp_path)
+            self.assertTrue(os.path.exists(tmp_path))
+            self.assertIsNotNone(axs)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_visualize_2D_no_save_path(self):
+        """ Test the plt.show() code path (no save, no external axes). """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        axs = PathData.visualize_2D([path], [False], ['#FF0000'], ['Robot'])
+        self.assertIsNotNone(axs)
+
+    def test_visualize_2D_external_axes_with_options(self):
+        """ Test 2D vis on externally provided axes with display options. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 2.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        fig, ax = plt.subplots()
+        result = PathData.visualize_2D(
+            [path], [True], ['#00FF00'], ['Robot'],
+            no_background=True, show_grid=True, legend=False,
+            no_border=True, disable_x_label=True, disable_y_label=True, ax=ax)
+        self.assertIs(result, ax)
+        plt.close(fig)
+
+    def test_visualize_2D_background_image(self):
+        """ Test 2D vis with background image, and error when x_edge missing. """
+        import matplotlib.image as mpimg_saver
+        img_data = np.random.randint(0, 255, (100, 150, 3), dtype=np.uint8)
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            mpimg_saver.imsave(f.name, img_data)
+            tmp_img = f.name
+
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        try:
+            # Should succeed with x_edge provided
+            fig, ax = plt.subplots()
+            PathData.visualize_2D([path], [False], ['#FF0000'], ['Robot'],
+                                  background_image_path=tmp_img,
+                                  background_image_x_edge=10.0, ax=ax)
+            plt.close(fig)
+
+            # Should fail without x_edge
+            fig2, ax2 = plt.subplots()
+            with self.assertRaises(ValueError):
+                PathData.visualize_2D([path], [False], ['#FF0000'], ['Robot'],
+                                      background_image_path=tmp_img, ax=ax2)
+            plt.close(fig2)
+        finally:
+            os.remove(tmp_img)
+
+    # =========================================================================
+    # ======= make_start_and_end_times_match error (line 704) =================
+    # =========================================================================
+
+    def test_make_start_and_end_times_match_error_cases(self):
+        """ Test ValueError for empty or mismatched-length lists. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 0, 0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with self.assertRaises(ValueError):
+            PathData.make_start_and_end_times_match([], [])
+        with self.assertRaises(ValueError):
+            PathData.make_start_and_end_times_match([path], [])
+        with self.assertRaises(ValueError):
+            PathData.make_start_and_end_times_match([], [path])
+        with self.assertRaises(ValueError):
+            PathData.make_start_and_end_times_match([path, path], [path])
+
+    # =========================================================================
+    # ============= seperate_PathData Tests (lines 783-800) ===================
+    # =========================================================================
+
+    def test_seperate_PathData(self):
+        """ Test that seperate_PathData correctly splits a concatenated PathData. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([1.1, 2.1, 4.1], dtype=object),
+            positions=np.array([[3.0, 4.0, 6.8], [4.0, 4.0, 6.8], [5.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]], dtype=object),
+            frame=CoordinateFrame.ENU)
+
+        concatenated = PathData.concatenate_PathData([path1, path2])
+        separated = PathData.seperate_PathData([path1, path2], concatenated)
+
+        self.assertEqual(len(separated), 2)
+        self.assertEqual(separated[0].len(), 3)
+        self.assertEqual(separated[1].len(), 3)
+        np.testing.assert_array_equal(separated[0].positions, path1.positions)
+        np.testing.assert_array_equal(separated[0].orientations, path1.orientations)
+        np.testing.assert_array_equal(separated[1].positions, path2.positions)
+        np.testing.assert_array_equal(separated[1].orientations, path2.orientations)
 
 
 if __name__ == "__main__":
