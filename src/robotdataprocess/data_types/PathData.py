@@ -321,6 +321,7 @@ class PathData(SequentialData):
                      show_grid: bool = False, legend: bool = True,
                      no_border: bool = False, disable_x_label: bool = False, disable_y_label: bool = False,
                      google_maps_scale_bar: bool = False, google_maps_scale_bar_loc: str ="bottom-right",
+                     gt_color_lightness_range_val: int = 3,
                      background_image_path: str | None = None,
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,):
         """
@@ -353,6 +354,10 @@ class PathData(SequentialData):
             raise ValueError("Lengths of all Lists must be equal!")
         num_data_objs = len(dataList)
 
+        # Check other argument requirements
+        if gt_color_lightness_range_val < 0 or gt_color_lightness_range_val >= 20:
+            raise ValueError("gt_color_lightness_range_val must be between 0 and 19 inclusive!")
+
         # Convert hex colors to a palette with varying lightness
         paletteList = []
         for c in colorList:
@@ -361,7 +366,7 @@ class PathData(SequentialData):
             h, _, s = colorsys.rgb_to_hls(*rgb)
 
             # Generate similar colors with varying lightness
-            lightnesses = np.linspace(0.3, 0.8, 20)
+            lightnesses = np.linspace(0.0, 1.0, 20)
             paletteList.append([colorsys.hls_to_rgb(h, li, s) for li in lightnesses])
 
         # Create the figure or use the provided axes
@@ -403,7 +408,7 @@ class PathData(SequentialData):
         for i in range(num_data_objs):
             label = nameList[i] + (" (GT)" if isGTList[i] else " (Est.)")
             linestyle = ("dotted" if isGTList[i] else None)
-            color = (paletteList[i][3] if isGTList[i] else paletteList[i][9])
+            color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
             axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1], 
                      label=label, color=color, linewidth=line_width, linestyle=linestyle)
     

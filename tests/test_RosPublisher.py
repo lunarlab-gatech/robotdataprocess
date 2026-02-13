@@ -11,11 +11,16 @@ from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInM
 from robotdataprocess.data_types.OdometryData import PATH_SLICE_STEP
 from robotdataprocess.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
+import signal
 import struct
+import subprocess
 import time
 from typing import Any, Callable, Optional
 from numpy.typing import NDArray
 import unittest
+
+# Timeout in seconds for each sub-test process (subscriber + publisher) to complete
+ROS1_SUBTEST_TIMEOUT = 30
 
 @unittest.skipIf(os.getenv("SKIP_ROS2_TESTS") == "True", "ROS2 not installed")
 class TestRosPublisher(unittest.TestCase):
@@ -279,6 +284,59 @@ class TestRosPublisher(unittest.TestCase):
 @unittest.skipIf(os.getenv("SKIP_ROS1_TESTS") == "True", "ROS1 not installed")
 class TestRosPublisherROS1(unittest.TestCase):
 
+    _roscore_proc = None
+
+    @classmethod
+    def setUpClass(cls):
+        """Start roscore if it is not already running."""
+        # Check if rosmaster is already listening
+        try:
+            result = subprocess.run(
+                ['rostopic', 'list'], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                return  # roscore already running
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+        # Start roscore as a new process group so we can clean it up later
+        cls._roscore_proc = subprocess.Popen(
+            ['roscore'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
+
+        # Wait until roscore is ready (rostopic list succeeds)
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            try:
+                if subprocess.run(['rostopic', 'list'],
+                                  capture_output=True, timeout=2).returncode == 0:
+                    return
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+            time.sleep(0.5)
+        raise RuntimeError("roscore did not start within 15 seconds")
+
+    @classmethod
+    def tearDownClass(cls):
+        """Stop roscore if we started it."""
+        if cls._roscore_proc is not None:
+            os.killpg(os.getpgid(cls._roscore_proc.pid), signal.SIGTERM)
+            cls._roscore_proc.wait(timeout=5)
+            cls._roscore_proc = None
+
+    @staticmethod
+    def _kill_process_tree(proc: Process):
+        """Terminate a multiprocessing.Process and all its descendants."""
+        if not proc.is_alive():
+            return
+        proc.terminate()
+        proc.join(timeout=3)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=2)
+
     def util_ROS1_test(self, data: SequentialData, topic_class: Any, topic_name: str,
                        msg_to_dict_fn: Callable, assert_data_dict_equal: Callable,
                        verbose: bool = False, data_msg_type: Optional[str] = None):
@@ -329,7 +387,7 @@ class TestRosPublisherROS1(unittest.TestCase):
             rospy.signal_shutdown("Test complete")
             p.join(timeout=5)
             if p.is_alive():
-                p.terminate()
+                self._kill_process_tree(p)
 
     def test__run_ROS1_publisher_process(self):
         """ Test that we can publish to ROS1 without losing data. """
@@ -365,7 +423,10 @@ class TestRosPublisherROS1(unittest.TestCase):
         p = Process(target=self.util_ROS1_test, args=(image_data, Image,
                                                        '/cam0/image_raw', img_msg_to_dict_fn, img_assert_data_dict_equal))
         p.start()
-        p.join()
+        p.join(timeout=ROS1_SUBTEST_TIMEOUT)
+        if p.is_alive():
+            self._kill_process_tree(p)
+            self.fail(f"ImageData sub-test timed out after {ROS1_SUBTEST_TIMEOUT}s")
         self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
 
         # ================== Test ImuData ==================
@@ -406,7 +467,10 @@ class TestRosPublisherROS1(unittest.TestCase):
 
         p = Process(target=self.util_ROS1_test, args=(imu_data, Imu, '/imu0', imu_msg_to_dict_fn, imu_assert_data_dict_equal, False))
         p.start()
-        p.join()
+        p.join(timeout=ROS1_SUBTEST_TIMEOUT)
+        if p.is_alive():
+            self._kill_process_tree(p)
+            self.fail(f"ImuData sub-test timed out after {ROS1_SUBTEST_TIMEOUT}s")
         self.assertEqual(p.exitcode, 0, f"Child process failed with exit code {p.exitcode}")
 
 

@@ -8,11 +8,11 @@ from scipy.spatial.transform import Rotation as R
 def main():  
     # Set all data to use
     dataset_names = ["V2.4.C", "V2.3.AP", "V2.3.AC", "V2.4.F"]
-    run_names = ['peachy-sweep-1', 'floral-sweep-6', 'brisk-sweep-2', 'northern-sweep-5']
+    run_names = ['peachy-sweep-1', 'woven-sweep-5', 'brisk-sweep-2', 'restful-sweep-6']
     robot_names_list = [["Husky1", "Husky2"],
-                        ["Drone1", "Drone2"],
+                        ["Husky2", "Drone2"],
                         ["Husky1", "Drone1"],
-                        ["Husky2", "Drone2"]]
+                        ["Drone1", "Drone2"]]
 
     # Create the 2x2 plot
     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
@@ -95,9 +95,13 @@ def main():
         colorList = [robot_name_to_color[name] for name in nameList]
 
         loc = "bottom-right" if i !=0 else "top-right"
+        if i == 0: light_val = 5
+        elif i == 1: light_val = 5
+        elif i == 2: light_val = 6
+        else: light_val = 13
         PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.5, show_grid=False,  
-                              disable_y_label=bool(i%2), disable_x_label=int(i/2) < 1, no_border=True, legend=False, google_maps_scale_bar=True,
-                              google_maps_scale_bar_loc=loc,
+                              disable_y_label=bool(i%2), disable_x_label=int(i/2) < 1, no_border=True, legend=False, 
+                              google_maps_scale_bar=True, google_maps_scale_bar_loc=loc, gt_color_lightness_range_val=light_val,
                               background_image_path=image_path, background_image_x_edge=x_edge, ax=axs[i])
     
     # Robot color legend entries
