@@ -112,14 +112,14 @@ class LiDARData(SequentialData):
     
     @classmethod
     @typechecked
-    def from_ros2_bag(cls, bag_path: Union[Path, str], lidar_topic: str, frame_id: str, frame: CoordinateFrame):
+    def from_ros2_bag(cls, bag_path: Union[Path, str], lidar_topic: str, frame: CoordinateFrame):
         """
-        Creates a class structure from a ROS2 bag file with an PointCloud2 topic.
+        Creates a class structure from a ROS2 bag file with a PointCloud2 topic.
+        The frame_id is loaded directly from the message header in the bag.
 
         Args:
             bag_path (Path | str): Path to the ROS2 bag file.
-            lidar_topic (str): Topic of the Imu messages.
-            frame_id (str): The frame where this IMU data was collected.
+            lidar_topic (str): Topic of the PointCloud2 messages.
             frame: The coordinate frame of the LiDAR data.
         Returns:
             LiDARData: Instance of this class.
@@ -131,35 +131,50 @@ class LiDARData(SequentialData):
         num_msgs: int = bag_wrapper.get_topic_count(lidar_topic)
         print(f"Found {num_msgs} messages on topic {lidar_topic}")
 
-        # TODO: Load the frame id directly from the ROS2 bag.
-
         # Setup arrays to hold data
         point_clouds: List[np.ndarray] = []
         channels: Optional[List[np.ndarray]] = None
         timestamps: List[float] = []
+        frame_id: Optional[str] = None
 
         # Extract the point clouds/timestamps and save
         pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Point Clouds...", unit=" msgs")
-        with Reader2(bag_path) as reader: 
+        with Reader2(bag_path) as reader:
             i = 0
             connections = [x for x in reader.connections if x.topic == lidar_topic]
             for conn, _, rawdata in reader.messages(connections=connections):
                 msg = typestore.deserialize_cdr(rawdata, conn.msgtype)
 
+                # Load frame_id from the first message
+                if frame_id is None:
+                    frame_id = msg.header.frame_id
+
                 # Get useful values
                 field_names = [f.name for f in msg.fields]
                 num_points = len(msg.data) // msg.point_step
 
-                # Determine struct format for each point
-                fmt_chars = []
+                # Determine struct format for each point, accounting for padding between fields
+                datatype_fmt = {7: 'f', 4: 'H'}  # FLOAT32, UINT16
+                datatype_size = {7: 4, 4: 2}
+                endian = '>' if msg.is_bigendian else '<'
+                fmt_chars = [endian]
+                current_offset = 0
                 for f in msg.fields:
-                    if f.datatype == 7:  # FLOAT32
-                        fmt_chars.append('f')
-                    elif f.datatype == 4:  # UINT16
-                        fmt_chars.append('H')
-                    else:
+                    if f.datatype not in datatype_fmt:
                         raise ValueError(f"Unsupported field datatype {f.datatype} for field {f.name}")
-                fmt = ('>' if msg.is_bigendian else '<') + ''.join(fmt_chars)
+                    
+                    # Insert padding bytes if there's a gap between fields
+                    pad = f.offset - current_offset
+                    if pad > 0:
+                        fmt_chars.append(f'{pad}x')
+                    fmt_chars.append(datatype_fmt[f.datatype])
+                    current_offset = f.offset + datatype_size[f.datatype]
+
+                # Trailing padding to reach point_step
+                trailing = msg.point_step - current_offset
+                if trailing > 0:
+                    fmt_chars.append(f'{trailing}x')
+                fmt = ''.join(fmt_chars)
                 struct_size = struct.calcsize(fmt)
                 assert struct_size == msg.point_step, "Point step does not match struct size!"
 
@@ -167,7 +182,7 @@ class LiDARData(SequentialData):
                 points_xyz = np.zeros((num_points, 3), dtype=np.float32)
                 points_ring = None
                 if "ring" in field_names:
-                    points_ring = np.zeros(num_points, dtype=np.uint8)
+                    points_ring = np.zeros(num_points, dtype=np.uint16)
                     if channels is None:
                         channels = []
 

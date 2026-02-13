@@ -2,7 +2,8 @@ from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import CoordinateFrame, LiDARData, ROSMsgLibType
+from robotdataprocess import CoordinateFrame, LiDARData, ROSMsgLibType, Ros2BagWrapper
+import shutil
 import struct
 import unittest
 
@@ -268,6 +269,47 @@ class TestLiDARData(unittest.TestCase):
         lidar = LiDARData("robot", [0], pc, None, CoordinateFrame.FLU)
         with self.assertRaises(RuntimeError):
             lidar.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+    def test_from_ros2_bag(self):
+        """ Ensure we can write LiDAR data to a ROS2 bag and read it back, loading frame_id from the bag. """
+
+        # Create LiDAR data from npy files and compute channels (required for get_ros_msg)
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        lidar_data.calculate_point_channels(51, -25, 25)
+
+        # Write to a ROS2 bag
+        bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_LiDARData', 'test_from_ros2_bag', 'lidar_bag').absolute()
+        if bag_path.is_dir():
+            shutil.rmtree(bag_path)
+        bag_path.parent.mkdir(parents=True, exist_ok=True)
+        Ros2BagWrapper.write_data_to_rosbag(bag_path, [lidar_data], ['/lidar'], [None], None)
+
+        # Read it back -- frame_id should be loaded from the bag header
+        loaded_data = LiDARData.from_ros2_bag(bag_path, '/lidar', CoordinateFrame.NED)
+
+        # Verify frame_id was loaded from the bag
+        self.assertEqual(loaded_data.frame_id, "robot")
+
+        # Verify basic structure
+        self.assertEqual(loaded_data.len(), 3)
+        self.assertEqual(loaded_data.frame, CoordinateFrame.NED)
+
+        # Verify timestamps match (compare as floats due to precision differences in bag round-trip)
+        np.testing.assert_array_almost_equal(
+            loaded_data.timestamps.astype(float),
+            lidar_data.timestamps.astype(float),
+            decimal=5
+        )
+
+        # Verify point cloud data round-trips correctly for a known point
+        pc_loaded, _ = loaded_data.get_point_cloud_at_index(0)
+        np.testing.assert_array_almost_equal(
+            pc_loaded[35], [26.67838478, 0.3280502, -9.79601479], decimal=4
+        )
+
+        # Cleanup
+        shutil.rmtree(bag_path)
 
 
 if __name__ == "__main__":
