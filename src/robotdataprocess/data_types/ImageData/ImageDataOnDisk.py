@@ -1,18 +1,17 @@
 from __future__ import annotations
-
 from ...conversion_utils import col_to_dec_arr
 from .ImageData import ImageData
+import cv2
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, List
+from typing import Union, List, Callable
 
 @typechecked
 class ImageDataOnDisk(ImageData):
     """
     Image data loaded lazily from disk, reading each image only when accessed.
-
     Uses a ``LazyImageArray`` that loads PNG or ``.npy`` files on demand,
     keeping memory usage low for large image sequences. Supports loading from
     ``.png`` and ``.npy`` folders where filenames encode timestamps.
@@ -25,31 +24,40 @@ class ImageDataOnDisk(ImageData):
         width: int
         encoding: ImageData.ImageEncoding
         image_paths: List[Path]
+        transformations: List[Callable]
 
-        def __init__(self, height: int, width: int, encoding: ImageData.ImageEncoding, image_paths: List[Path]):
+        def __init__(self, height: int, width: int, encoding: ImageData.ImageEncoding, 
+                     image_paths: List[Path], transformations: List[Callable] = []):
             self.height = height
             self.width = width
             self.encoding = encoding
             self.image_paths = image_paths
+            self.transformations = transformations
 
         def __getitem__(self, idx) -> np.ndarray:
             # Handle boolean masking (used by the crop_data function)
             if isinstance(idx, np.ndarray) and idx.dtype == bool:
                 new_paths = [p for p, keep in zip(self.image_paths, idx) if keep]
-                return self.__class__(self.height, self.width, self.encoding, new_paths)
+                return self.__class__(self.height, self.width, self.encoding, new_paths, self.transformations)
 
             # Handle slicing (e.g., images[0:10])
             if isinstance(idx, slice):
-                return self.__class__(self.height, self.width, self.encoding, self.image_paths[idx])
+                return self.__class__(self.height, self.width, self.encoding, self.image_paths[idx], self.transformations)
 
             # Handle single integer indexing (loading the actual image)
             path: Path = Path(self.image_paths[idx])
             if path.suffix == '.npy':
-                return np.load(str(path), 'r')
+                image = np.load(str(path), 'r')
             elif path.suffix == '.png':
-                return np.array(Image.open(str(path)), dtype=self.dtype)
+                image = np.array(Image.open(str(path)), dtype=self.dtype)
             else: 
                 raise NotImplementedError(f"Unsupported file format {path.suffix} in LazyImageArray!")
+
+            # Apply transformations
+            for transform in self.transformations:
+                image = transform(image)
+            
+            return image
 
         def __setitem__(self, idx, value):
             raise RuntimeError("This LazyPNGArray is read-only; writes are forbidden.")
@@ -78,6 +86,26 @@ class ImageDataOnDisk(ImageData):
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataOnDisk. """
         pass
+
+    # =========================================================================
+    # ====================== Encoding Transformations =========================
+    # =========================================================================
+
+    def to_encoding(self, encoding: ImageData.ImageEncoding):
+        """
+        Swap the encoding of the image data.
+        Currently only supports RGB8 -> BGR8.
+        """
+        if encoding == self.encoding:
+            return
+
+        if self.encoding == ImageData.ImageEncoding.RGB8 and encoding == ImageData.ImageEncoding.BGR8:
+            def rgb_to_bgr(image: np.ndarray) -> np.ndarray:
+                return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            self.images.transformations.append(rgb_to_bgr)
+            self.encoding = ImageData.ImageEncoding.BGR8
+        else:
+            raise NotImplementedError(f"Encoding conversion from {self.encoding} to {encoding} is not supported.")
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -114,7 +142,7 @@ class ImageDataOnDisk(ImageData):
                 raise NotImplementedError(f"Unsupported encoding {encoding} for 'from_image_files' method!")
         
         # Return an ImageDataOnDisk class
-        return cls(frame_id, timestamps_sorted, cls.LazyImageArray(first_image.height, first_image.width, encoding, all_image_files_sorted))
+        return cls(frame_id, timestamps_sorted, cls.LazyImageArray(first_image.height, first_image.width, encoding, all_image_files_sorted, []))
     
     @classmethod
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
@@ -156,4 +184,4 @@ class ImageDataOnDisk(ImageData):
             raise NotImplementedError(f"Only ImageData.ImageEncoding._32FC1 mode implemented for 'from_npy_files', not {encoding}")
 
         # Return an ImageDataOnDisk class
-        return cls(frame_id, timestamps_sorted, cls.LazyImageArray(height, width, encoding, all_image_files_sorted))
+        return cls(frame_id, timestamps_sorted, cls.LazyImageArray(height, width, encoding, all_image_files_sorted, []))

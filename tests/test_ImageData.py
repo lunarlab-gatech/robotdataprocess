@@ -69,9 +69,9 @@ class TestImageDataEncoding(unittest.TestCase):
         self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
 
     def test_from_dtype_and_channels_rgb8(self):
-        """ Test from_dtype_and_channels with uint8 and 3 channels (RGB8). """
-        encoding = ImageData.ImageEncoding.from_dtype_and_channels(np.uint8, 3)
-        self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
+        """ Test from_dtype_and_channels raises NotImplementedError for ambiguous RGB8/BGR8 (uint8, 3 channels). """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.from_dtype_and_channels(np.uint8, 3)
 
     def test_from_dtype_and_channels_32fc1(self):
         """ Test from_dtype_and_channels with float32 and 1 channel (32FC1). """

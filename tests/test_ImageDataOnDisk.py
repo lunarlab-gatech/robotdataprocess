@@ -1,8 +1,12 @@
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import ImageDataInMemory, ImageDataOnDisk
+from robotdataprocess.data_types.ImageData.ImageData import ImageData
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 import unittest
+import cv2
+from PIL import Image
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImageDataOnDisk(unittest.TestCase):
@@ -66,6 +70,55 @@ class TestImageDataOnDisk(unittest.TestCase):
         # Test __setitem__ raises RuntimeError
         with self.assertRaises(RuntimeError):
             data.images[0] = np.zeros((10, 10))
+
+    def test_to_encoding(self):
+        """ Test encoding conversion from RGB8 to BGR8. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        
+        # Load RGB images
+        image_data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        self.assertEqual(image_data.encoding, ImageData.ImageEncoding.RGB8)
+
+        # Get original first image
+        original_image = image_data.images[0]
+        self.assertEqual(len(image_data.images.transformations), 0)
+
+        # Convert to BGR8
+        image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        self.assertEqual(image_data.encoding, ImageData.ImageEncoding.BGR8)
+        self.assertEqual(len(image_data.images.transformations), 1)
+
+        # Verify the image is now BGR
+        bgr_image = image_data.images[0]
+        rgb_converted_back = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
+        np.testing.assert_array_equal(original_image, rgb_converted_back)
+
+        # Test converting again does nothing
+        image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        self.assertEqual(image_data.encoding, ImageData.ImageEncoding.BGR8)
+        # Verify no new transformations were added
+        self.assertEqual(len(image_data.images.transformations), 1) 
+        # Verify the image data is still the same (no re-transformation)
+        re_bgr_image = image_data.images[0]
+        np.testing.assert_array_equal(bgr_image, re_bgr_image)
+
+
+        # Test unsupported conversion from BGR8 to Mono8
+        with self.assertRaises(NotImplementedError):
+            image_data.to_encoding(ImageData.ImageEncoding.Mono8)
+        
+        # Test unsupported conversion from Mono8 to BGR8
+        mono_folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', 'mono_images').absolute()
+        mono_folder.mkdir(parents=True, exist_ok=True)
+        # Create a dummy mono image
+        mono_image_path = mono_folder / "1.000000000.png"
+        img = Image.new('L', (100, 100)) # 'L' mode for monochrome
+        img.save(str(mono_image_path))
+        
+        mono_image_data = ImageDataOnDisk.from_image_files(mono_folder, 'optical')
+        self.assertEqual(mono_image_data.encoding, ImageData.ImageEncoding.Mono8)
+        with self.assertRaises(NotImplementedError):
+            mono_image_data.to_encoding(ImageData.ImageEncoding.BGR8)
 
     def test_from_npy_files(self):
         """ Test loading 32FC1 npy files from disk matches ImageDataInMemory. """

@@ -24,6 +24,7 @@ class ImageData(SequentialData):
         Mono8 = 0
         RGB8 = 1
         _32FC1 = 2
+        BGR8 = 3
 
         # ================ Class Methods ================
         @classmethod
@@ -34,6 +35,8 @@ class ImageData(SequentialData):
                 return cls.RGB8
             elif encoding_str == "ImageEncoding._32FC1":
                 return cls._32FC1
+            elif encoding_str == "ImageEncoding.BGR8":
+                return cls.BGR8
             else:
                 raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
         
@@ -46,6 +49,8 @@ class ImageData(SequentialData):
                 return cls.RGB8
             elif encoding_str == "32fc1":
                 return cls._32FC1
+            elif encoding_str == 'bgr8':
+                return cls.BGR8
             else:
                 raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
         
@@ -54,7 +59,7 @@ class ImageData(SequentialData):
             if dtype == np.uint8 and channels == 1:
                 return cls.Mono8
             elif dtype == np.uint8 and channels == 3:
-                return cls.RGB8
+                raise NotImplementedError(f"dtype {dtype} w/ {channels} channel(s) can't determine which encoding the data is in!")
             elif dtype == np.float32 and channels == 1:
                 return cls._32FC1
             else:
@@ -78,6 +83,8 @@ class ImageData(SequentialData):
                 return 'rgb8'
             elif encoding == ImageData.ImageEncoding._32FC1:
                 return '32FC1'
+            elif encoding == ImageData.ImageEncoding.BGR8:
+                return 'bgr8'
             else:
                 raise NotImplementedError(f"This ImageData.ImageEncoding.{encoding} is not yet implemented (or it doesn't exist)!")
         
@@ -86,6 +93,8 @@ class ImageData(SequentialData):
             if encoding == ImageData.ImageEncoding.Mono8:
                 return (np.uint8, 1)
             elif encoding == ImageData.ImageEncoding.RGB8:
+                return (np.uint8, 3)
+            elif encoding == ImageData.ImageEncoding.BGR8:
                 return (np.uint8, 3)
             elif encoding == ImageData.ImageEncoding._32FC1:
                 return (np.float32, 1)
