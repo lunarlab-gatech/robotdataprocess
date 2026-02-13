@@ -10,6 +10,13 @@ from typing import Union, List
 
 @typechecked
 class ImageDataOnDisk(ImageData):
+    """
+    Image data loaded lazily from disk, reading each image only when accessed.
+
+    Uses a ``LazyImageArray`` that loads PNG or ``.npy`` files on demand,
+    keeping memory usage low for large image sequences. Supports loading from
+    ``.png`` and ``.npy`` folders where filenames encode timestamps.
+    """
 
     class LazyImageArray:
         """A read-only array-like interface that loads PNG images from disk on demand."""

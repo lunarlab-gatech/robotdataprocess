@@ -71,8 +71,26 @@ coverage run -m unittest discover tests
 - Container name pattern: `robotdataprocess_ros1_container`
 - Shared memory may be limited in Docker (affects RosPublisher shared_memory); use `--shm-size=2gb`
 
+## Coverage
+- `.coveragerc` has `concurrency = multiprocessing`, so after `coverage run` you **must** run `coverage combine` before `coverage report`. Without `combine`, subprocess coverage data is not merged and the report will be stale.
+- Full sequence: `coverage run -m unittest discover tests && coverage combine && coverage report`
+
+## Writing Tests
+- Tests use `unittest` exclusively (no pytest fixtures, parametrize, etc.)
+- For tests that render matplotlib plots, set the Agg backend **before** importing any module that imports matplotlib: `import matplotlib; matplotlib.use('Agg')` at the top of the test file, before data class imports.
+- Test fixtures live in `tests/files/<TestClassName>/`. Helper data (CSV, TXT, etc.) goes there.
+
+## Documentation (docs/)
+- Sphinx with `sphinx_rtd_theme`, `autodoc`, and `napoleon` extensions. Config in `docs/source/conf.py`.
+- Structure: `index.rst` (overview) → `installation.rst`, `quickstart.rst` (Getting Started) → `data_types/data_types.rst`, `ros/ros.rst` (API Reference).
+- Pages use `.. autoclass::` / `.. autofunction::` directives to pull docstrings from source.
+- Style preferences: concise and professional. Avoid verbose problem statements. Don't recommend editable (`-e`) installs. Don't reference `to_evo()` in docs.
+- When describing enums: `CoordinateFrame` enables frame conversions (e.g. `to_FLU_frame()`); `ROSMsgLibType` defines which ROS message library to use. `ROSBAGS` should be described as "(rosbags, pure Python)".
+- ROS publishing examples should show separate ROS1 and ROS2 code blocks.
+
 ## Common Pitfalls
 - ROS1 tests freeze if roscore is not running (`rospy.init_node` blocks indefinitely)
 - Process joins in ROS tests need timeouts to prevent infinite hangs
 - `neutralize_resource_tracker()` in RosPublisher.py patches Python's shared memory resource tracker to avoid crashes in multiprocessing
 - `signal.SIGALRM` is used in worker processes to timeout shared memory allocation
+- OdometryData.py has several unused-import Pylance warnings (col_to_dec_arr, dec_arr_to_float_arr, geometry, plt, NDArray, R, timestamp) -- these are pre-existing and not regressions

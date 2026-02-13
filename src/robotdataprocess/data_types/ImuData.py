@@ -20,6 +20,19 @@ import tqdm
 
 @typechecked
 class ImuData(SequentialData):
+    """
+    IMU sensor data with linear acceleration, angular velocity, and optional orientation.
+
+    Supports loading from ROS2 bags and TXT files (TartanAir format). Can be
+    integrated via Euler's method to produce a PathData trajectory, or published
+    as ``sensor_msgs/Imu`` ROS messages.
+
+    Attributes:
+        lin_acc: (N, 3) array of linear accelerations in m/s^2.
+        ang_vel: (N, 3) array of angular velocities in rad/s.
+        orientations: (N, 4) array of quaternions (x, y, z, w), or None if unavailable.
+        frame: The coordinate frame convention of this data.
+    """
 
     # Define IMU-specific data attributes
     lin_acc: NDArray

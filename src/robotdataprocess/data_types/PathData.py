@@ -27,6 +27,18 @@ import tqdm
 
 @typechecked
 class PathData(SequentialData):
+    """
+    Trajectory data with timestamped 3D positions and orientations.
+
+    Extends SequentialData with spatial pose information. Serves as the base
+    class for OdometryData and provides methods for frame conversion, trajectory
+    alignment, error evaluation (APE/RPE via evo), and 2D/3D visualization.
+
+    Attributes:
+        positions: (N, 3) array of x, y, z positions in meters.
+        orientations: (N, 4) array of quaternions in (x, y, z, w) order.
+        frame: The coordinate frame convention of this data.
+    """
 
     positions: np.ndarray # meters (x, y, z)
     orientations: np.ndarray # quaternions (x, y, z, w)
@@ -540,7 +552,7 @@ class PathData(SequentialData):
         if google_maps_scale_bar:
             range_m = x_max - x_min
             target_length = range_m * 0.25
-            if target_length < 10: suggested_length = target_width
+            if target_length < 10: suggested_length = target_length
             else: suggested_length = int(round(target_length / 10.0)) * 10
             add_google_maps_scale(axs, suggested_length, google_maps_scale_bar_loc)
 

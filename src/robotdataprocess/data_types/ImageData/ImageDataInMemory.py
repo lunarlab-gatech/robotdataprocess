@@ -20,6 +20,12 @@ import tqdm
 
 @typechecked
 class ImageDataInMemory(ImageData):
+    """
+    Image data stored entirely in RAM (or as a memory-mapped numpy array).
+
+    Supports loading from ROS2 bags, ``.npy`` files, and ``.png`` folders.
+    Provides in-memory downscaling and export to PNG or ``.npy`` format.
+    """
 
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], 
                  height: int, width: int, encoding: ImageData.ImageEncoding, images: np.ndarray):

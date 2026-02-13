@@ -27,6 +27,17 @@ PATH_SLICE_STEP = 40
 
 @typechecked
 class OdometryData(PathData):
+    """
+    Odometry data extending PathData with a child frame ID and ROS message caching.
+
+    Supports loading from ROS2 bags, CSV files, and TXT files, and exporting
+    to CSV or ROS messages (Odometry, Path, and maplab OdometryWithImuBiases).
+
+    Attributes:
+        child_frame_id: The frame whose pose is described by this odometry (e.g. ``"base_link"``).
+        poses: Cached rosbags PoseStamped messages (rebuilt after any mutation).
+        poses_rclpy: Cached rclpy/rospy PoseStamped messages (rebuilt after any mutation).
+    """
 
     # Define odometry-specific data attributes
     child_frame_id: str

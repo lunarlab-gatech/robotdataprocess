@@ -22,6 +22,13 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
 
 class Ros2BagWrapper:
+    """
+    Wrapper around rosbags for reading and writing ROS2 bag files.
+
+    Handles typestore creation (including external/custom message types),
+    topic introspection, timestamp extraction, bag downsampling, and
+    writing new bag files from Data objects.
+    """
 
     # Define attributes
     bag_path: Path
