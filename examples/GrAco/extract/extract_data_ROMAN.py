@@ -15,33 +15,18 @@ def data_extraction(input_dir: str, robot_name: str,  skip_depth: bool = False, 
     # Extract LiDAR data
     if not skip_depth:
         lidar_data = LiDARData.from_ros2_bag(input_path / robot_name / robot_name, '/velodyne/points', CoordinateFrame.ENU)
-        lidar_data.to_npy()
+        lidar_data.to_npy_files(output_path / robot_name / 'lidar')
 
     # Extract image dat
     if not skip_rgb:
         rgb_data = ImageDataInMemory.from_ros2_bag(input_path / robot_name / robot_name, '/camera_left/image_raw')
-        rgb_data.to_npy(output_path / robot_name / 'rgb')
-
-    # Load the odometry data
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 
-                                           robot_name + '/odom', robot_name + '/ground_truth/base_link', 
-                                           CoordinateFrame.NED, False)
-
-    # Convert to the FLU coordinate frame & crop
-    pose_data.to_FLU_frame()
-
-    # Save back to a csv file
-    if os.path.exists(output_path / robot_name / 'poseGT.csv'):
-                print("Deleting CSV file at this location previously...")
-                os.remove(output_path / robot_name / 'poseGT.csv')
-    os.makedirs(output_path / robot_name, exist_ok=True)
-    pose_data.to_csv(output_path / robot_name / 'poseGT.csv', write_header=True)
+        rgb_data.to_npy(output_path / robot_name / 'camera_left')
 
 def main(): 
     # Enter desired configuration here
     dataset_num = "V1.0"
     user = getpass.getuser()
-    input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
+    input_dir = '/media/' + user + '/T73/GrAco_datasets/' + dataset_num + '/data'
     robot_names = ["ground-01", "ground-06"]
 
     # Run extraction for each robot

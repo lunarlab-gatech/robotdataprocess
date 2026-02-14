@@ -104,12 +104,33 @@ class LiDARData(SequentialData):
             # Separate XYZ and optional channel
             point_clouds_memmap.append(pc[:, :3])
             if has_channels:
-                channels_memmap.append(pc[:, 3])
+                channels_memmap.append(pc[:, 3].astype(np.uint16))
             pbar.update()
 
         # Return an LiDARData class
         return cls(frame_id, timestamps_sorted, point_clouds_memmap, channels_memmap, frame)
-    
+
+    def to_npy_files(self, npy_folder_path: Union[Path, str]) -> None:
+        """
+        Save LiDAR data to a series of .npy files in a specified folder,
+        where file names correspond to timestamps. Each file contains an
+        (N, 3) array if channels are None, or (N, 4) array if channels exist
+        (4th column is the channel).
+
+        Args:
+            npy_folder_path: Path to the output folder. Created if it doesn't exist.
+        """
+        npy_folder_path = Path(npy_folder_path)
+        npy_folder_path.mkdir(parents=True, exist_ok=True)
+
+        for i in range(len(self.point_clouds)):
+            pc = np.array(self.point_clouds[i])
+            if self.channels is not None:
+                channels_col = np.array(self.channels[i]).reshape(-1, 1).astype(pc.dtype)
+                pc = np.hstack([pc, channels_col])
+            filename = str(self.timestamps[i]) + ".npy"
+            np.save(npy_folder_path / filename, pc)
+
     @classmethod
     @typechecked
     def from_ros2_bag(cls, bag_path: Union[Path, str], lidar_topic: str, frame: CoordinateFrame):

@@ -26,6 +26,58 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(lidar_data.get_point_cloud_at_index(2)[0][-1], [5.671111583709717, 9.91832280305971e-7, 2.6444828510284424])
         np.testing.assert_equal(len(lidar_data.point_clouds), 3)
 
+    def test_to_npy_files(self):
+        """ Ensure we can save LiDAR data to npy files and load it back identically. """
+
+        # Load original data from fixtures
+        src_folder = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        lidar_data = LiDARData.from_npy_files(src_folder, "robot", CoordinateFrame.NED)
+
+        # Save to a temporary folder
+        out_folder = Path(Path('.'), 'tests', 'temporary_files', 'test_LiDARData', 'test_to_npy_files').absolute()
+        if out_folder.is_dir():
+            shutil.rmtree(out_folder)
+        lidar_data.to_npy_files(out_folder)
+
+        # Reload and compare
+        loaded = LiDARData.from_npy_files(out_folder, "robot", CoordinateFrame.NED)
+        self.assertEqual(loaded.len(), lidar_data.len())
+        np.testing.assert_array_equal(loaded.timestamps, lidar_data.timestamps)
+        for i in range(lidar_data.len()):
+            np.testing.assert_array_almost_equal(
+                np.array(loaded.point_clouds[i]),
+                np.array(lidar_data.point_clouds[i])
+            )
+        self.assertEqual(loaded.channels, lidar_data.channels)  # Both None
+
+        # Test round-trip with channels (same number of points per frame required by from_npy_files)
+        pc = [np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
+              np.array([[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]], dtype=np.float32)]
+        channels = [np.array([0, 5], dtype=np.uint16),
+                    np.array([12, 3], dtype=np.uint16)]
+        lidar_with_channels = LiDARData("sensor", [Decimal("1.0"), Decimal("2.0")], pc, channels, CoordinateFrame.FLU)
+
+        out_folder_ch = Path(Path('.'), 'tests', 'temporary_files', 'test_LiDARData', 'test_to_npy_files_channels').absolute()
+        if out_folder_ch.is_dir():
+            shutil.rmtree(out_folder_ch)
+        lidar_with_channels.to_npy_files(out_folder_ch)
+
+        loaded_ch = LiDARData.from_npy_files(out_folder_ch, "sensor", CoordinateFrame.FLU)
+        self.assertEqual(loaded_ch.len(), 2)
+        for i in range(2):
+            np.testing.assert_array_almost_equal(
+                np.array(loaded_ch.point_clouds[i]),
+                np.array(lidar_with_channels.point_clouds[i])
+            )
+            np.testing.assert_array_equal(
+                np.array(loaded_ch.channels[i]),
+                np.array(lidar_with_channels.channels[i])
+            )
+
+        # Cleanup
+        shutil.rmtree(out_folder)
+        shutil.rmtree(out_folder_ch)
+
     def test_to_FLU_frame(self):
         """ Ensure NED-to-FLU transformation flips Y and Z when getting point clouds. """
         point_cloud = [np.array([[ 0.0,  1.0,  2.0],
