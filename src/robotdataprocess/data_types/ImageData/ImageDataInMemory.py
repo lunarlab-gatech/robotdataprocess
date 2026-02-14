@@ -309,7 +309,3 @@ class ImageDataInMemory(ImageData):
         for i in range(self.len()):
             rescaled_images[i] = cv2.resize(self.images[i], (self.width, self.height), interpolation=cv2.INTER_LINEAR)
         self.images = rescaled_images
-
-    # =========================================================================
-    # ============================ Export Methods ============================= 
-    # ========================================================================= 
