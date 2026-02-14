@@ -86,38 +86,44 @@ class TestTransformationData(unittest.TestCase):
             frame=CoordinateFrame.NED
         )
 
-        # Test no-op if target_frame is current_frame
-        transformation_data.to_coordinate_frame(CoordinateFrame.NED)
-        self.assertEqual(transformation_data.frame, CoordinateFrame.NED)
+        # Test no-op if target_frame is current_frame — returns a copy
+        same_frame_result = transformation_data.to_coordinate_frame(CoordinateFrame.NED)
+        self.assertEqual(same_frame_result.frame, CoordinateFrame.NED)
+        np.testing.assert_array_almost_equal(same_frame_result.as_matrix(), initial_matrix)
+        # Original should be unchanged
         np.testing.assert_array_almost_equal(transformation_data.as_matrix(), initial_matrix)
 
 
         # Test NED to FLU conversion
-        transformation_data.to_coordinate_frame(CoordinateFrame.FLU)
-        self.assertEqual(transformation_data.frame, CoordinateFrame.FLU)
+        flu_result = transformation_data.to_coordinate_frame(CoordinateFrame.FLU)
+        self.assertEqual(flu_result.frame, CoordinateFrame.FLU)
+
+        # Original should be unchanged (still NED)
+        self.assertEqual(transformation_data.frame, CoordinateFrame.NED)
+        np.testing.assert_array_almost_equal(transformation_data.as_matrix(), initial_matrix)
 
         # Expected translation after NED to FLU (Y, Z flipped signs)
         expected_translation_after_transform = np.array([1.0, -2.0, -3.0])
-        
+
         # Expected orientation after NED to FLU (initial_rotation_quat * q_NED_to_FLU)
         # q_NED_to_FLU is 180 deg around X: [1,0,0,0] xyzw
         # initial_rotation_quat is 90 deg around Z: [0,0,0.707,0.707] xyzw
         q_NED_to_FLU_transform = R.from_euler('x', 180, degrees=True)
         expected_orientation_after_transform = (q_NED_to_FLU_transform * R.from_quat(initial_rotation_quat)).as_quat() # [0.0, 0.70710678, 0.70710678, 0.0] xyzw
 
-        np.testing.assert_array_almost_equal(transformation_data.translation, expected_translation_after_transform)
-        np.testing.assert_array_almost_equal(transformation_data.orientation, expected_orientation_after_transform)
+        np.testing.assert_array_almost_equal(flu_result.translation, expected_translation_after_transform)
+        np.testing.assert_array_almost_equal(flu_result.orientation, expected_orientation_after_transform)
 
         # Verify the full matrix after transformation
         expected_matrix_after_transform = np.identity(4)
         expected_matrix_after_transform[0:3, 0:3] = R.from_quat(expected_orientation_after_transform).as_matrix()
         expected_matrix_after_transform[0:3, 3] = expected_translation_after_transform
-        np.testing.assert_array_almost_equal(transformation_data.as_matrix(), expected_matrix_after_transform)
+        np.testing.assert_array_almost_equal(flu_result.as_matrix(), expected_matrix_after_transform)
 
 
-        # Test unsupported conversion (e.g., FLU to NED) - now it's FLU, so converting back to NED is not implemented
+        # Test unsupported conversion (e.g., FLU to NED) - flu_result is FLU, so converting back to NED is not implemented
         with self.assertRaises(NotImplementedError):
-            transformation_data.to_coordinate_frame(CoordinateFrame.NED)
+            flu_result.to_coordinate_frame(CoordinateFrame.NED)
 
         # Test unsupported conversion (e.g., initial NED to ENU)
         unsupported_initial_matrix = np.array([
@@ -182,6 +188,48 @@ class TestTransformationData(unittest.TestCase):
         tf_D_C_incompatible_id = TransformationData.from_matrix("frame_D", "frame_C", tf_B_C_matrix, CoordinateFrame.FLU)
         with self.assertRaises(ValueError):
             tf_A_B_compatible_frame.apply_transformation_right_side(tf_D_C_incompatible_id)
+
+    def test_invert(self):
+        """ Test that T @ T.invert() == Identity for a non-trivial transformation. """
+        # Build a transformation with rotation (90 deg around Z) and translation
+        matrix = np.array([
+            [0.0, -1.0, 0.0, 10.0],
+            [1.0,  0.0, 0.0, 20.0],
+            [0.0,  0.0, 1.0, 30.0],
+            [0.0,  0.0, 0.0,  1.0],
+        ])
+        tf = TransformationData.from_matrix("frame_A", "frame_B", matrix, CoordinateFrame.FLU)
+
+        tf_inv = tf.invert()
+
+        # Frame IDs should be swapped
+        self.assertEqual(tf_inv.frame_id, "frame_B")
+        self.assertEqual(tf_inv.child_frame_id, "frame_A")
+        self.assertEqual(tf_inv.frame, CoordinateFrame.FLU)
+
+        # T @ T_inv should equal the identity matrix
+        product = tf.as_matrix() @ tf_inv.as_matrix()
+        np.testing.assert_array_almost_equal(product, np.identity(4))
+
+        # T_inv @ T should also equal the identity matrix
+        product_reverse = tf_inv.as_matrix() @ tf.as_matrix()
+        np.testing.assert_array_almost_equal(product_reverse, np.identity(4))
+
+        # Also verify with a more complex rotation (Euler xyz 30, 45, 60)
+        rot = R.from_euler('xyz', [30, 45, 60], degrees=True)
+        complex_matrix = np.identity(4)
+        complex_matrix[0:3, 0:3] = rot.as_matrix()
+        complex_matrix[0:3, 3] = [5.0, -3.0, 7.5]
+        tf2 = TransformationData.from_matrix("world", "sensor", complex_matrix, CoordinateFrame.NED)
+
+        tf2_inv = tf2.invert()
+        np.testing.assert_array_almost_equal(tf2.as_matrix() @ tf2_inv.as_matrix(), np.identity(4))
+        np.testing.assert_array_almost_equal(tf2_inv.as_matrix() @ tf2.as_matrix(), np.identity(4))
+
+        # Identity transformation should invert to itself
+        tf_identity = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        tf_identity_inv = tf_identity.invert()
+        np.testing.assert_array_almost_equal(tf_identity_inv.as_matrix(), np.identity(4))
 
     def test_OpenVINS_transformations(self):
 
@@ -300,10 +348,10 @@ class TestTransformationData(unittest.TestCase):
                 H_R_to_O = H_R_to_C.apply_transformation_right_side(H_C_to_O)
 
                 # Convert from NED to FLU frame
-                H_R_to_O.to_coordinate_frame(CoordinateFrame.FLU)
+                H_R_to_O_FLU = H_R_to_O.to_coordinate_frame(CoordinateFrame.FLU)
 
                 # Compare with GT
-                np.testing.assert_array_almost_equal(H_R_to_O.as_matrix(), gt_trans[dataset_name][robot_name], decimal=12)
+                np.testing.assert_array_almost_equal(H_R_to_O_FLU.as_matrix(), gt_trans[dataset_name][robot_name], decimal=12)
 
 
 if __name__ == "__main__":

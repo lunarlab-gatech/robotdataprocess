@@ -28,32 +28,44 @@ class TransformationData(Data):
     # ========================== Transform Methods ============================
     # =========================================================================
 
-    def to_coordinate_frame(self, target_frame: CoordinateFrame):
+    def to_coordinate_frame(self, target_frame: CoordinateFrame) -> TransformationData:
         """
-        Transforms the transformation data to the target coordinate frame.
+        Returns a new TransformationData in the target coordinate frame.
         Currently only supports NED to FLU.
         """
         if self.frame == target_frame:
-            return
+            return TransformationData(self.frame_id, self.child_frame_id, self.translation.copy(), self.orientation.copy(), self.frame)
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
             # Transformation from NED to FLU (North-East-Down to Forward-Left-Up)
             # This is equivalent to a 180-degree rotation around the X-axis
             # More simply, X_FLU = X_NED, Y_FLU = -Y_NED, Z_FLU = -Z_NED
-            
+
             # Apply to translation
-            self.translation[1] *= -1 # Y becomes -Y
-            self.translation[2] *= -1 # Z becomes -Z
+            new_translation = self.translation.copy()
+            new_translation[1] *= -1 # Y becomes -Y
+            new_translation[2] *= -1 # Z becomes -Z
 
             # Apply to orientation (quaternion)
             # The rotation is 180 degrees around X. Represented as quaternion [1, 0, 0, 0] in xyzw.
             # The order of multiplication matters: q_new = q_transform * q_old
             q_NED_to_FLU = R.from_euler('x', 180, degrees=True)
-            self.orientation = (q_NED_to_FLU * R.from_quat(self.orientation)).as_quat()
+            new_orientation = (q_NED_to_FLU * R.from_quat(self.orientation)).as_quat()
 
-            self.frame = CoordinateFrame.FLU
+            return TransformationData(self.frame_id, self.child_frame_id, new_translation, new_orientation, CoordinateFrame.FLU)
         else:
             raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
+
+    def invert(self) -> TransformationData:
+        """
+        Returns the inverse transformation such that self @ self.invert() == Identity.
+        Swaps frame_id and child_frame_id.
+        """
+        rot = R.from_quat(self.orientation).as_matrix()
+        inv_rot = rot.T
+        inv_translation = -inv_rot @ self.translation
+        inv_orientation = R.from_matrix(inv_rot).as_quat()
+        return TransformationData(self.child_frame_id, self.frame_id, inv_translation, inv_orientation, self.frame)
 
     def apply_transformation_right_side(self, other: TransformationData) -> TransformationData:
         """

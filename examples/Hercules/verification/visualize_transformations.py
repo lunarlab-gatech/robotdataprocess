@@ -1,4 +1,3 @@
-import copy
 import getpass
 from robotdataprocess import TransformationData, CoordinateFrame
 
@@ -16,9 +15,8 @@ def main():
         H_C_to_O = TransformationData.optical_wrt_camera(CoordinateFrame.NED, frame_id=sensor_name)
         H_R_to_O = H_R_to_C.apply_transformation_right_side(H_C_to_O)
         trans.append(H_R_to_O)
-        H_R_to_O_copy = copy.deepcopy(H_R_to_O)
-        H_R_to_O_copy.to_coordinate_frame(CoordinateFrame.FLU)
-        trans.append(H_R_to_O_copy)
+        H_R_to_O_FLU = H_R_to_O.to_coordinate_frame(CoordinateFrame.FLU)
+        trans.append(H_R_to_O_FLU)
     
     TransformationData.visualize(trans, axes_length=0.5)
 
