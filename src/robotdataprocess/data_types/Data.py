@@ -19,6 +19,20 @@ class CoordinateFrame(Enum):
     ENU = 2
     NONE = 3
 
+class TransformType(Enum):
+    """
+    Enum for how coordinate frame conversions are applied to a transformation.
+
+    Attributes:
+        ROTATION: Apply the frame change as a rotation (left-multiply).
+            q_new = q_frame_change * q_old, t_new = R_frame_change * t_old.
+        CHANGE_OF_BASIS: Apply the frame change as a similarity transform.
+            T_new = R * T * R^{-1}, where R is the frame change matrix.
+    """
+
+    ROTATION = 0
+    CHANGE_OF_BASIS = 1
+
 class ROSMsgLibType(Enum):
     """
     Enum for different ROS message library types.

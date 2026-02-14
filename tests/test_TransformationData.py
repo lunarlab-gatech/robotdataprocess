@@ -3,7 +3,7 @@ import os
 import unittest
 from pathlib import Path
 from robotdataprocess.data_types.TransformationData import TransformationData
-from robotdataprocess.data_types.Data import CoordinateFrame
+from robotdataprocess.data_types.Data import CoordinateFrame, TransformType
 from scipy.spatial.transform import Rotation as R
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -140,6 +140,64 @@ class TestTransformationData(unittest.TestCase):
         )
         with self.assertRaises(NotImplementedError):
             unsupported_data.to_coordinate_frame(CoordinateFrame.ENU)
+
+    def test_to_coordinate_frame_change_of_basis(self):
+        """ Test CHANGE_OF_BASIS mode for to_coordinate_frame (NED -> FLU). """
+        # Build a transformation with rotation (90 deg yaw) and translation in NED
+        initial_translation = np.array([1.0, 2.0, 3.0])
+        initial_rotation_quat = R.from_euler('z', 90, degrees=True).as_quat()
+
+        initial_matrix = np.identity(4)
+        initial_matrix[0:3, 0:3] = R.from_quat(initial_rotation_quat).as_matrix()
+        initial_matrix[0:3, 3] = initial_translation
+
+        tf_ned = TransformationData.from_matrix("robot", "sensor", initial_matrix, CoordinateFrame.NED)
+
+        # --- No-op when target == current frame ---
+        same = tf_ned.to_coordinate_frame(CoordinateFrame.NED, TransformType.CHANGE_OF_BASIS)
+        np.testing.assert_array_almost_equal(same.as_matrix(), initial_matrix)
+
+        # --- Change of basis NED -> FLU ---
+        tf_flu = tf_ned.to_coordinate_frame(CoordinateFrame.FLU, TransformType.CHANGE_OF_BASIS)
+        self.assertEqual(tf_flu.frame, CoordinateFrame.FLU)
+
+        # Compute expected: T_new = R * T * R^{-1}, R = Rx(180)
+        R_frame = R.from_euler('x', 180, degrees=True).as_matrix()
+        R_4x4 = np.identity(4)
+        R_4x4[0:3, 0:3] = R_frame
+        R_inv_4x4 = np.identity(4)
+        R_inv_4x4[0:3, 0:3] = R_frame.T
+        expected_matrix = R_4x4 @ initial_matrix @ R_inv_4x4
+
+        np.testing.assert_array_almost_equal(tf_flu.as_matrix(), expected_matrix)
+
+        # --- Verify ROTATION mode produces correct values ---
+        tf_flu_rotation = tf_ned.to_coordinate_frame(CoordinateFrame.FLU, TransformType.ROTATION)
+        # Expected rotation result: q_new = Rx(180) * q_old, t_new = [1, -2, -3]
+        expected_rotation_translation = np.array([1.0, -2.0, -3.0])
+        q_NED_to_FLU = R.from_euler('x', 180, degrees=True)
+        expected_rotation_orientation = (q_NED_to_FLU * R.from_quat(initial_rotation_quat)).as_quat()
+        expected_rotation_matrix = np.identity(4)
+        expected_rotation_matrix[0:3, 0:3] = R.from_quat(expected_rotation_orientation).as_matrix()
+        expected_rotation_matrix[0:3, 3] = expected_rotation_translation
+        np.testing.assert_array_almost_equal(tf_flu_rotation.as_matrix(), expected_rotation_matrix)
+
+        # The two modes should NOT be identical in general
+        self.assertFalse(np.allclose(tf_flu.as_matrix(), tf_flu_rotation.as_matrix()),
+                         "CHANGE_OF_BASIS and ROTATION should produce different results for this transformation")
+
+        # --- Verify original is unchanged ---
+        np.testing.assert_array_almost_equal(tf_ned.as_matrix(), initial_matrix)
+
+        # --- Property: change of basis preserves eigenvalues of the rotation ---
+        orig_eigenvalues = np.sort(np.linalg.eigvals(initial_matrix[0:3, 0:3]))
+        new_eigenvalues = np.sort(np.linalg.eigvals(tf_flu.as_matrix()[0:3, 0:3]))
+        np.testing.assert_array_almost_equal(np.abs(orig_eigenvalues), np.abs(new_eigenvalues))
+
+        # --- Identity transformation should remain identity under change of basis ---
+        tf_identity = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.NED)
+        tf_identity_cob = tf_identity.to_coordinate_frame(CoordinateFrame.FLU, TransformType.CHANGE_OF_BASIS)
+        np.testing.assert_array_almost_equal(tf_identity_cob.as_matrix(), np.identity(4))
 
     def test_apply_transformation_right_side(self):
         """ Test applying a transformation to the right side. """

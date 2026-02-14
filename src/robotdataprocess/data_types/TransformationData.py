@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .Data import Data, CoordinateFrame
+from .Data import Data, CoordinateFrame, TransformType
 import json
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,29 +28,44 @@ class TransformationData(Data):
     # ========================== Transform Methods ============================
     # =========================================================================
 
-    def to_coordinate_frame(self, target_frame: CoordinateFrame) -> TransformationData:
+    def to_coordinate_frame(self, target_frame: CoordinateFrame, transform_type: TransformType = TransformType.ROTATION) -> TransformationData:
         """
         Returns a new TransformationData in the target coordinate frame.
         Currently only supports NED to FLU.
+
+        Args:
+            target_frame: The desired coordinate frame.
+            transform_type: How to apply the frame change.
+                ROTATION: Left-multiplies the frame change rotation onto the
+                    translation and orientation (default, original behaviour).
+                CHANGE_OF_BASIS: Applies a similarity transform T_new = R T R^{-1},
+                    re-expressing the same physical transformation in the new basis.
         """
         if self.frame == target_frame:
             return TransformationData(self.frame_id, self.child_frame_id, self.translation.copy(), self.orientation.copy(), self.frame)
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
-            # Transformation from NED to FLU (North-East-Down to Forward-Left-Up)
-            # This is equivalent to a 180-degree rotation around the X-axis
-            # More simply, X_FLU = X_NED, Y_FLU = -Y_NED, Z_FLU = -Z_NED
+            # The frame change rotation: 180 degrees around X
+            R_frame = R.from_euler('x', 180, degrees=True)
 
-            # Apply to translation
-            new_translation = self.translation.copy()
-            new_translation[1] *= -1 # Y becomes -Y
-            new_translation[2] *= -1 # Z becomes -Z
+            if transform_type == TransformType.ROTATION:
+                # Apply as a rotation: R_frame * t, R_frame * q
+                new_translation = self.translation.copy()
+                new_translation[1] *= -1  # Y becomes -Y
+                new_translation[2] *= -1  # Z becomes -Z
+                new_orientation = (R_frame * R.from_quat(self.orientation)).as_quat()
 
-            # Apply to orientation (quaternion)
-            # The rotation is 180 degrees around X. Represented as quaternion [1, 0, 0, 0] in xyzw.
-            # The order of multiplication matters: q_new = q_transform * q_old
-            q_NED_to_FLU = R.from_euler('x', 180, degrees=True)
-            new_orientation = (q_NED_to_FLU * R.from_quat(self.orientation)).as_quat()
+            elif transform_type == TransformType.CHANGE_OF_BASIS:
+                # Similarity transform: T_new = R * T * R^{-1}
+                R_mat = R_frame.as_matrix()
+                T = self.as_matrix()
+                R_4x4 = np.identity(4)
+                R_4x4[0:3, 0:3] = R_mat
+                R_inv_4x4 = np.identity(4)
+                R_inv_4x4[0:3, 0:3] = R_mat.T
+                T_new = R_4x4 @ T @ R_inv_4x4
+                new_translation = T_new[0:3, 3]
+                new_orientation = R.from_matrix(T_new[0:3, 0:3]).as_quat()
 
             return TransformationData(self.frame_id, self.child_frame_id, new_translation, new_orientation, CoordinateFrame.FLU)
         else:
