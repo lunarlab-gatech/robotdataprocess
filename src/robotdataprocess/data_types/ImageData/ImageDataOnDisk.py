@@ -2,6 +2,7 @@ from __future__ import annotations
 from ...conversion_utils import col_to_dec_arr
 from .ImageData import ImageData
 import cv2
+import copy
 import numpy as np
 from pathlib import Path
 from PIL import Image
@@ -15,10 +16,10 @@ class LazyImageArray:
     image_paths: List[Path]
     transformations: List[Callable]
 
-    def __init__(self, container: 'ImageDataOnDisk', image_paths: List[Path], transformations: List[Callable] = []):
+    def __init__(self, container: 'ImageDataOnDisk', image_paths: List[Path], transformations: Union[List[Callable], None] = None):
         self.container = container
         self.image_paths = image_paths
-        self.transformations = transformations
+        self.transformations = copy.deepcopy(transformations) if transformations else []
 
     def __getitem__(self, idx) -> np.ndarray:
         # Handle boolean masking (used by the crop_data function)
@@ -76,9 +77,11 @@ class ImageDataOnDisk(ImageData):
     images: LazyImageArray # Not initalized here, but put here for visual code highlighting
 
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], height: int, width: int, 
-                 encoding: ImageData.ImageEncoding, image_paths: List[Path], transformations: List[Callable] = []):
+                 encoding: ImageData.ImageEncoding, image_paths: List[Path], transformations: Union[List[Callable], None] = None):
+        
         super().__init__(frame_id, timestamps, height, width, encoding, None)
-        self.images = LazyImageArray(self, image_paths, transformations)
+        transformations_copy = copy.deepcopy(transformations) if transformations else []
+        self.images = LazyImageArray(self, image_paths, transformations_copy)
 
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataOnDisk. """
