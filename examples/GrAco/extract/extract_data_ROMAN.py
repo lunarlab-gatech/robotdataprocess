@@ -2,7 +2,7 @@ from decimal import Decimal
 import getpass
 import os
 from pathlib import Path
-from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame, ImageDataOnDisk, LiDARData
+from robotdataprocess import ImageDataInMemory, ImuData, OdometryData, CoordinateFrame, ImageDataOnDisk, LiDARData, ImageData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from typing import Union
 
@@ -17,17 +17,17 @@ def data_extraction(input_dir: str, robot_name: str,  skip_depth: bool = False, 
         lidar_data = LiDARData.from_ros2_bag(input_path / robot_name / robot_name, '/velodyne/points', CoordinateFrame.ENU)
         lidar_data.to_npy_files(output_path / robot_name / 'lidar')
 
-    # Extract image dat
+    # Extract image data
     if not skip_rgb:
-        rgb_data = ImageDataInMemory.from_ros2_bag(input_path / robot_name / robot_name, '/camera_left/image_raw')
-        rgb_data.to_npy(output_path / robot_name / 'camera_left')
-
+        rgb_data = ImageDataInMemory.from_ros2_bag(input_path / robot_name / robot_name, 
+                        '/camera_left/image_raw', output_path / robot_name / 'camera_left')
+        
 def main(): 
     # Enter desired configuration here
     dataset_num = "V1.0"
     user = getpass.getuser()
-    input_dir = '/media/' + user + '/T73/GrAco_datasets/' + dataset_num + '/data'
-    robot_names = ["ground-01", "ground-06"]
+    input_dir = '/media/' + user + '/T73/GrAco_dataset/' + dataset_num + '/data'
+    robot_names = ["ground-06"]
 
     # Run extraction for each robot
     for i in range(len(robot_names)):
