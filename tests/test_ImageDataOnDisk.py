@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
-from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk, LazyImageArray
 import unittest
 import cv2
 from PIL import Image
@@ -16,16 +16,17 @@ class TestImageDataOnDisk(unittest.TestCase):
 
         # Load the image data using both classes
         folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
-        image_data_mem = ImageDataOnDisk.from_image_files(folder_path, 'optical')
-        image_data_disk = ImageDataInMemory.from_image_files(folder_path, 'optical')
+        image_data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        image_data_mem = ImageDataInMemory.from_image_files(folder_path, 'optical')
 
         # Assert that their data matches
-        np.testing.assert_equal(image_data_mem.frame_id, image_data_disk.frame_id)
-        np.testing.assert_array_equal(image_data_mem.timestamps, image_data_disk.timestamps)
-        np.testing.assert_equal(image_data_mem.height, image_data_disk.height)
-        np.testing.assert_equal(image_data_mem.width, image_data_disk.width)
-        np.testing.assert_equal(image_data_mem.encoding, image_data_disk.encoding)
-        np.testing.assert_array_equal(image_data_mem.images, image_data_disk.images)
+        self.assertEqual(image_data.frame_id, image_data_mem.frame_id)
+        np.testing.assert_array_equal(image_data.timestamps, image_data_mem.timestamps)
+        self.assertEqual(image_data.height, image_data_mem.height)
+        self.assertEqual(image_data.width, image_data_mem.width)
+        self.assertEqual(image_data.encoding, image_data_mem.encoding)
+        for i in range(image_data.len()):
+            np.testing.assert_array_equal(image_data.images[i], image_data_mem.images[i])
 
     def test_lazy_image_array_operations(self):
         """ Test LazyImageArray slicing, boolean masking, setitem, shape, dtype, len. """
@@ -51,21 +52,23 @@ class TestImageDataOnDisk(unittest.TestCase):
             np.testing.assert_array_equal(data.images[i], mem_data.images[i])
 
         # Test slicing returns correct data
-        sliced = data.images[0:2]
-        self.assertIsInstance(sliced, ImageDataOnDisk.LazyImageArray)
-        self.assertEqual(len(sliced), 2)
-        for i in range(len(sliced)):
-            np.testing.assert_array_equal(sliced[i], mem_data.images[i])
+        sliced_images = data.images[0:2]
+        self.assertIsInstance(sliced_images, LazyImageArray)
+        self.assertEqual(len(sliced_images), 2)
+        for i in range(len(sliced_images)):
+            np.testing.assert_array_equal(sliced_images[i], mem_data.images[i])
 
         # Test boolean masking returns correct data
         mask = np.array([True, False, True] + [False] * (original_len - 3)) if original_len >= 3 \
             else np.array([True] + [False] * (original_len - 1))
-        masked = data.images[mask]
-        self.assertIsInstance(masked, ImageDataOnDisk.LazyImageArray)
-        mem_masked = mem_data.images[mask]
-        self.assertEqual(len(masked), len(mem_masked))
-        for i in range(len(masked)):
-            np.testing.assert_array_equal(masked[i], mem_masked[i])
+        
+        # Apply mask to images and check
+        masked_images = data.images[mask]
+        mem_masked_images = mem_data.images[mask]
+        self.assertIsInstance(masked_images, LazyImageArray)
+        self.assertEqual(len(masked_images), len(mem_masked_images))
+        for i in range(len(masked_images)):
+            np.testing.assert_array_equal(masked_images[i], mem_masked_images[i])
 
         # Test __setitem__ raises RuntimeError
         with self.assertRaises(RuntimeError):

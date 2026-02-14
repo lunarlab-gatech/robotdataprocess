@@ -10,6 +10,7 @@ from .data_types.LoopClosureData import LoopClosureData
 from .data_types.OdometryData import OdometryData
 from .data_types.PathData import PathData
 from .data_types.SequentialData import SequentialData
+from .data_types.TransformationData import TransformationData
 
 # ROS Classes & Functions
 from .ros.Ros2BagWrapper import Ros2BagWrapper
