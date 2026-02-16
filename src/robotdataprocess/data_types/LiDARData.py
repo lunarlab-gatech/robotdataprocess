@@ -346,7 +346,7 @@ class LiDARData(SequentialData):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
 
         # Create boolean mask of data to keep (for when we get point clouds later)
-        if self.data_mask is not None:
+        if self.data_mask is None:
             self.data_mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
         else:
             raise RuntimeError("LiDARData does not currently support calling crop_data multiple times!")
