@@ -342,11 +342,14 @@ class LiDARData(SequentialData):
         else:
             raise RuntimeError(f"LiDARData class is in an unexpected frame: {self.frame}!")
 
-    def crop_data(self, start: Decimal, end: Decimal):
+    def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
         """ Will crop the data so only values within [start, end] inclusive are kept. """
 
         # Create boolean mask of data to keep (for when we get point clouds later)
-        self.data_mask = (self.timestamps >= start) & (self.timestamps <= end)
+        if self.data_mask is not None:
+            self.data_mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
+        else:
+            raise RuntimeError("LiDARData does not currently support calling crop_data multiple times!")
 
         # Apply mask to Data attributes
         self.timestamps = self.timestamps[self.data_mask]
