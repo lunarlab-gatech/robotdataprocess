@@ -7,6 +7,7 @@ import numpy as np
 from typeguard import typechecked
 from typing import List, Tuple, Union
 from scipy.spatial.transform import Rotation as R
+import yaml
 
 @typechecked
 class TransformationData(Data):
@@ -23,6 +24,115 @@ class TransformationData(Data):
         self.translation = translation
         self.orientation = orientation
         self.frame = frame
+
+    # =========================================================================
+    # ============================ Class Methods ==============================
+    # =========================================================================
+
+    @classmethod
+    def from_HERCULES_settings_json(cls, json_path: str, robot_name: str, sensor_type: str, sensor_name: str) -> TransformationData:
+        """
+        Load a transformation from a HERCULES settings JSON.
+        """
+
+        # Open the json
+        with open(json_path, "r") as f:
+            settings = json.load(f)
+
+        # Extract robot config
+        vehicles = settings.get("Vehicles", {})
+        if robot_name not in vehicles:
+            raise KeyError(f"Robot '{robot_name}' not found in Vehicles")
+        robot = vehicles[robot_name]
+
+        # Extract sensor type block
+        if sensor_type.lower() == "camera":
+            block = robot.get("Cameras", {})
+        elif sensor_type.lower() == "sensor":
+            block = robot.get("Sensors", {})
+        else:
+            raise ValueError("sensor_type must be 'Camera' or 'Sensor'")
+
+        # Extract sensor config
+        if sensor_name not in block:
+            raise KeyError(
+                f"{sensor_type} '{sensor_name}' not found on robot '{robot_name}'"
+            )
+        data = block[sensor_name]
+
+        # Extract transformation
+        translation = np.array([data["X"], data["Y"], data["Z"]], dtype=float)
+        rotation = R.from_euler(seq="xyz", angles=[data["Roll"], data["Pitch"], data["Yaw"]], degrees=True,)
+        orientation = rotation.as_quat()
+        
+        # Create the class
+        return cls(
+            frame_id=robot_name,
+            child_frame_id=sensor_name,
+            translation=translation,
+            orientation=orientation,
+            frame=CoordinateFrame.NED,
+        )
+
+    @classmethod
+    def from_GrAco_yaml(cls, yaml_path: str, transform_name: str) -> TransformationData:
+        """
+        Load a transformation from a GrAco calibration YAML file.
+
+        Args:
+            yaml_path: Path to the GrAco YAML file.
+            transform_name: Name of the transform key (e.g. 'T_Imu_Lidar').
+        """
+    
+        with open(yaml_path, "r") as f:
+            data = yaml.safe_load(f)
+
+        if transform_name not in data:
+            raise KeyError(f"Transform '{transform_name}' not found in {yaml_path}")
+
+        transform = data[transform_name]
+        rows = transform["rows"]
+        cols = transform["cols"]
+        if rows != 4 or cols != 4:
+            raise ValueError(f"Expected 4x4 transformation matrix, got {rows}x{cols}")
+        flat_data = transform["data"]
+        matrix = np.array(flat_data, dtype=float).reshape(rows, cols)
+
+        # Extract frame_id and child_frame_id from transform name (e.g. T_Imu_Lidar -> Imu, Lidar)
+        parts = transform_name.split("_")
+        frame_id = parts[1]
+        child_frame_id = "_".join(parts[2:])
+
+        return cls.from_matrix(frame_id, child_frame_id, matrix, CoordinateFrame.ENU)
+
+    @classmethod
+    def from_matrix(cls, frame_id: str, child_frame_id: str, matrix: np.ndarray, frame: CoordinateFrame) -> TransformationData:
+        """
+        Creates a TransformationData object from a 4x4 transformation matrix.
+        """
+        if matrix.shape != (4, 4):
+            raise ValueError("Transformation matrix must be 4x4.")
+        
+        translation = matrix[0:3, 3]
+        rotation_matrix = matrix[0:3, 0:3]
+        orientation = R.from_matrix(rotation_matrix).as_quat()
+
+        return cls(frame_id, child_frame_id, translation, orientation, frame)
+    
+    @classmethod
+    def optical_wrt_camera(cls, frame: CoordinateFrame, frame_id: str = "camera", child_frame_id: str = "optical") -> TransformationData:
+        """ Get H_C_to_W in a specified frame """
+        if frame == CoordinateFrame.NED:
+            rot = np.array([[0, 0, 1],
+                            [1, 0, 0],
+                            [0, 1, 0]])
+        elif frame == CoordinateFrame.FLU:
+            rot = np.array([[ 0,  0, 1],
+                            [-1,  0, 0],
+                            [ 0, -1, 0]])
+
+        orientation = R.from_matrix(rot).as_quat()
+        return cls(frame_id, child_frame_id, np.zeros(3), orientation, frame)
 
     # =========================================================================
     # ========================== Transform Methods ============================
@@ -103,84 +213,6 @@ class TransformationData(Data):
         # Return the result
         new_rotation_matrix = new_matrix[0:3, 0:3]
         return TransformationData(self.frame_id, other.child_frame_id, new_matrix[0:3, 3], R.from_matrix(new_rotation_matrix).as_quat(), self.frame)
-
-    # =========================================================================
-    # ============================ Class Methods ==============================
-    # =========================================================================
-
-    @classmethod
-    def from_HERCULES_settings_json(cls, json_path: str, robot_name: str, sensor_type: str, sensor_name: str) -> TransformationData:
-        """
-        Load a single transformation from a HERCULES settings JSON.
-        """
-
-        # Open the json
-        with open(json_path, "r") as f:
-            settings = json.load(f)
-
-        # Extract robot config
-        vehicles = settings.get("Vehicles", {})
-        if robot_name not in vehicles:
-            raise KeyError(f"Robot '{robot_name}' not found in Vehicles")
-        robot = vehicles[robot_name]
-
-        # Extract sensor type block
-        if sensor_type.lower() == "camera":
-            block = robot.get("Cameras", {})
-        elif sensor_type.lower() == "sensor":
-            block = robot.get("Sensors", {})
-        else:
-            raise ValueError("sensor_type must be 'Camera' or 'Sensor'")
-
-        # Extract sensor config
-        if sensor_name not in block:
-            raise KeyError(
-                f"{sensor_type} '{sensor_name}' not found on robot '{robot_name}'"
-            )
-        data = block[sensor_name]
-
-        # Extract transformation
-        translation = np.array([data["X"], data["Y"], data["Z"]], dtype=float)
-        rotation = R.from_euler(seq="xyz", angles=[data["Roll"], data["Pitch"], data["Yaw"]], degrees=True,)
-        orientation = rotation.as_quat()
-        
-        # Create the class
-        return cls(
-            frame_id=robot_name,
-            child_frame_id=sensor_name,
-            translation=translation,
-            orientation=orientation,
-            frame=CoordinateFrame.NED,
-        )
-
-    @classmethod
-    def from_matrix(cls, frame_id: str, child_frame_id: str, matrix: np.ndarray, frame: CoordinateFrame) -> TransformationData:
-        """
-        Creates a TransformationData object from a 4x4 transformation matrix.
-        """
-        if matrix.shape != (4, 4):
-            raise ValueError("Transformation matrix must be 4x4.")
-        
-        translation = matrix[0:3, 3]
-        rotation_matrix = matrix[0:3, 0:3]
-        orientation = R.from_matrix(rotation_matrix).as_quat()
-
-        return cls(frame_id, child_frame_id, translation, orientation, frame)
-    
-    @classmethod
-    def optical_wrt_camera(cls, frame: CoordinateFrame, frame_id: str = "camera", child_frame_id: str = "optical") -> TransformationData:
-        """ Get H_C_to_W in a specified frame """
-        if frame == CoordinateFrame.NED:
-            rot = np.array([[0, 0, 1],
-                            [1, 0, 0],
-                            [0, 1, 0]])
-        elif frame == CoordinateFrame.FLU:
-            rot = np.array([[ 0,  0, 1],
-                            [-1,  0, 0],
-                            [ 0, -1, 0]])
-
-        orientation = R.from_matrix(rot).as_quat()
-        return cls(frame_id, child_frame_id, np.zeros(3), orientation, frame)
 
     # =========================================================================
     # =========================== Export Methods ==============================

@@ -412,5 +412,83 @@ class TestTransformationData(unittest.TestCase):
                 np.testing.assert_array_almost_equal(H_R_to_O_FLU.as_matrix(), gt_trans[dataset_name][robot_name], decimal=12)
 
 
+    def test_from_GrAco_yaml(self):
+        """ Test loading transformations from GrAco calibration YAML files. """
+        base_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData', 'test_from_GrAco_yaml').absolute()
+
+        # --- imu-lidar.yaml: single transform T_Imu_Lidar ---
+        tf = TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_Imu_Lidar')
+        self.assertEqual(tf.frame_id, "Imu")
+        self.assertEqual(tf.child_frame_id, "Lidar")
+        self.assertEqual(tf.frame, CoordinateFrame.ENU)
+        expected = np.array([[ 0.99991642,  0.01018984,  0.00795779, -0.01192777],
+                             [-0.01025064,  0.99991829,  0.0076374 , -0.01973063],
+                             [-0.00787932, -0.00771833,  0.99993917,  0.12260907],
+                             [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf.as_matrix(), expected)
+
+        # --- stereo-imu.yaml: two transforms, T_Imu_cam0 and T_Imu_cam1 ---
+        tf_cam0 = TransformationData.from_GrAco_yaml(str(base_path / 'stereo-imu.yaml'), 'T_Imu_cam0')
+        self.assertEqual(tf_cam0.frame_id, "Imu")
+        self.assertEqual(tf_cam0.child_frame_id, "cam0")
+        self.assertEqual(tf_cam0.frame, CoordinateFrame.ENU)
+        expected_cam0 = np.array([[ 0.99985436, -0.00116148, -0.0170267 , -0.11655291],
+                                  [ 0.01702167, -0.0042153 ,  0.99984624,  0.01614558],
+                                  [-0.00123307, -0.99999044, -0.00419492,  0.07950961],
+                                  [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_cam0.as_matrix(), expected_cam0)
+
+        tf_cam1 = TransformationData.from_GrAco_yaml(str(base_path / 'stereo-imu.yaml'), 'T_Imu_cam1')
+        self.assertEqual(tf_cam1.frame_id, "Imu")
+        self.assertEqual(tf_cam1.child_frame_id, "cam1")
+        expected_cam1 = np.array([[ 0.99979217, -0.02037659,  0.00063456,  0.11568842],
+                                  [-0.0007412 , -0.00522643,  0.99998607,  0.01651153],
+                                  [-0.02037299, -0.99977872, -0.00524045,  0.07766165],
+                                  [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_cam1.as_matrix(), expected_cam1)
+
+        # --- stereo-lidar.yaml: T_cam0_Lidar and T_cam1_Lidar ---
+        tf_c0_lidar = TransformationData.from_GrAco_yaml(str(base_path / 'stereo-lidar.yaml'), 'T_cam0_Lidar')
+        self.assertEqual(tf_c0_lidar.frame_id, "cam0")
+        self.assertEqual(tf_c0_lidar.child_frame_id, "Lidar")
+        expected_c0_lidar = np.array([[ 0.99976153,  0.02147506,  0.00396403,  0.11023908],
+                                      [ 0.00401332, -0.00225255, -0.99998941, -0.05627601],
+                                      [-0.0214659 ,  0.99976685, -0.0023382 , -0.04082231],
+                                      [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_c0_lidar.as_matrix(), expected_c0_lidar)
+
+        tf_c1_lidar = TransformationData.from_GrAco_yaml(str(base_path / 'stereo-lidar.yaml'), 'T_cam1_Lidar')
+        self.assertEqual(tf_c1_lidar.frame_id, "cam1")
+        self.assertEqual(tf_c1_lidar.child_frame_id, "Lidar")
+        expected_c1_lidar = np.array([[ 0.99978981,  0.00411645, -0.02008472, -0.12342287],
+                                      [-0.02006976, -0.00364381, -0.99979194, -0.05020034],
+                                      [-0.00418878,  0.99998489, -0.00356043, -0.04229076],
+                                      [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_c1_lidar.as_matrix(), expected_c1_lidar)
+
+        # --- stereo.yaml: T_cam1_cam0 and T_cam0_cam1 ---
+        tf_c1_c0 = TransformationData.from_GrAco_yaml(str(base_path / 'stereo.yaml'), 'T_cam1_cam0')
+        self.assertEqual(tf_c1_c0.frame_id, "cam1")
+        self.assertEqual(tf_c1_c0.child_frame_id, "cam0")
+        expected_c1_c0 = np.array([[ 0.99965907,  0.01921468, -0.01767879, -0.23223044],
+                                   [-0.01922979,  0.99981486, -0.00068469,  0.00288665],
+                                   [ 0.01766236,  0.00102441,  0.99984348, -0.000523  ],
+                                   [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_c1_c0.as_matrix(), expected_c1_c0)
+
+        tf_c0_c1 = TransformationData.from_GrAco_yaml(str(base_path / 'stereo.yaml'), 'T_cam0_cam1')
+        self.assertEqual(tf_c0_c1.frame_id, "cam0")
+        self.assertEqual(tf_c0_c1.child_frame_id, "cam1")
+        expected_c0_c1 = np.array([[ 0.99965907, -0.01922979,  0.01766236,  0.23221601],
+                                   [ 0.01921468,  0.99981486,  0.00102441,  0.00157665],
+                                   [-0.01767879, -0.00068469,  0.99984348, -0.00358066],
+                                   [ 0.        ,  0.        ,  0.        ,  1.        ]])
+        np.testing.assert_array_almost_equal(tf_c0_c1.as_matrix(), expected_c0_c1)
+
+        # --- Error: transform name not found ---
+        with self.assertRaises(KeyError):
+            TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_nonexistent')
+
+
 if __name__ == "__main__":
     unittest.main()
