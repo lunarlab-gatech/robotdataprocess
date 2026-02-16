@@ -130,6 +130,12 @@ class TransformationData(Data):
             rot = np.array([[ 0,  0, 1],
                             [-1,  0, 0],
                             [ 0, -1, 0]])
+        elif frame == CoordinateFrame.ENU:
+            rot = np.array([[1,  0, 0],
+                            [0,  0, 1],
+                            [0, -1, 0]])
+        else:
+            raise RuntimeError(f"optical_wrt_camera not yet implemented for CoordinateFrame {frame}.")
 
         orientation = R.from_matrix(rot).as_quat()
         return cls(frame_id, child_frame_id, np.zeros(3), orientation, frame)
