@@ -1,8 +1,0 @@
-input_bag: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_pruned
-external_msgs_path_ros2: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros2
-external_msgs_path_ros1: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros1
-operation_to_run: compare_timestamps_two_image_data
-operation_params:
-  compare_timestamps_two_image_data:
-    folder_0: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_prunedExtractV2/Husky2_RGB
-    folder_1: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_prunedExtractV2/Husky2_Depth

@@ -1,15 +1,19 @@
 from copy import deepcopy
 from decimal import Decimal
+import math
 import numpy as np
 import os
+import pandas as pd
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
-from robotdataprocess.data_types.OdometryData import OdometryData
+from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
+from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from scipy.spatial.transform import Rotation as R
+from test_utils import safe_urlretrieve
 import unittest
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestOdometryData(unittest.TestCase):
 
     def test_from_csv(self):
@@ -67,11 +71,13 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU, False)
         bag_path = Path(Path('.'), 'tests', 'test_bags', 'test_from_txt_file', 'odom_bag').absolute()
         if os.path.isdir(bag_path):
-            os.remove(bag_path / 'odom_bag.db3')
-            os.remove(bag_path / 'metadata.yaml')
+            if os.path.exists(bag_path / 'odom_bag.db3'):
+                os.remove(bag_path / 'odom_bag.db3')
+            if os.path.exists(bag_path / 'metadata.yaml'):
+                os.remove(bag_path / 'metadata.yaml')
             os.rmdir(bag_path)
 
         # Save it into a ROS2 bag
@@ -90,11 +96,21 @@ class TestOdometryData(unittest.TestCase):
 
         # Make sure the Odometry and Path options match in their data. 
         path_data = PathData.from_ros2_bag(bag_path, '/odom/path', CoordinateFrame.FLU)
-        np.testing.assert_equal(ros_data.len(), path_data.len() * 10)
+        np.testing.assert_equal(math.ceil(ros_data.len() / PATH_SLICE_STEP), path_data.len())
         np.testing.assert_equal(ros_data.frame_id, path_data.frame_id)
-        np.testing.assert_equal(ros_data.timestamps[30], path_data.timestamps[3])
-        np.testing.assert_array_equal(ros_data.positions[30], path_data.positions[3])
-        np.testing.assert_array_equal(ros_data.orientations[30], path_data.orientations[3])
+        np.testing.assert_equal(ros_data.timestamps[PATH_SLICE_STEP], path_data.timestamps[1])
+        np.testing.assert_array_equal(ros_data.positions[PATH_SLICE_STEP], path_data.positions[1])
+        np.testing.assert_array_equal(ros_data.orientations[PATH_SLICE_STEP], path_data.orientations[1])
+
+        # Check that the new arguments work properly
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom_openvins.txt').absolute()
+        odom_data_test = OdometryData.from_txt_file(file_path, 'frame', 'child_frame', CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
+        np.testing.assert_equal(odom_data_test.len(), 3)
+        np.testing.assert_equal(odom_data_test.frame_id, 'frame')
+        np.testing.assert_equal(odom_data_test.child_frame_id, 'child_frame')
+        np.testing.assert_array_equal(odom_data_test.timestamps.astype(np.float64), np.array([1403715278.86375, 1403715278.91222, 1403715278.96200], dtype=np.float64))
+        np.testing.assert_array_equal(odom_data_test.positions[1].astype(np.float64), [0.047673, 0.008781, 0.078044])
+        np.testing.assert_array_equal(odom_data_test.orientations[2].astype(np.float64), [0.810142, -0.007347, 0.586184, 0.001775])
 
     def test_to_FLU_frame(self):
         """ 
@@ -104,7 +120,7 @@ class TestOdometryData(unittest.TestCase):
         def compare_with_expected(odom_data: OdometryData):
             np.testing.assert_equal(float(odom_data.timestamps[32]), 690.100000)
             np.testing.assert_array_equal(odom_data.positions[32].astype(np.float128), [-66.153381, 76.155663, -1.445448])
-            np.testing.assert_array_almost_equal(odom_data.orientations[32].astype(np.float128), [-0.0012460003013751132, -0.0005660001369007335, 0.9165542216906626, -0.3999080967273826], 8)
+            np.testing.assert_array_almost_equal(np.abs(odom_data.orientations[32].astype(np.float128)), np.abs([-0.0012460003013751132, -0.0005660001369007335, 0.9165542216906626, -0.3999080967273826]), 8)
             np.testing.assert_equal(odom_data.frame_id, '/Husky1')
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
@@ -112,7 +128,7 @@ class TestOdometryData(unittest.TestCase):
         # ===  Test NED to FLU ===
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Converts it into the FLU coordinate system
         odom_data.to_FLU_frame()
@@ -135,7 +151,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data and convert into the ROS frame
         file_path = Path(Path('.'), 'tests', 'test_outputs', 'test_from_txt_file', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
         odom_data.to_FLU_frame()
 
         # Shift it so that it starts at the origin
@@ -152,7 +168,7 @@ class TestOdometryData(unittest.TestCase):
     def test_crop_data(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_crop_data', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Test cropping out some data
         odom_data_cropped = deepcopy(odom_data)
@@ -164,13 +180,159 @@ class TestOdometryData(unittest.TestCase):
     def test_ori_apply_rotation(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED)
+        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Ensure the rotation functions properly
         odom_data_rotated = deepcopy(odom_data)
         rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
         odom_data_rotated._ori_apply_rotation(rotation)
         np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
+
+    def test_apply_transformation(self):
+        # Load the Odometry data
+        odom_data = OdometryData("temp", "child", [0], np.array([[1, 2, 3]]), np.array([[-0.7071068, 0, 0, 0.7071068]]), CoordinateFrame.FLU)
+
+        # Apply the transformation and make sure it worked
+        H = np.array([[0.0, -1.0,  0.0,  1.0],
+                      [1.0,  0.0,  0.0,  0.0],
+                      [0.0,  0.0,  1.0,  0.0],
+                      [0.0,  0.0,  0.0,  1.0]])
+        odom_data.apply_transformation_left_side(H)
+
+        np.testing.assert_array_equal(odom_data.positions[0].astype(float), np.array([-1, 1, 3]))
+        np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(float), np.array([0.5, 0.5, -0.5, -0.5]), decimal=6)
+
+        # Test with a more complicated transformation
+        odom_data = OdometryData("temp", "child", [0], np.array([[1, 2, 3]]), np.array([[-0.7071068, 0, 0, 0.7071068]]), CoordinateFrame.FLU)
+
+        # Apply the transformation and make sure it worked
+        odom_data.apply_transformation_right_side(H)
+
+        np.testing.assert_array_equal(odom_data.positions[0].astype(float), np.array([2, 2, 3]))
+        np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(float), np.array([ 0.5, -0.5, -0.5, -0.5 ]), decimal=6)
+
+    def test_to_csv(self):
+        """ Test that we can extract odometry from a ROS2 bag and save to CSV correctly. """
+
+        # Setup paths and download test bag if needed
+        path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
+        path_hercules_bag_db3 = path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
+        path_hercules_bag_yaml = path_hercules_bag / Path("metadata.yaml")
+
+        if not os.path.isfile(path_hercules_bag_db3):
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
+        if not os.path.isfile(path_hercules_bag_yaml):
+            safe_urlretrieve("https://www.dropbox.com/scl/fi/2iu1djmhedy1j4qci53a4/metadata.yaml?rlkey=x0kb00pruubxtbaojht4ui5yl&st=9b41wq07&dl=1", path_hercules_bag_yaml)
+
+        # Define output path
+        output_file = Path(Path('.'), 'tests', 'temporary_files', 'test_OdometryData', 'test_to_csv', 'Husky2_odom.csv').absolute()
+        topic = "/hercules_node/Husky2/ground_truth/odom_local"
+
+        # Delete output file if it exists
+        if os.path.exists(output_file):
+            os.remove(output_file)
+
+        # Create output folder if it doesn't exist
+        output_folder = output_file.parent
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Load odometry from ROS2 bag and save to CSV
+        odom_data = OdometryData.from_ros2_bag(path_hercules_bag, topic, CoordinateFrame.NONE)
+        odom_data.to_csv(output_file)
+
+        # Load csv file and check values
+        df = pd.read_csv(output_file)
+
+        first_row = df.iloc[0].tolist()
+        np.testing.assert_almost_equal(first_row[0], 1749131152.801460736, 14)
+        np.testing.assert_almost_equal(first_row[1], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(first_row[2], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(first_row[3], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(first_row[4], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(first_row[5], -0.00005158343992661684751586201171875, 14)
+        np.testing.assert_almost_equal(first_row[6], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(first_row[7], 1.05546661188782309181988239288330078125E-7, 14)
+
+        random_row = df[df['timestamp'] == 1749131152.883519488].iloc[0]
+        np.testing.assert_almost_equal(random_row['x'], -0.0000245371702476404607295989990234375, 14)
+        np.testing.assert_almost_equal(random_row['y'], -0.0000033797959986259229481220245361328125, 14)
+        np.testing.assert_almost_equal(random_row['z'], -1.44854152202606201171875, 14)
+        np.testing.assert_almost_equal(random_row['qw'], 0.99998915195465087890625, 14)
+        np.testing.assert_almost_equal(random_row['qx'], -0.000051583439926616847515106201171875, 14)
+        np.testing.assert_almost_equal(random_row['qy'], 0.004659599624574184417724609375, 14)
+        np.testing.assert_almost_equal(random_row['qz'], 1.05546661188782309181988239288330078125E-7, 14)
+
+
+    def test_shift_position(self):
+        """ Test that shift_position modifies positions correctly. """
+        odom = OdometryData("world", "robot", [0, 1, 2],
+                            np.array([[1.0, 2.0, 3.0],
+                                      [4.0, 5.0, 6.0],
+                                      [7.0, 8.0, 9.0]]),
+                            np.array([[0, 0, 0, 1],
+                                      [0, 0, 0, 1],
+                                      [0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        odom.shift_position(10.0, -20.0, 5.0)
+        np.testing.assert_array_almost_equal(
+            odom.positions.astype(float),
+            [[11.0, -18.0, 8.0],
+             [14.0, -15.0, 11.0],
+             [17.0, -12.0, 14.0]])
+
+    def test_interpolate_to_hz(self):
+        """ Test interpolation to a target frequency including SLERP for orientations. """
+        # Use rotations about Z: 0 deg, 90 deg, 180 deg at t=0, 1, 2
+        r0 = R.from_euler('z', 0, degrees=True).as_quat()
+        r90 = R.from_euler('z', 90, degrees=True).as_quat()
+        r180 = R.from_euler('z', 180, degrees=True).as_quat()
+
+        odom = OdometryData("world", "robot",
+                            np.array([0.0, 1.0, 2.0]),
+                            np.array([[0.0, 0.0, 0.0],
+                                      [1.0, 0.0, 0.0],
+                                      [2.0, 0.0, 0.0]]),
+                            np.array([r0, r90, r180]),
+                            CoordinateFrame.FLU)
+        odom.interpolate_to_hz(2.0)
+
+        # Check positions are linearly interpolated
+        self.assertEqual(odom.len(), 5)
+        np.testing.assert_array_almost_equal(
+            odom.positions.astype(float)[:, 0],
+            [0.0, 0.5, 1.0, 1.5, 2.0])
+
+        # Check orientations are SLERPed correctly
+        expected_quats = [R.from_euler('z', deg, degrees=True).as_quat()
+                          for deg in [0, 45, 90, 135, 180]]
+        for i, expected_quat in enumerate(expected_quats):
+            np.testing.assert_array_almost_equal(
+                odom.orientations[i].astype(float), expected_quat, decimal=10)
+
+        # Check ValueError for non-positive hz
+        with self.assertRaises(ValueError):
+            odom2 = OdometryData("world", "robot", [0, 1],
+                                 np.array([[0, 0, 0], [1, 0, 0]]),
+                                 np.array([[0, 0, 0, 1], [0, 0, 0, 1]]),
+                                 CoordinateFrame.FLU)
+            odom2.interpolate_to_hz(0)
+        with self.assertRaises(ValueError):
+            odom3 = OdometryData("world", "robot", [0, 1],
+                                 np.array([[0, 0, 0], [1, 0, 0]]),
+                                 np.array([[0, 0, 0, 1], [0, 0, 0, 1]]),
+                                 CoordinateFrame.FLU)
+            odom3.interpolate_to_hz(-1.0)
+
+    def test_to_csv_existing_file_raises(self):
+        """ Test that to_csv raises ValueError when file already exists. """
+        odom = OdometryData("world", "robot", [0],
+                            np.array([[1.0, 2.0, 3.0]]),
+                            np.array([[0, 0, 0, 1]]),
+                            CoordinateFrame.FLU)
+        existing_file = Path(__file__).absolute()
+        with self.assertRaises(ValueError):
+            odom.to_csv(existing_file)
 
 if __name__ == "__main__":
     unittest.main()

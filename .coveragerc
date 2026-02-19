@@ -1,0 +1,15 @@
+[run]
+branch = False
+source = robotdataprocess
+concurrency = multiprocessing
+disable_warnings =
+    module-not-measured
+    no-data-collected
+
+[paths]
+source =
+    src/robotdataprocess
+    */site-packages/robotdataprocess
+    */robotdataprocess/src/robotdataprocess
+    */src/robotdataprocess
+    /usr/local/lib/python3.10/dist-packages/robotdataprocess

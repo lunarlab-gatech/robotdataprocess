@@ -1,20 +1,19 @@
 from decimal import Decimal
 import numpy as np
-from numpy.typing import NDArray
 from typeguard import typechecked
 from typing import Union
 
 @typechecked
-def col_to_dec_arr(collection: Union[NDArray, list]) -> NDArray[Decimal]:
+def col_to_dec_arr(collection: Union[np.ndarray, list]) -> np.ndarray:
     """
     This helper method maps collections (such as arrays or lists) into 
-    an np.ndarray of Decimal objects for easy operations and high-fidelity
+    an np.np.ndarray of Decimal objects for easy operations and high-fidelity
     numbers.
 
     Args:
-        collection (np.ndarray | list): A sequential collection of numbers.
+        collection (np.np.ndarray | list): A sequential collection of numbers.
     Returns:
-        np.ndarray[Decimal]: A numpy array with Decimal objects.
+        np.np.ndarray[Decimal]: A numpy array with Decimal objects.
     """
     def safe_decimal(x):
         return Decimal(str(x))
@@ -26,6 +25,6 @@ def col_to_dec_arr(collection: Union[NDArray, list]) -> NDArray[Decimal]:
     else:
         return np.vectorize(safe_decimal)(collection)
     
-def dec_arr_to_float_arr(decimal_array: NDArray[Decimal]) -> NDArray[float]:
+def dec_arr_to_float_arr(decimal_array: np.ndarray) -> np.ndarray:
     """ Converts decimal arrays into float arrays for use with external libraries. """
-    return np.vectorize(float)(decimal_array)
+    return np.array(decimal_array.tolist(), dtype=np.float64)

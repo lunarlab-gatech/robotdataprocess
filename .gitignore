@@ -4,6 +4,7 @@ outputs/
 
 # Ignore coverage files
 .coverage
+.coverage.*
 htmlcov/
 
 # Ignore profile output
@@ -11,3 +12,9 @@ profile.out
 
 #ignore pyenv
 venv/
+
+# Ignore Python cache files
+*/__pycache__/
+__pycache__/
+
+.vscode/

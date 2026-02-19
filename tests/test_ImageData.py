@@ -1,242 +1,296 @@
-from copy import deepcopy
-import cv2
-from decimal import Decimal
 import numpy as np
 import os
-from pathlib import Path
-from robotdataprocess.data_types.ImageData import ImageData
-from robotdataprocess.rosbag.Ros2BagWrapper import Ros2BagWrapper
-import shutil
-from test_utils import safe_urlretrieve
 import unittest
+from robotdataprocess.data_types.ImageData.ImageData import ImageData
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
+from robotdataprocess.data_types.Data import ROSMsgLibType
+from pathlib import Path
+import shutil
 
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestImageDataEncoding(unittest.TestCase):
+    """
+    Test the ImageEncoding enum methods in the ImageData base class.
+    """
+
+    # ==================== from_str tests ====================
+
+    def test_from_str_mono8(self):
+        """ Test from_str with Mono8 encoding. """
+        encoding = ImageData.ImageEncoding.from_str("ImageEncoding.Mono8")
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+
+    def test_from_str_rgb8(self):
+        """ Test from_str with RGB8 encoding. """
+        encoding = ImageData.ImageEncoding.from_str("ImageEncoding.RGB8")
+        self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
+
+    def test_from_str_32fc1(self):
+        """ Test from_str with 32FC1 encoding. """
+        encoding = ImageData.ImageEncoding.from_str("ImageEncoding._32FC1")
+        self.assertEqual(encoding, ImageData.ImageEncoding._32FC1)
+
+    def test_from_str_invalid(self):
+        """ Test from_str raises NotImplementedError for invalid encoding. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.from_str("InvalidEncoding")
+
+    # ==================== from_ros_str tests ====================
+
+    def test_from_ros_str_mono8(self):
+        """ Test from_ros_str with mono8 encoding. """
+        encoding = ImageData.ImageEncoding.from_ros_str("mono8")
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+
+    def test_from_ros_str_mono8_uppercase(self):
+        """ Test from_ros_str with MONO8 (uppercase) encoding. """
+        encoding = ImageData.ImageEncoding.from_ros_str("MONO8")
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+
+    def test_from_ros_str_rgb8(self):
+        """ Test from_ros_str with rgb8 encoding. """
+        encoding = ImageData.ImageEncoding.from_ros_str("rgb8")
+        self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
+
+    def test_from_ros_str_32fc1(self):
+        """ Test from_ros_str with 32fc1 encoding. """
+        encoding = ImageData.ImageEncoding.from_ros_str("32fc1")
+        self.assertEqual(encoding, ImageData.ImageEncoding._32FC1)
+
+    # Note: from_ros_str invalid case is already tested in test_ImageDataInMemory.py
+
+    # ==================== from_dtype_and_channels tests ====================
+
+    def test_from_dtype_and_channels_mono8(self):
+        """ Test from_dtype_and_channels with uint8 and 1 channel (Mono8). """
+        encoding = ImageData.ImageEncoding.from_dtype_and_channels(np.uint8, 1)
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+
+    def test_from_dtype_and_channels_rgb8(self):
+        """ Test from_dtype_and_channels raises NotImplementedError for ambiguous RGB8/BGR8 (uint8, 3 channels). """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.from_dtype_and_channels(np.uint8, 3)
+
+    def test_from_dtype_and_channels_32fc1(self):
+        """ Test from_dtype_and_channels with float32 and 1 channel (32FC1). """
+        encoding = ImageData.ImageEncoding.from_dtype_and_channels(np.float32, 1)
+        self.assertEqual(encoding, ImageData.ImageEncoding._32FC1)
+
+    def test_from_dtype_and_channels_invalid(self):
+        """ Test from_dtype_and_channels raises NotImplementedError for invalid combination. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.from_dtype_and_channels(np.float64, 4)
+
+    # ==================== from_pillow_str tests ====================
+
+    def test_from_pillow_str_rgb(self):
+        """ Test from_pillow_str with RGB encoding. """
+        encoding = ImageData.ImageEncoding.from_pillow_str("RGB")
+        self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
+
+    def test_from_pillow_str_mono(self):
+        """ Test from_pillow_str with L (grayscale) encoding. """
+        encoding = ImageData.ImageEncoding.from_pillow_str("L")
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+
+    def test_from_pillow_str_invalid(self):
+        """ Test from_pillow_str raises NotImplementedError for invalid encoding. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.from_pillow_str("RGBA")
+
+    # ==================== to_ros_str tests ====================
+
+    def test_to_ros_str_mono8(self):
+        """ Test to_ros_str with Mono8 encoding. """
+        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.Mono8)
+        self.assertEqual(ros_str, 'mono8')
+
+    def test_to_ros_str_rgb8(self):
+        """ Test to_ros_str with RGB8 encoding. """
+        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.RGB8)
+        self.assertEqual(ros_str, 'rgb8')
+
+    def test_to_ros_str_32fc1(self):
+        """ Test to_ros_str with 32FC1 encoding. """
+        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding._32FC1)
+        self.assertEqual(ros_str, '32FC1')
+
+    def test_to_ros_str_invalid(self):
+        """ Test to_ros_str raises NotImplementedError for invalid encoding. """
+        with self.assertRaises(NotImplementedError):
+            # Pass a non-ImageEncoding value
+            ImageData.ImageEncoding.to_ros_str("invalid")
+
+    # ==================== to_dtype_and_channels tests ====================
+
+    def test_to_dtype_and_channels_mono8(self):
+        """ Test to_dtype_and_channels with Mono8 encoding. """
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(ImageData.ImageEncoding.Mono8)
+        self.assertEqual(dtype, np.uint8)
+        self.assertEqual(channels, 1)
+
+    def test_to_dtype_and_channels_rgb8(self):
+        """ Test to_dtype_and_channels with RGB8 encoding. """
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(ImageData.ImageEncoding.RGB8)
+        self.assertEqual(dtype, np.uint8)
+        self.assertEqual(channels, 3)
+
+    def test_to_dtype_and_channels_32fc1(self):
+        """ Test to_dtype_and_channels with 32FC1 encoding. """
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(ImageData.ImageEncoding._32FC1)
+        self.assertEqual(dtype, np.float32)
+        self.assertEqual(channels, 1)
+
+    def test_to_dtype_and_channels_invalid(self):
+        """ Test to_dtype_and_channels raises NotImplementedError for invalid encoding. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.to_dtype_and_channels("invalid")
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImageData(unittest.TestCase):
-    
-    def setUp(self):
-        """ 
-        Setup paths and download files that will be used 
-        for all tests.
-        """
+    """
+    Test the ImageData base class methods.
+    """
 
-        # Get paths to test bags & external messages
-        self.path_hercules_bag = Path(Path('.'), 'tests', 'test_bags', 'hercules_test_bag_pruned_3_FINAL').absolute()
-        self.path_external_msgs_ros2 = Path(Path('.').parent, 'external_msgs_ros2').absolute()
-        self.path_external_msgs_ros1 = Path(Path('.').parent, 'external_msgs_ros1').absolute()
+    def test_get_ros_msg_type_invalid(self):
+        """ Test get_ros_msg_type raises NotImplementedError for invalid lib_type. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.get_ros_msg_type(ROSMsgLibType.NONE)
 
-        # Get paths to files within the input bag
-        path_hercules_bag_db3 = self.path_hercules_bag / Path("hercules_test_bag_pruned_3_FINAL.db3")
-        path_hercules_bag_yaml = self.path_hercules_bag / Path("metadata.yaml")
+    def test_get_ros_msg_out_of_bounds(self):
+        """ Test get_ros_msg raises ValueError for out-of-bounds index. """
+        # Create a minimal ImageData instance
+        timestamps = np.array([0.1, 0.2, 0.3])
+        images = np.zeros((3, 10, 10, 3), dtype=np.uint8)
+        image_data = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
 
-        # Download the test bag (as its too big for GitHub)
-        if not os.path.isfile(path_hercules_bag_db3):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/0ydrblh1uai1lhbrrk6c6/hercules_test_bag_pruned_3_FINAL.db3?rlkey=n27tgr0vuxcyrsyafavlh0aw9&st=i5qixbjo&dl=1", path_hercules_bag_db3)
-        if not os.path.isfile(path_hercules_bag_yaml):
-            safe_urlretrieve("https://www.dropbox.com/scl/fi/vsi1tpihpar87459upyiw/metadata.yaml?rlkey=ozi4h0i4wp0kr7ckvaybz70uq&st=vxs10bqt&dl=1", path_hercules_bag_yaml)
+        # Test negative index
+        with self.assertRaises(ValueError):
+            image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, -1)
 
-    def test_from_ros_str(self):
-        """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
-        with np.testing.assert_raises(NotImplementedError):
-            ImageData.ImageEncoding.from_ros_str("fake_name")
+        # Test index >= len
+        with self.assertRaises(ValueError):
+            image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 3)
 
-    def test_from_npy(self):
-        """
-        Test that create of ImgData from an .npy file results 
-        in the same class as loading from the rosbag.
-        """
+        with self.assertRaises(ValueError):
+            image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 100)
 
-        # Convert the data into .npy (byproduct of loading ImageData from rosbag)
-        save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy').absolute()
-        rosData = ImageData.from_ros2_bag(self.path_hercules_bag, '/hercules_node/Husky2/front_center_Scene/image', save_folder)
+    def test_get_ros_msg_unsupported_encoding_mono8(self):
+        """ Test get_ros_msg raises NotImplementedError for Mono8 encoding (not yet supported). """
+        timestamps = np.array([0.1])
+        images = np.zeros((1, 10, 10), dtype=np.uint8)
+        image_data = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.Mono8, images)
 
-        # Load the .npy file
-        npyData = ImageData.from_npy(save_folder)
+        with self.assertRaises(NotImplementedError):
+            image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
 
-        # Make sure the two classes are equivalent
-        np.testing.assert_equal(rosData.frame_id, npyData.frame_id)
-        np.testing.assert_array_equal(rosData.timestamps, npyData.timestamps)
-        np.testing.assert_equal(rosData.height, npyData.height)
-        np.testing.assert_equal(rosData.width, npyData.width)
-        np.testing.assert_equal(rosData.encoding, npyData.encoding)
-        np.testing.assert_array_equal(rosData.images, npyData.images)
-    
-        # Make sure that there is actually data in the test bag that we are preserving
-        if rosData.height == 0 or rosData.width == 0 or len(rosData.images) == 0 \
-            or len(rosData.timestamps) == 0 or rosData.frame_id == "":
-            self.fail("Test data is not representative of real-time operation!")
+    def test_to_image_files_roundtrip_in_memory(self):
+        """ Test saving Mono8 images to files and loading back (in-memory). """
+        path = Path('.') / 'tests' / 'files' / 'test_ImageData' / 'test_from_image_files' / 'mono8'
+        image_data = ImageDataInMemory.from_image_files(path.absolute(), 'callie')
 
-    def test_from_npy_files(self):
-        """ Test that we load the data properly from images in individual .npy files. """
+        # Save to image files
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_image_files_in_memory'
+        output = output.absolute()
+        if output.exists():
+            shutil.rmtree(output)
+        image_data.to_image_files(output)
 
-        # === Test with 32FC1 Images ===
-        # Load the npy files
-        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
+        # Load back and compare
+        image_data_loaded = ImageDataInMemory.from_image_files(output, 'callie')
+        self.assertEqual(image_data.frame_id, image_data_loaded.frame_id)
+        self.assertEqual(image_data.height, image_data_loaded.height)
+        self.assertEqual(image_data.width, image_data_loaded.width)
+        self.assertEqual(image_data.encoding, image_data_loaded.encoding)
+        np.testing.assert_array_equal(image_data.timestamps, image_data_loaded.timestamps)
+        np.testing.assert_array_equal(image_data.images, image_data_loaded.images)
 
-        # Make sure it matches what is loaded directly using NumPy
-        np.testing.assert_array_equal(image_data.images[2], np.load(files_folder / '0.150000.npy', 'r'))
-        np.testing.assert_array_equal(image_data.timestamps.astype(np.float128), [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5])
+    def test_to_image_files_roundtrip_on_disk(self):
+        """ Test saving Mono8 images to files and loading back (on-disk). """
+        path = Path('.') / 'tests' / 'files' / 'test_ImageData' / 'test_from_image_files' / 'mono8'
+        image_data = ImageDataOnDisk.from_image_files(path.absolute(), 'callie')
 
-        # Make sure it matches data from using external viewer: https://perchance.org/npy-file-viewer
-        np.testing.assert_equal(image_data.images[2][1][1], 1.0576000e+04)
-        np.testing.assert_equal(image_data.frame_id, 'Husky1/front_center_DepthPlanar')
-        np.testing.assert_equal(image_data.height, 480)
-        np.testing.assert_equal(image_data.width, 752)
-        np.testing.assert_equal(image_data.encoding, ImageData.ImageEncoding._32FC1)
+        # Save to image files
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_image_files_on_disk'
+        output = output.absolute()
+        if output.exists():
+            shutil.rmtree(output)
+        image_data.to_image_files(output)
 
-    def test_from_image_files(self):
-        """
-        Test that load the data from image files and saving in the 
-        rosbag results in the same data as just loading the image directly.
-        """
+        # Load back and compare
+        image_data_loaded = ImageDataOnDisk.from_image_files(output, 'callie')
 
-        # === Test with RGB8 Images ===
-        # Load the image data with the class and save to a ROS2 bag
-        files_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'Husky1/front_center_Scene')
-        bag_path = Path(Path('.'), 'tests', 'test_bags', 'test_from_image_files', 'rgb_data_bag').absolute()
-        if os.path.isdir(bag_path):
-            os.remove(bag_path / 'rgb_data_bag.db3')
-            os.remove(bag_path / 'metadata.yaml')
-            os.rmdir(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [image_data], ['/cam0'], [None], None)
+        self.assertEqual(image_data.frame_id, image_data_loaded.frame_id)
+        self.assertEqual(image_data.height, image_data_loaded.height)
+        self.assertEqual(image_data.width, image_data_loaded.width)
+        self.assertEqual(image_data.encoding, image_data_loaded.encoding)
+        np.testing.assert_array_equal(image_data.timestamps, image_data_loaded.timestamps)
 
-        # Load that data directly from the rosbag
-        npy_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb', 'npy').absolute()
-        image_data_after = ImageData.from_ros2_bag(bag_path, '/cam0', npy_folder)
+        # Check that the images are the same by loading them
+        for i in range(len(image_data.images)):
+            np.testing.assert_array_equal(image_data.images[i], image_data_loaded.images[i])
 
-        # Make sure that the data is what we expect
-        np.testing.assert_array_almost_equal(np.arange(0.05, 10.05, 0.05), image_data_after.timestamps.astype(np.float128), 14)
-        np.testing.assert_equal('Husky1/front_center_Scene', image_data_after.frame_id)
-        np.testing.assert_equal(480, image_data_after.height)
-        np.testing.assert_equal(752, image_data_after.width)
-        np.testing.assert_equal(ImageData.ImageEncoding.RGB8, image_data_after.encoding)
-
-        # Manually load a couple images to compare image data
-        def manual_cv2_load(path, cvt=True):
-            image_bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-            if cvt: return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-            else: return image_bgr
-
-        images = np.zeros((3, 480, 752, 3), dtype=np.uint8)
-        images[0] = manual_cv2_load(files_folder / "0.050000.png")
-        images[1] = manual_cv2_load(files_folder / "0.350000.png")
-        images[2] = manual_cv2_load(files_folder / "9.750000.png")
-
-        # Make sure image data and timestamps match what we loaded manually via OpenCV
-        np.testing.assert_array_equal(images[0], image_data_after.images[0])
-        np.testing.assert_array_equal(images[1], image_data_after.images[6])
-        np.testing.assert_array_equal(images[2], image_data_after.images[194])
-
-        # === Test with Mono8 Images ===
-        path = Path('.')/'tests'/'files'/'test_ImageData'/'test_from_image_files'/'mono8'
-        image_data = ImageData.from_image_files(path.absolute(), 'callie')
-
-        images = np.zeros((1, 652, 1196), dtype=np.uint8)
-        images[0] = manual_cv2_load(path / "0.0.png", False)
-
-        np.testing.assert_array_equal(images, image_data.images)
-        np.testing.assert_array_equal([0.0], image_data.timestamps.astype(np.float128))
-        np.testing.assert_equal('callie', image_data.frame_id)
-        np.testing.assert_equal(652, image_data.height)
-        np.testing.assert_equal(1196, image_data.width)
-        np.testing.assert_equal(ImageData.ImageEncoding.Mono8, image_data.encoding)
-
-        # === Unsupported Formats ===
-        # Test that it properly detects an unsupported format
-        path = Path('.')/'tests'/'files'/'test_ImageData'/'test_from_image_files'/'rgba'
-        with np.testing.assert_raises(NotImplementedError):
-            _ = ImageData.from_image_files(path.absolute(), 'N/A')
-
-    def test_to_npy(self):
-        """ Make sure the data isn't changed after saving to an .npy file. """
-
-        # === Test with RGB8 Images ===
-        # Load the images
-        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_to_npy', 'images').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'Husky1/front_center_Scene')
-
-        # Save it to an .npy file
-        save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy').absolute()
-        save_path.mkdir(parents=True, exist_ok=True)
-        image_data.to_npy(save_path)
-
-        # Load it back from the .npy file
-        npy_data = ImageData.from_npy(save_path)
-
-        # Ensure the data hasn't changed
-        np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
-        np.testing.assert_array_almost_equal(image_data.timestamps, npy_data.timestamps, 16)
-        np.testing.assert_equal(image_data.frame_id, npy_data.frame_id)
-        np.testing.assert_equal(image_data.height, npy_data.height)
-        np.testing.assert_equal(image_data.width, npy_data.width)
-        np.testing.assert_equal(image_data.encoding, npy_data.encoding)
-
-        # === Test with 32FC1 Images ===
-        # Load the npy files
-        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'Husky1/front_center_DepthPlanar')
-
-        # Save to .npy file and reload
-        save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy_depth').absolute()
-        save_path.mkdir(parents=True, exist_ok=True)
-        image_data.to_npy(save_path)
-        npy_data = ImageData.from_npy(save_path)
-
-        # Ensure the data hasn't changed
-        np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
-        np.testing.assert_array_almost_equal(image_data.timestamps, npy_data.timestamps, 16)
-        np.testing.assert_equal(image_data.frame_id, npy_data.frame_id)
-        np.testing.assert_equal(image_data.height, npy_data.height)
-        np.testing.assert_equal(image_data.width, npy_data.width)
-        np.testing.assert_equal(image_data.encoding, npy_data.encoding)
+    def test_to_image_files_rgb(self):
+        """ Test saving RGB8 images to files for both in-memory and on-disk. """
+        # Create a dummy RGB image
+        path = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'rgb_source'
+        if path.exists():
+            shutil.rmtree(path)
+        path.mkdir(parents=True, exist_ok=True)
         
-    def test_crop_data(self):
-        """ Ensure the correct data is cropped. """
+        timestamps = np.array([0.1, 0.2])
+        images = np.random.randint(0, 255, size=(2, 10, 10, 3), dtype=np.uint8)
 
-        # Load the images
-        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_crop_data', 'images').absolute()
-        image_data = ImageData.from_image_files(files_folder, 'camera')
-
-        # Ensure cropping works correctly
-        image_data_cropped = deepcopy(image_data)
-        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.15'))
-        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:])
-        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:])
-
-        image_data_cropped = deepcopy(image_data)
-        image_data_cropped.crop_data(Decimal('0.075'), Decimal('0.125'))
-        np.testing.assert_array_equal(image_data_cropped.timestamps, image_data.timestamps[1:2])
-        np.testing.assert_array_equal(image_data_cropped.images, image_data.images[1:2])
-
-    def test_get_ros_msg(self):
-        """ Test that the ROS message is created properly for images with 32FC1 encoding. 
-            TODO: Add test for RGB8 encoding as well. """
+        # Create in-memory data
+        image_data_mem = ImageDataInMemory("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
         
-        # Load the images
-        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_get_ros_msg', 'images').absolute()
-        image_data = ImageData.from_npy_files(files_folder, 'cam0')
+        # Save to files
+        output_mem = path / "in_memory"
+        image_data_mem.to_image_files(output_mem)
 
-        # Write the image data to a ROS message
-        bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
-        if bag_path.exists():
-            shutil.rmtree(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(
-            bag_path,
-            [image_data], 
-            ['/cam0/depth'], 
-            [None], 
-            None)
+        # Load back and check
+        loaded_mem = ImageDataInMemory.from_image_files(output_mem, "test_frame")
+        self.assertEqual(image_data_mem.frame_id, loaded_mem.frame_id)
+        self.assertEqual(image_data_mem.height, loaded_mem.height)
+        self.assertEqual(image_data_mem.width, loaded_mem.width)
+        self.assertEqual(image_data_mem.encoding, loaded_mem.encoding)
+        np.testing.assert_array_almost_equal(image_data_mem.timestamps, loaded_mem.timestamps)
+        np.testing.assert_array_equal(images, loaded_mem.images)
 
-        # Load that data back from the rosbag
-        image_data_after = ImageData.from_ros2_bag(bag_path, '/cam0/depth', bag_path.parent / 'npy')
+        # Create on-disk data from the same initial files
+        for i, ts in enumerate(timestamps):
+            from PIL import Image
+            img = Image.fromarray(images[i], 'RGB')
+            img.save(path / f"{ts:.9f}.png")
 
-        # Ensure that the data is the same
-        np.testing.assert_array_equal(image_data.images, image_data_after.images)
-        np.testing.assert_array_almost_equal(image_data.timestamps, image_data_after.timestamps, 16)
-        np.testing.assert_equal(image_data.frame_id, image_data_after.frame_id)
-        np.testing.assert_equal(image_data.height, image_data_after.height)
-        np.testing.assert_equal(image_data.width, image_data_after.width)
-        np.testing.assert_equal(image_data.encoding, image_data_after.encoding)
+        image_data_disk = ImageDataOnDisk.from_image_files(path, "test_frame")
+        
+        # Save to files
+        output_disk = path / "on_disk"
+        image_data_disk.to_image_files(output_disk)
+
+        # Load back and check
+        loaded_disk = ImageDataOnDisk.from_image_files(output_disk, "test_frame")
+        self.assertEqual(image_data_disk.frame_id, loaded_disk.frame_id)
+        self.assertEqual(image_data_disk.height, loaded_disk.height)
+        self.assertEqual(image_data_disk.width, loaded_disk.width)
+        self.assertEqual(image_data_disk.encoding, loaded_disk.encoding)
+        np.testing.assert_array_almost_equal(image_data_disk.timestamps, loaded_disk.timestamps)
+        for i in range(len(images)):
+            np.testing.assert_array_equal(images[i], loaded_disk.images[i])
+
+    def test_to_npy_unsupported_encoding(self):
+        """ Test that to_npy raises NotImplementedError for Mono8 encoding. """
+        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_npy_unsupported'
+        output = output.absolute()
+        with self.assertRaises(NotImplementedError):
+            data.to_npy(output)
+
 
 if __name__ == "__main__":
     unittest.main()

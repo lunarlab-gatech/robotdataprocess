@@ -1,8 +1,0 @@
-input_bag: /media/dbutterfield3/T72/Hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV
-external_msgs_path_ros2: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros2
-external_msgs_path_ros1: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros1
-operation_to_run: extract_images_to_npy
-operation_params:
-  extract_images_to_npy:
-    topic: /hercules_node/Husky2/front_center_Scene/image
-    output_folder: /media/dbutterfield3/T72/Hercules_datasets/V1.2/extract/Husky2_RGB

@@ -2,15 +2,21 @@ name: Unit Tests
 
 on:
   workflow_dispatch: 
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: "Build & Test Python"
+  python3_8-tests:
+    name: "Build & Test Python3.8"
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
+    env:
+      SKIP_ROS2_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
 
     steps:
     - uses: actions/checkout@v3
@@ -27,11 +33,156 @@ jobs:
         python -m pip install -e .
     - name: Import external message types
       uses: snickerbockers/submodules-init@v4
-    - name: Test with unittest & evaluate test coverage
+    - name: Test with unittest
       run: |
         coverage run --source robotdataprocess -m unittest discover tests/ -v
-    - name: Coveralls GitHub Action (Upload Coverage Report)
-      uses: coverallsapp/github-action@v2.3.6
+    - name: Save coverage data
+      uses: actions/upload-artifact@v4
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        name: coverage-${{ github.job }}
+        path: .coverage.*
+        include-hidden-files: true
+    
+  python3_10-tests:
+    name: "Build & Test Python3.10"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SKIP_ROS2_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python3 -m pip install -e . "numpy<1.25"
+        pip install --upgrade pydantic typeguard
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest
+      run: |
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+    - name: Save coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ github.job }}
+        path: .coverage.*
+        include-hidden-files: true
+
+  ros2-tests:
+    name: "Build & Test ROS2 Python Code"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: dlittleman/robotdataprocess_ros2_humble:0.2
+      options: --user root  # optional, helps avoid permission issues
+    env:
+      SKIP_PURE_PYTHON_TESTS: "True"
+      SKIP_ROS1_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python3 -m pip install -e . "numpy<1.25"
+        pip install --upgrade pydantic typeguard
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest & evaluate test coverage
+      shell: bash
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        source /opt/ros/humble/setup.bash
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+    - name: Save coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ github.job }}
+        path: .coverage.*
+        include-hidden-files: true
       
+  ros1-tests:
+    name: "Build & Test ROS1 Python Code"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: dlittleman/robotdataprocess_ros1_noetic:01
+      options: --user root
+    env:
+      SKIP_PURE_PYTHON_TESTS: "True"
+      SKIP_ROS2_TESTS: "True"
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Install the package
+      run: |
+        python3 -m pip install -e .
+    - name: Import external message types
+      uses: snickerbockers/submodules-init@v4
+    - name: Test with unittest & evaluate test coverage
+      shell: bash
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        source /opt/ros/noetic/setup.bash
+        coverage run --source robotdataprocess -m unittest discover tests/ -v
+    - name: Save coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ github.job }}
+        path: .coverage.*
+        include-hidden-files: true
+
+  coverage:
+    name: "Merge & Upload Coverage Reports"
+    needs: [python3_8-tests, python3_10-tests, ros2-tests, ros1-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v3
+        with:
+          python-version: "3.10"
+      - uses: actions/download-artifact@v4
+        with:
+          path: coverage-files
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install the package
+        run: |
+          python3 -m pip install -e .
+      - name: Merge coverage
+        run: | # coverage-files/coverage-ros1-tests/.coverage.*
+          pip install coverage
+          ls -al
+          pwd
+          coverage combine coverage-files/coverage-python3_8-tests/.coverage.* coverage-files/coverage-python3_10-tests/.coverage.* coverage-files/coverage-ros2-tests/.coverage.* coverage-files/coverage-ros1-tests/.coverage.*
+          coverage xml
+      - name: Coveralls GitHub Action (Upload Coverage Report)
+        uses: coverallsapp/github-action@v2.3.6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Merged Coverage File
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-final
+          path: .coverage
+          include-hidden-files: true

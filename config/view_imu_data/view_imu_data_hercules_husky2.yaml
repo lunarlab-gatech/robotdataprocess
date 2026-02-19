@@ -1,9 +1,0 @@
-input_bag: /media/dbutterfield3/T73/hercules_datasets/V1.2/ausenv_test1_checkpoints_CSLAM_2UAVUGV_pruned
-external_msgs_path_ros2: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros2
-external_msgs_path_ros1: /home/dbutterfield3/Research/rosbag_manip/external_msgs_ros1
-operation_to_run: 'view_imu_data'
-operation_params:
-  view_imu_data:
-    topic: /hercules_node/Husky2/imu/imu
-    output_folder: /home/dbutterfield3/Research/rosbag_manip/figures/IMU/HERCULES/Husky2
-    data_range: [0, 10000]
