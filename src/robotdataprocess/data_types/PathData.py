@@ -335,7 +335,8 @@ class PathData(SequentialData):
                      google_maps_scale_bar: bool = False, google_maps_scale_bar_loc: str ="bottom-right",
                      gt_color_lightness_range_val: int = 3,
                      background_image_path: str | None = None,
-                     background_image_x_edge: float | None = None, ax: plt.Axes | None = None,):
+                     background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
+                     background_image_extent_offsets: Union[Tuple[float, float], None] = None):
         """
         Plot all PathData objects on a 2D XY plane.
         
@@ -358,6 +359,7 @@ class PathData(SequentialData):
             background_image_path: Path to an image to plot in the background; It is assumed
                 that the center of the image corresponds to x=0 & y=0 in the PataData frames.
             background_image_x_edge: The distance in meters from center of image to the x edge.
+            background_image_extent_offets: XY locations where the image center should be located.
             ax: If passed, plot is drawn onto these axes instead of on a new figure.
         """
 
@@ -403,7 +405,12 @@ class PathData(SequentialData):
                 x_extent_meters = background_image_x_edge
                 h, w = img.shape[0], img.shape[1]
                 y_extent_meters = x_extent_meters / w * h
-                extent = [-x_extent_meters, x_extent_meters, -y_extent_meters, y_extent_meters]
+                if background_image_extent_offsets is not None:
+                    x_offset, y_offset = background_image_extent_offsets
+                else:
+                    x_offset, y_offset = 0, 0
+                extent = [-x_extent_meters + x_offset, x_extent_meters + x_offset,
+                          -y_extent_meters + y_offset, y_extent_meters + y_offset]
                 axs.imshow(img, extent=extent, origin="upper", alpha=1.0, zorder=0)
             else:
                 raise ValueError("Extent must be provided with Background image size via background_image_x_edge.")

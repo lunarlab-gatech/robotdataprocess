@@ -521,8 +521,12 @@ class LoopClosureData(Data):
         labels: List[str],
         inlier_masks: List[np.ndarray] = None,
         show_plots: bool = True,
+        save_path: str = None,
         max_translation_frac: float = 1.0,
         max_rotation_frac: float = 1.0,
+        trans_err_in_target: float = 1.0,
+        rot_err_in_target: float = 5.0,
+        title: str = None
     ):
         """
         Scatter plot of loop closure errors (log-log scale): each point is one loop closure.
@@ -554,7 +558,7 @@ class LoopClosureData(Data):
 
         sns.set_theme(style="whitegrid", context="talk", palette="tab10")
         sns.set_context("poster", font_scale=1.0)
-        fig, ax = plt.subplots(figsize=(20, 20))
+        fig, ax = plt.subplots(figsize=(10, 10))
         palette = sns.color_palette("bright", len(errors))
 
         # Collect all translation and rotation errors
@@ -577,8 +581,7 @@ class LoopClosureData(Data):
             rot_err = np.asarray(err["rotation_errors"])
 
             # 1. Calculate how many points fall inside the highlighted square
-            # Square bounds: Translation <= 1.0, Rotation <= 5.0
-            in_box_mask = (trans_err <= 1.0) & (rot_err <= 5.0)
+            in_box_mask = (trans_err <= trans_err_in_target) & (rot_err <= rot_err_in_target)
             num_in_box = np.sum(in_box_mask)
             total_points = len(trans_err)
 
@@ -615,13 +618,14 @@ class LoopClosureData(Data):
                 )
 
             # Save the legend entry
-            updated_label = f"{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target )"
-            if inlier_mask is not None:
-                updated_label += f" - Num Inliers: {num_inliers}"
-            legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label)
-)
-
-        ax.set_title("Loop Closure Errors Scatter Plot (Log-Log)", fontsize=24)
+            updated_label = f"{label}"
+            # if inlier_mask is not None: updated_label += f" - Num Inliers: {num_inliers}"
+            print(f"{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target )")
+            print(f"Number of inliers for {label}: {num_inliers}")
+            legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label))
+        
+        if title is not None:
+            ax.set_title(title, fontsize=24)
         ax.set_xlabel("Translation Error (m)")
         ax.set_ylabel("Rotation Error (degrees)")
         
@@ -642,8 +646,9 @@ class LoopClosureData(Data):
 
         # Add the Highlighted Square
         import matplotlib.patches as patches
-        rect = patches.Rectangle((1e-6, 1e-6), 1.0, 5.0, linewidth=0, facecolor='yellow', alpha=0.2, zorder=0)
-        legend_handles.append(Patch(facecolor='yellow', alpha=0.4, edgecolor='none', label='Successful Loop Closures (<=1m, <=5°)'))
+        rect = patches.Rectangle((1e-6, 1e-6), trans_err_in_target, rot_err_in_target, linewidth=0, facecolor='yellow', alpha=0.2, zorder=0)
+        # legend_handles.append(Patch(facecolor='yellow', alpha=0.4, edgecolor='none', label='Successful Loop Closures (<=' + str(trans_err_in_target) + \
+        #                             'm, <=' + str(rot_err_in_target) + '°)'))
         ax.add_patch(rect)
 
         # Place ticks at EVERY digit (1-9) so the grid lines exist
@@ -696,7 +701,12 @@ class LoopClosureData(Data):
         sns.despine(ax=ax)
         fig.tight_layout()
 
-        if show_plots:
+        if show_plots and save_path is not None:
+            raise RuntimeError("Can't enable both show_plots and save_path!")
+        elif show_plots:
             plt.show()
+        elif save_path is not None:
+            plt.savefig(save_path)
+        plt.close()
 
         return fig
