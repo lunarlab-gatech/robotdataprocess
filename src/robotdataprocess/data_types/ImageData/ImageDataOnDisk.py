@@ -95,6 +95,13 @@ class ImageDataOnDisk(ImageData):
         """
         Swap the encoding of the image data.
         Currently only supports RGB8 -> BGR8.
+
+        Args:
+            encoding: The target encoding to convert to.
+
+        Raises:
+            NotImplementedError: If the conversion between the current and
+                target encoding is not supported.
         """
         if encoding == self.encoding:
             return

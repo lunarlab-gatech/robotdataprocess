@@ -109,7 +109,12 @@ class Ros2BagWrapper:
         return typestore
     
     def get_typestore(self) -> Typestore:
-        """ Return the ROS2 typestore """
+        """
+        Return the ROS2 typestore.
+
+        Returns:
+            Typestore: The ROS2 typestore instance for this bag.
+        """
         return self.typestore2
 
     @staticmethod

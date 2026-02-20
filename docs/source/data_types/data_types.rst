@@ -10,11 +10,9 @@ Enumerations
 
 .. autoclass:: robotdataprocess.CoordinateFrame
    :members:
-   :undoc-members:
 
 .. autoclass:: robotdataprocess.ROSMsgLibType
    :members:
-   :undoc-members:
 
 SequentialData
 --------------

@@ -218,9 +218,17 @@ class LiDARData(SequentialData):
     # ========================= Reproducible Loading ========================== 
     # =========================================================================  
     def get_point_cloud_at_index(self, index: int):
-        """ 
+        """
         Gets the point cloud at index T and ensures all necessary transformations are applied.
-        This is a safe copy of the memmapped array, meaning it can be transformed and changed. 
+        This is a safe copy of the memmapped array, meaning it can be transformed and changed.
+
+        Args:
+            index: The index of the point cloud to retrieve (0-based within the
+                possibly-cropped dataset).
+
+        Returns:
+            Tuple of ``(points, channels)`` where ``points`` is an (N, 3)
+            float32 array and ``channels`` is an (N,) uint16 array or None.
         """
 
         # Map index to masked index if cropping has occurred
@@ -247,13 +255,17 @@ class LiDARData(SequentialData):
     # ========================= Manipulation Methods ========================== 
     # =========================================================================  
     def calculate_point_channels(self, num_channels: int, v_min_angle: float, v_max_angle: float) -> None:
-        """ 
+        """
         Calculate channel numbers for each point.
-         
+
         NOTE: This assumes that lasers are evenly spaced within the angular range and that
         the first laser fires at v_min_angle and the last laser fires at v_max_angle.
         NOTE: Invalid points (NaNs) get a channel of 65535.
-        NOTE: Assumes laser angles of a VLP-16 LiDAR.
+
+        Args:
+            num_channels: Number of laser channels (e.g. 16 for VLP-16).
+            v_min_angle: Minimum vertical angle in degrees.
+            v_max_angle: Maximum vertical angle in degrees.
         """
 
         if self.channels is not None:
@@ -343,7 +355,13 @@ class LiDARData(SequentialData):
             raise RuntimeError(f"LiDARData class is in an unexpected frame: {self.frame}!")
 
     def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        """
+        Will crop the data so only values within [start, end] inclusive are kept.
+
+        Args:
+            start: The earliest timestamp to keep.
+            end: The latest timestamp to keep. If None, keeps all data from ``start`` onward.
+        """
 
         # Create boolean mask of data to keep (for when we get point clouds later)
         if self.data_mask is None:
@@ -436,9 +454,20 @@ class LiDARData(SequentialData):
     # =================== ROS Message Conversion Methods =====================
     # =========================================================================
 
-    @staticmethod 
+    @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
-        """ Return the __msgtype__ for a PointCloud2 msg. """
+        """
+        Return the ROS message type class for a PointCloud2 message.
+
+        Args:
+            lib_type: Which ROS message library to use.
+
+        Returns:
+            The ROS message type class for ``sensor_msgs/PointCloud2``.
+
+        Raises:
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
 
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)

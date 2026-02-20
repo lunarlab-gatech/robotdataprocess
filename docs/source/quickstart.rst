@@ -28,7 +28,7 @@ The class hierarchy is:
 
 Two enums control behavior throughout:
 
-* ``CoordinateFrame``: ``FLU``, ``NED``, ``ENU``, ``NONE`` -- tracks which coordinate convention a Data object uses, enabling built-in frame conversions (e.g. ``to_FLU_frame()``) that correctly transform positions and orientations.
+* ``CoordinateFrame``: ``FLU``, ``NED``, ``ENU``, ``NONE`` -- tracks which coordinate convention a Data object uses, enabling built-in frame conversions (e.g. ``to_coordinate_frame()``) that correctly transform positions and orientations.
 * ``ROSMsgLibType``: ``ROSBAGS`` (rosbags, pure Python), ``RCLPY`` (ROS2), ``ROSPY`` (ROS1), ``NONE`` -- specifies which ROS message library to use when building or serializing ROS messages, so the same Data object can target different ROS environments.
 
 Loading Data
@@ -68,7 +68,7 @@ Manipulating Data
    odom.crop_data(Decimal("100.0"), Decimal("200.0"))
 
    # Convert coordinate frames (NED -> FLU)
-   odom.to_FLU_frame()
+   odom.to_coordinate_frame(CoordinateFrame.FLU)
 
    # Shift all positions
    odom.shift_position(x_shift=1.0, y_shift=0.0, z_shift=0.0)

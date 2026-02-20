@@ -27,8 +27,13 @@ class SequentialData(Data):
             if self.timestamps[i] >= self.timestamps[i+1]:
                 raise ValueError(f"Timestamps {self.timestamps[i]} and {self.timestamps[i+1]} do not come in sequential order!")
 
-    def len(self):
-        """ Returns the number of items in this data class """
+    def len(self) -> int:
+        """
+        Returns the number of items in this data class.
+
+        Returns:
+            int: The number of timestamped entries.
+        """
         return len(self.timestamps)
 
     def _invalidate_cache(self):
@@ -40,13 +45,27 @@ class SequentialData(Data):
     # =========================================================================
 
     def round_timestamps(self, decimals: int):
-        """ Rounds all timestamps to the specified number of decimal places. """
+        """
+        Rounds all timestamps to the specified number of decimal places.
+
+        Args:
+            decimals: Number of decimal places to round to.
+        """
         quantize_val = Decimal(10) ** -decimals
         self.timestamps = np.array([ts.quantize(quantize_val) for ts in self.timestamps])
         self._invalidate_cache()
 
     def crop_data(self, start: Decimal, end: Decimal):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        """
+        Will crop the data so only values within [start, end] inclusive are kept.
+
+        Args:
+            start: The earliest timestamp to keep.
+            end: The latest timestamp to keep.
+
+        Raises:
+            NotImplementedError: Always; must be overridden by subclasses.
+        """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 
     # =========================================================================
@@ -55,11 +74,34 @@ class SequentialData(Data):
 
     @staticmethod
     def get_ros_msg_type(libtype: ROSMsgLibType):
-        """ Will return the msgtype for the ROS message for this Data object. """
+        """
+        Will return the msgtype for the ROS message for this Data object.
+
+        Args:
+            libtype: Which ROS message library to use.
+
+        Returns:
+            The ROS message type class.
+
+        Raises:
+            NotImplementedError: Always; must be overridden by subclasses.
+        """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 
     def get_ros_msg(self, libtype: ROSMsgLibType, i: int):
-        """ Will create and return a ROS message object. """
+        """
+        Will create and return a ROS message object.
+
+        Args:
+            libtype: Which ROS message library to use.
+            i: Index of the data sample to convert.
+
+        Returns:
+            A ROS message populated with the data at index ``i``.
+
+        Raises:
+            NotImplementedError: Always; must be overridden by subclasses.
+        """
         raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 
     # =========================================================================

@@ -49,7 +49,7 @@ All sensor data is loaded into format-agnostic ``Data`` objects. Adding support 
    from decimal import Decimal
 
    imu = ImuData.from_txt_file(path, "imu_link", CoordinateFrame.NED)
-   imu.to_FLU_frame()
+   imu.to_coordinate_frame(CoordinateFrame.FLU)
    imu.crop_data(Decimal("0.0"), end_time)
 
    publish_data_ROS_multiprocess(

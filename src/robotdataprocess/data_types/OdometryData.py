@@ -267,10 +267,10 @@ class OdometryData(PathData):
 
         Args:
             csv_path (Path | str): Path to the output csv file.
-            odom_topic (str): Topic of the Odometry messages.
             write_header (bool): If false, skip the header row.
-        Returns:
-            OdometryData: Instance of this class.
+
+        Raises:
+            ValueError: If the output file already exists.
         """
 
         # setup tqdm 
@@ -303,7 +303,21 @@ class OdometryData(PathData):
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType, msg_type: str = "Odometry") -> Any:
-        """ Return the __msgtype__ for an Odometry msg. """
+        """
+        Return the ROS message type class for odometry-related messages.
+
+        Args:
+            lib_type: Which ROS message library to use.
+            msg_type: The message type name. Supported values are ``"Odometry"``,
+                ``"Path"``, and ``"maplab_msg/OdometryWithImuBiases"`` (ROSPY only).
+
+        Returns:
+            The ROS message type class.
+
+        Raises:
+            ValueError: If ``msg_type`` is not supported for the given ``lib_type``.
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             if msg_type == "Odometry":
@@ -337,15 +351,17 @@ class OdometryData(PathData):
     
     def get_ros_msg(self, lib_type: ROSMsgLibType, i: int, msg_type: str = "Odometry"):
         """
-        Gets an Image ROS2 Humble message corresponding to the odometry in index i.
-        
-        Args:
-            i (int): The index of the odometry data to convert.
-        Raises:
-            ValueError: If i is outside the data bounds.
+        Gets an Odometry ROS message corresponding to the data at index i.
 
-        NOTE: Currently doesn't support Twist information.
-        NOTE: Assumes zero covariances.
+        Args:
+            lib_type: Which ROS message library to use.
+            i: The index of the odometry data to convert.
+            msg_type: The message type name (``"Odometry"``, ``"Path"``, or
+                ``"maplab_msg/OdometryWithImuBiases"``).
+
+        Raises:
+            IndexError: If ``i`` is outside the data bounds.
+            ValueError: If ``msg_type`` is not supported for the given ``lib_type``.
         """
 
         # Check to make sure index is within data bounds

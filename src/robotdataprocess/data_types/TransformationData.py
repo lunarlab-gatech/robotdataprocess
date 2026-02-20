@@ -33,6 +33,19 @@ class TransformationData(Data):
     def from_HERCULES_settings_json(cls, json_path: str, robot_name: str, sensor_type: str, sensor_name: str) -> TransformationData:
         """
         Load a transformation from a HERCULES settings JSON.
+
+        Args:
+            json_path: Path to the HERCULES settings JSON file.
+            robot_name: Name of the vehicle in the JSON (under ``Vehicles``).
+            sensor_type: Either ``"Camera"`` or ``"Sensor"``.
+            sensor_name: Name of the sensor within the type block.
+
+        Returns:
+            TransformationData: Instance with NED coordinate frame.
+
+        Raises:
+            KeyError: If the robot or sensor is not found in the JSON.
+            ValueError: If ``sensor_type`` is not ``"Camera"`` or ``"Sensor"``.
         """
 
         # Open the json
@@ -109,6 +122,18 @@ class TransformationData(Data):
     def from_matrix(cls, frame_id: str, child_frame_id: str, matrix: np.ndarray, frame: CoordinateFrame) -> TransformationData:
         """
         Creates a TransformationData object from a 4x4 transformation matrix.
+
+        Args:
+            frame_id: The parent frame ID.
+            child_frame_id: The child frame ID.
+            matrix: A 4x4 homogeneous transformation matrix.
+            frame: The coordinate frame of this transformation.
+
+        Returns:
+            TransformationData: Instance of this class.
+
+        Raises:
+            ValueError: If ``matrix`` is not 4x4.
         """
         if matrix.shape != (4, 4):
             raise ValueError("Transformation matrix must be 4x4.")
@@ -121,7 +146,20 @@ class TransformationData(Data):
     
     @classmethod
     def optical_wrt_camera(cls, frame: CoordinateFrame, frame_id: str = "camera", child_frame_id: str = "optical") -> TransformationData:
-        """ Get H_C_to_W in a specified frame """
+        """
+        Get the optical-frame-w.r.t.-camera transformation in a specified coordinate frame.
+
+        Args:
+            frame: The coordinate frame convention (NED, FLU, or ENU).
+            frame_id: The parent frame ID.
+            child_frame_id: The child frame ID.
+
+        Returns:
+            TransformationData: Pure rotation (zero translation) from camera to optical.
+
+        Raises:
+            RuntimeError: If ``frame`` is not supported.
+        """
         if frame == CoordinateFrame.NED:
             rot = np.array([[0, 0, 1],
                             [1, 0, 0],
@@ -191,6 +229,9 @@ class TransformationData(Data):
         """
         Returns the inverse transformation such that self @ self.invert() == Identity.
         Swaps frame_id and child_frame_id.
+
+        Returns:
+            TransformationData: The inverse transformation.
         """
         rot = R.from_quat(self.orientation).as_matrix()
         inv_rot = rot.T
@@ -201,7 +242,18 @@ class TransformationData(Data):
     def apply_transformation_right_side(self, other: TransformationData) -> TransformationData:
         """
         Applies another transformation to the right side of this transformation.
-        Effectively, this transformation becomes self @ other.
+        Effectively computes ``self @ other``.
+
+        Args:
+            other: The transformation to compose on the right.
+
+        Returns:
+            TransformationData: The composed transformation with ``self.frame_id``
+            and ``other.child_frame_id``.
+
+        Raises:
+            ValueError: If coordinate frames do not match or if
+                ``self.child_frame_id != other.frame_id``.
         """
         if self.frame != other.frame:
             raise ValueError(f"Coordinate frames must match for right-side transformation: {self.frame} vs {other.frame}")
@@ -225,6 +277,12 @@ class TransformationData(Data):
     # =========================================================================
 
     def as_matrix(self) -> np.ndarray:
+        """
+        Returns the 4x4 homogeneous transformation matrix.
+
+        Returns:
+            np.ndarray: A 4x4 matrix with rotation and translation.
+        """
         matrix = np.identity(4)
         matrix[0:3, 0:3] = R.from_quat(self.orientation).as_matrix()
         matrix[0:3, 3] = self.translation
@@ -236,7 +294,14 @@ class TransformationData(Data):
 
     @staticmethod
     def visualize(transformations: List[TransformationData], axes_length: float = 1.0):
-        """ Visualize multiple transformations in the same 3D space """
+        """
+        Visualize multiple transformations in the same 3D space.
+
+        Args:
+            transformations: List of TransformationData objects to plot.
+                An identity world frame is appended automatically.
+            axes_length: Length of the plotted orientation axes in meters.
+        """
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
