@@ -12,7 +12,7 @@ robotdataprocess
       :target: https://github.com/lunarlab-gatech/robotdataprocess/actions/workflows/python_test.yml
       :alt: Python Unit Tests
 
-   .. image:: https://coveralls.io/repos/github/lunarlab-gatech/robotdataprocess/badge.svg?branch=master
+   .. image:: https://coveralls.io/repos/github/lunarlab-gatech/robotdataprocess/badge.svg?branch=master&v=1
       :target: https://coveralls.io/github/lunarlab-gatech/robotdataprocess?branch=master
       :alt: Coverage Status
 
