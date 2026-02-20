@@ -3,7 +3,7 @@ from __future__ import annotations
 import colorsys
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
-from .Data import CoordinateFrame
+from .Data import CoordinateFrame, TransformType
 from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
@@ -61,7 +61,13 @@ class PathData(SequentialData):
     # =========================================================================
 
     def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        """
+        Will crop the data so only values within [start, end] inclusive are kept.
+
+        Args:
+            start: The earliest timestamp to keep.
+            end: The latest timestamp to keep. If None, keeps all data from ``start`` onward.
+        """
 
         # Create boolean mask of data to keep
         mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
@@ -148,30 +154,40 @@ class PathData(SequentialData):
     # =========================== Frame Conversions ===========================
     # =========================================================================
 
-    def to_FLU_frame(self):
-        # If we are already in the FLU frame, return
-        if self.frame == CoordinateFrame.FLU:
-            print("Data already in FLU coordinate frame, returning...")
+    def to_coordinate_frame(self, target_frame: CoordinateFrame, transform_type: TransformType = TransformType.CHANGE_OF_BASIS):
+        """
+        Converts positions and orientations into the target coordinate frame.
+
+        Args:
+            target_frame: The desired coordinate frame.
+            transform_type: How to apply the frame change.
+                ``CHANGE_OF_BASIS`` applies a similarity transform to orientations
+                (R * q * R^-1) and rotates positions (default, original behaviour).
+                ``ROTATION`` left-multiplies the frame change rotation onto both
+                positions and orientations without the inverse on orientations.
+        """
+        if self.frame == target_frame:
+            print(f"Data already in {target_frame.name} coordinate frame, returning...")
             return
 
-        # If in NED, run the conversion
-        elif self.frame == CoordinateFrame.NED:
-            # Define the rotation matrix
-            R_NED = np.array([[1,  0,  0],
-                              [0, -1,  0],
-                              [0,  0, -1]])
+        if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
+            # The frame change rotation: 180 degrees around X
+            R_frame = np.array([[1,  0,  0],
+                                [0, -1,  0],
+                                [0,  0, -1]])
 
-            # Do a change of basis to update the frame
-            self._convert_frame(R_NED)
+            if transform_type == TransformType.CHANGE_OF_BASIS:
+                self._convert_frame(R_frame)
+            elif transform_type == TransformType.ROTATION:
+                R_frame_Q = R.from_matrix(R_frame)
+                self.positions = (R_frame @ self.positions.T).T
+                self._ori_apply_rotation(R_frame_Q)
 
-            # Update frame
             self.frame = CoordinateFrame.FLU
-
             self._invalidate_cache()
 
-        # Otherwise, throw an error
         else:
-            raise RuntimeError(f"PathData class is in an unexpected frame: {self.frame}!")
+            raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
 
     def apply_transformation_left_side(self, H: np.ndarray):
         """
@@ -312,7 +328,17 @@ class PathData(SequentialData):
     
     @classmethod
     def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame) -> PathData:
-        """ Creates a PathData object from an evo PoseTrajectory3D object. """
+        """
+        Creates a PathData object from an evo PoseTrajectory3D object.
+
+        Args:
+            pose_trajectory_3d: An evo PoseTrajectory3D with positions, orientations, and timestamps.
+            frame_id: The frame ID to assign.
+            frame: The coordinate frame of this data.
+
+        Returns:
+            PathData: Instance of this class.
+        """
 
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
@@ -688,7 +714,12 @@ class PathData(SequentialData):
                             frame=self.frame)
 
     def to_evo(self) -> PoseTrajectory3D:
-        """ Returns an evo PoseTrajectory3D object for this class. """
+        """
+        Returns an evo PoseTrajectory3D object for this class.
+
+        Returns:
+            PoseTrajectory3D: Trajectory with positions, orientations (wxyz), and timestamps.
+        """
 
         orientations_wxyz = dec_arr_to_float_arr(self.orientations[:, [3, 0, 1, 2]])
         return PoseTrajectory3D(positions_xyz=dec_arr_to_float_arr(self.positions), 
@@ -750,13 +781,22 @@ class PathData(SequentialData):
 
     @staticmethod
     def concatenate_PathData(path_data_objs: list[PathData]) -> PathData:
-        """ 
+        """
         Combines multiple PathData objects into a single PathData object. In doing so,
         will shift the timestamps of each subsequent PathData so that their data starts
         one second after the previous PathData ends. Also assumes the frame_id and frame
         of the first PathData object for final PathData object.
-        
+
         Mimics the behavior found in ROMAN's (https://github.com/lunarlab-gatech/roman) evaluation scripts.
+
+        Args:
+            path_data_objs: List of PathData objects to concatenate.
+
+        Returns:
+            PathData: A single PathData with all trajectories joined end-to-end.
+
+        Raises:
+            ValueError: If the list is empty or has only one element.
         """
 
         print("Warning! This code has not been unit tested yet!")
@@ -796,6 +836,14 @@ class PathData(SequentialData):
         """
         Inverse of concatenate_PathData(); needs the original objects to know the timestamps
         that each trajectory is found on.
+
+        Args:
+            original_PathDatas: The original PathData objects used during concatenation,
+                needed to determine timestamp boundaries.
+            merged_PathData: The single merged PathData to split apart.
+
+        Returns:
+            list[PathData]: One PathData per original trajectory, cropped from the merged data.
         """
 
         # Calculate the start and end times for the beginning of each robots data

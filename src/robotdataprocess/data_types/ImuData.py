@@ -76,10 +76,10 @@ class ImuData(SequentialData):
 
         Args:
             bag_path (Path | str): Path to the ROS2 bag file.
-            img_topic (str): Topic of the Imu messages.
+            imu_topic (str): Topic of the Imu messages.
             frame_id (str): The frame where this IMU data was collected.
         Returns:
-            ImageData: Instance of this class.
+            ImuData: Instance of this class.
         """
 
         print("WARNING: This code does not check the orientation covariance to determine if the orientation is valid; may use invalid orientations!")
@@ -176,7 +176,13 @@ class ImuData(SequentialData):
     # =========================================================================  
 
     def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        """
+        Will crop the data so only values within [start, end] inclusive are kept.
+
+        Args:
+            start: The earliest timestamp to keep.
+            end: The latest timestamp to keep. If None, keeps all data from ``start`` onward.
+        """
 
         # Create boolean mask of data to keep
         mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
@@ -193,7 +199,13 @@ class ImuData(SequentialData):
     # =========================================================================  
 
     def visualize(self, ts_start: float, ts_end: float):
-        """ Plot the linear acceleration, angular velocity, and orientation data. """
+        """
+        Plot the linear acceleration, angular velocity, and orientation data.
+
+        Args:
+            ts_start: Start timestamp of the window to plot.
+            ts_end: End timestamp of the window to plot.
+        """
 
         def multi_list_plotter(data: np.ndarray, timestamps: np.ndarray, title: str, keys: List[str], ylabel: str):
             """
@@ -314,7 +326,18 @@ class ImuData(SequentialData):
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
-        """ Return the __msgtype__ for an Imu msg. """
+        """
+        Return the ROS message type class for an Imu message.
+
+        Args:
+            lib_type: Which ROS message library to use.
+
+        Returns:
+            The ROS message type class for ``sensor_msgs/Imu``.
+
+        Raises:
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
 
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
@@ -326,14 +349,15 @@ class ImuData(SequentialData):
             
     def get_ros_msg(self, lib_type: ROSMsgLibType, i: int):
         """
-        Gets an Image ROS2 Humble message corresponding to the image represented by index i.
-        
-        Args:
-            i (int): The index of the image message to convert.
-        Raises:
-            ValueError: If i is outside the data bounds.
+        Gets an Imu ROS message corresponding to the data at index i.
 
-        # NOTE: Assumes covariances of 0.
+        Args:
+            lib_type: Which ROS message library to use.
+            i: The index of the IMU data to convert.
+
+        Raises:
+            ValueError: If ``i`` is outside the data bounds.
+            NotImplementedError: If ``lib_type`` is not supported.
         """
 
         # Check to make sure index is within data bounds

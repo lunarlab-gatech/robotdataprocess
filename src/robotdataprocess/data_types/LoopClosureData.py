@@ -194,7 +194,12 @@ class LoopClosureData(Data):
     # =========================================================================
 
     def round_timestamps(self, decimals: int):
-        """ Rounds all timestamps to the specified number of decimal places. """
+        """
+        Rounds all timestamps to the specified number of decimal places.
+
+        Args:
+            decimals: Number of decimal places to round to.
+        """
         quantize_val = Decimal(10) ** -decimals
         self.timestamps_a = np.array([ts.quantize(quantize_val) for ts in self.timestamps_a])
         self.timestamps_b = np.array([ts.quantize(quantize_val) for ts in self.timestamps_b])
@@ -361,13 +366,26 @@ class LoopClosureData(Data):
     ):
         """
         Plot loop closure success as a function of error threshold.
-        Produces six plots:
-        1) Translation success rate (%)
-        2) Rotation success rate (%)
-        3) Translation count under threshold
-        4) Rotation count under threshold
-        5) Combined success rate (%)
-        6) Combined count under threshold
+        Produces six plots: translation success rate, rotation success rate,
+        translation count, rotation count, combined success rate, and combined count.
+
+        Args:
+            errors: List of error dicts, each containing ``"translation_errors"``
+                and ``"rotation_errors"`` arrays.
+            labels: Display name for each error dict.
+            num_thresholds: Number of evenly-spaced threshold values to evaluate.
+            show_plots: If True, display the plots interactively.
+            max_translation_frac: Fraction of the maximum translation error to
+                use as the upper threshold bound.
+            max_rotation_frac: Fraction of the maximum rotation error to
+                use as the upper threshold bound.
+
+        Returns:
+            Tuple of six matplotlib Figure objects (translation %, rotation %,
+            translation count, rotation count, combined %, combined count).
+
+        Raises:
+            ValueError: If list lengths do not match or fraction values are out of range.
         """
 
         if len(labels) != len(errors):
@@ -529,16 +547,29 @@ class LoopClosureData(Data):
         title: str = None
     ):
         """
-        Scatter plot of loop closure errors (log-log scale): each point is one loop closure.
-        X-axis: translation error
-        Y-axis: rotation error
-        Each dict in errors gets a separate color.
+        Scatter plot of loop closure errors (log-log scale): each point is one
+        loop closure. Inliers and outliers are shown with different markers.
 
-        If inlier_masks is provided, inliers are plotted with inlier_marker
-        and outliers with the per-run marker from markers. If inlier_masks is
-        None or a particular entry is None, all points use the outlier marker.
+        Args:
+            errors: List of error dicts, each containing ``"translation_errors"``
+                and ``"rotation_errors"`` arrays.
+            labels: Display name for each error dict.
+            inlier_masks: Optional list of boolean arrays marking inlier loop
+                closures. If None, all points are treated as outliers.
+            show_plots: If True, display the plot interactively.
+            save_path: If provided, save the figure to this path instead of showing.
+            max_translation_frac: Fraction of max translation error for axis limit.
+            max_rotation_frac: Fraction of max rotation error for axis limit.
+            trans_err_in_target: Translation error threshold for the highlighted region.
+            rot_err_in_target: Rotation error threshold for the highlighted region.
+            title: Optional plot title.
 
-        Axes automatically expand to include all points with a small margin.
+        Returns:
+            matplotlib Figure object.
+
+        Raises:
+            ValueError: If list lengths do not match or fraction values are out of range.
+            RuntimeError: If both ``show_plots`` and ``save_path`` are set.
         """
 
         if len(labels) != len(errors):

@@ -124,7 +124,16 @@ class ImageData(SequentialData):
 
     @classmethod
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageData:
-        """ Creates a class structure from a folder with .png files. """
+        """
+        Creates a class structure from a folder with .png files.
+
+        Args:
+            image_folder_path: Path to the folder containing image files.
+            frame_id: The frame ID to assign.
+
+        Returns:
+            ImageData: Instance of this class.
+        """
         NotImplementedError("This method needs to be overwritten by the child Data class!")
     
     # =========================================================================
@@ -132,7 +141,13 @@ class ImageData(SequentialData):
     # =========================================================================  
 
     def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
-        """ Will crop the data so only values within [start, end] inclusive are kept. """
+        """
+        Will crop the data so only values within [start, end] inclusive are kept.
+
+        Args:
+            start: The earliest timestamp to keep.
+            end: The latest timestamp to keep. If None, keeps all data from ``start`` onward.
+        """
 
         # Create boolean mask of data to keep
         mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
@@ -235,7 +250,18 @@ class ImageData(SequentialData):
 
     @staticmethod
     def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
-        """ Return the __msgtype__ for an Image msg. """
+        """
+        Return the __msgtype__ for an Image msg.
+
+        Args:
+            lib_type: The ROS message library to use.
+
+        Returns:
+            The Image message type for the specified library.
+
+        Raises:
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
 
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)

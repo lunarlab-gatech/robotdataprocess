@@ -1,0 +1,5 @@
+sphinx
+sphinx-rtd-theme
+numpy<1.25
+# Include the project itself to allow autodoc to import it
+-e .

@@ -150,7 +150,13 @@ class _SingleDataPublisher():
         self.log_msg_to_ros(f"robotdataprocess_publisher_{topic_name.replace('/', '_')} intialized!", stats_dict)
 
     def log_msg_to_ros(self, msg: str, stats_dict: Union[DictProxy, None] = None):
-        """ Method to log data to ROS regardless of ROS version (1 or 2) """
+        """
+        Log a message to ROS regardless of ROS version (1 or 2).
+
+        Args:
+            msg: The message string to log.
+            stats_dict: Optional shared manager dict for console logging.
+        """
 
         if self.libtype == ROSMsgLibType.ROSPY:
             rospy = ModuleImporter.get_module('rospy')

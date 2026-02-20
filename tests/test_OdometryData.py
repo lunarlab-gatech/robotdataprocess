@@ -6,6 +6,7 @@ import os
 import pandas as pd
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
+from robotdataprocess.data_types.Data import TransformType
 from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
@@ -112,9 +113,9 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data_test.positions[1].astype(np.float64), [0.047673, 0.008781, 0.078044])
         np.testing.assert_array_equal(odom_data_test.orientations[2].astype(np.float64), [0.810142, -0.007347, 0.586184, 0.001775])
 
-    def test_to_FLU_frame(self):
-        """ 
-        Makes sure that the conversion from NED to ROS functions properly.
+    def test_to_coordinate_frame(self):
+        """
+        Makes sure that the conversion from NED to FLU functions properly via to_coordinate_frame.
         """
 
         def compare_with_expected(odom_data: OdometryData):
@@ -125,24 +126,57 @@ class TestOdometryData(unittest.TestCase):
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
 
-        # ===  Test NED to FLU ===
-        # Load the Odometry data
+        # ===  Test NED to FLU (default CHANGE_OF_BASIS) ===
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
         odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
-        # Converts it into the FLU coordinate system
-        odom_data.to_FLU_frame()
+        odom_data.to_coordinate_frame(CoordinateFrame.FLU)
         compare_with_expected(odom_data)
 
-        # === Test FLU to FLU ===
-        # Try to convert again, should do nothing.
-        odom_data.to_FLU_frame()
+        # === Test FLU to FLU (no-op) ===
+        odom_data.to_coordinate_frame(CoordinateFrame.FLU)
         compare_with_expected(odom_data)
 
-        # === Test Unsupported formats throw error ===
+        # === Test Unsupported conversion throws error ===
         odom_data.frame = CoordinateFrame.ENU
-        with np.testing.assert_raises(RuntimeError):
-            odom_data.to_FLU_frame()
+        with np.testing.assert_raises(NotImplementedError):
+            odom_data.to_coordinate_frame(CoordinateFrame.FLU)
+
+        # === Test ROTATION vs CHANGE_OF_BASIS orientations ===
+        odom_rotation = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_cob = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        original_ori = odom_rotation.orientations.copy()
+
+        odom_rotation.to_coordinate_frame(CoordinateFrame.FLU, TransformType.ROTATION)
+        odom_cob.to_coordinate_frame(CoordinateFrame.FLU, TransformType.CHANGE_OF_BASIS)
+
+        # Positions should be identical (both apply R * p)
+        np.testing.assert_array_equal(odom_rotation.positions, odom_cob.positions)
+
+        # Orientations should differ between ROTATION and CHANGE_OF_BASIS
+        self.assertFalse(np.allclose(
+            odom_rotation.orientations.astype(np.float64),
+            odom_cob.orientations.astype(np.float64)
+        ))
+
+        # Verify orientations at specific indices against the mathematical definitions
+        R_frame = R.from_euler('x', 180, degrees=True)
+        for idx in [0, 32, 100]:
+            q_orig = R.from_quat(original_ori[idx].astype(np.float64))
+
+            # ROTATION: q_new = R_frame * q_original
+            expected_rotation = (R_frame * q_orig).as_quat()
+            np.testing.assert_array_almost_equal(
+                odom_rotation.orientations[idx].astype(np.float64),
+                expected_rotation, decimal=8
+            )
+
+            # CHANGE_OF_BASIS: q_new = R_frame * q_original * R_frame^{-1}
+            expected_cob = (R_frame * q_orig * R_frame.inv()).as_quat()
+            np.testing.assert_array_almost_equal(
+                odom_cob.orientations[idx].astype(np.float64),
+                expected_cob, decimal=8
+            )
 
     def test_shift_to_start_at_identity(self):
         """
@@ -152,7 +186,7 @@ class TestOdometryData(unittest.TestCase):
         # Load the Odometry data and convert into the ROS frame
         file_path = Path(Path('.'), 'tests', 'test_outputs', 'test_from_txt_file', 'odom.txt').absolute()
         odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
-        odom_data.to_FLU_frame()
+        odom_data.to_coordinate_frame(CoordinateFrame.FLU)
 
         # Shift it so that it starts at the origin
         odom_data.shift_to_start_at_identity()
