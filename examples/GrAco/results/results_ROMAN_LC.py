@@ -5,8 +5,8 @@ from robotdataprocess import LoopClosureData, OdometryData, CoordinateFrame
 def main():
     # Set dataset configuration
     user = getpass.getuser()
-    run_names = ["latest"]
-    label_names = ["ROMAN"]
+    run_names = ["In_paper", "run-0e044ed8"]
+    label_names = ["ROMAN", "MeronomyGraph"]
     dataset_names = ["V1.0"] * len(run_names)
 
     # Calculate lc errors for each run and robot pair
@@ -15,7 +15,7 @@ def main():
     for dataset_name, run_name in zip(dataset_names, run_names):
 
         # Get robot name pair for this configuration
-        run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '_aerial/' + run_name)
+        run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '/' + run_name)
         align_dir = run_folder / 'align'
         for subdir in align_dir.iterdir():
             if not subdir.is_dir(): continue
