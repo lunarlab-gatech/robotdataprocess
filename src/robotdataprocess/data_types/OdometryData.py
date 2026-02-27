@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-import csv
 from .Data import CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
@@ -10,8 +9,6 @@ import matplotlib.pyplot as plt
 from ..ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
-import os
-import pandas as pd
 from .PathData import PathData
 from pathlib import Path
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
@@ -125,8 +122,8 @@ class OdometryData(PathData):
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
-    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
-                 header_included: bool, column_to_data: Union[List[int], None] = None, 
+    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
+                 header_included: bool, column_to_data: Union[List[int], None] = None,
                  separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None,
                  ts_in_ns: bool = False, reorder_data: bool = False):
         """
@@ -139,71 +136,30 @@ class OdometryData(PathData):
             frame (CoordinateFrame): The coordinate system convention of this data.
             header_included (bool): If this csv file has a header, so we can remove it.
             column_to_data (list[int]): Tells the algorithms which columns in the csv contain which
-                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
-                index 0 of column_to_data should be the column that timestamp data is found in the 
+                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus,
+                index 0 of column_to_data should be the column that timestamp data is found in the
                 csv file. Set to None to use [0,1,2,3,4,5,6,7].
             separator (str | None): The separator used in the csv file. If None, will use a comma by default.
             filter: A tuple of (column_name, value), where only rows with column_name == value will be kept. If
                 csv file has no headers, then `column_name` should be the index of the column as a string.
             ts_in_ns (bool): If True, assumes timestamps are in nanoseconds and converts to seconds. Otherwise,
                 assumes timestamps are already in seconds.
-            reorder_data (bool): If True, reorders the data to be in order of timestamps. If False, 
+            reorder_data (bool): If True, reorders the data to be in order of timestamps. If False,
                 assumes data is already ordered by timestamp.
 
         Returns:
             OdometryData: Instance of this class.
         """
 
-        # If column_to_data is None, assume default
-        if column_to_data is None:
-            column_to_data = [0,1,2,3,4,5,6,7]
-        else:
-            # Check column_to_data values are valid
-            assert np.all(np.array(column_to_data) >= 0)
-            assert len(column_to_data) == 8
-
-        # Read the csv file
-        header = 0 if header_included else None
-        df1 = pd.read_csv(str(csv_path), header=header, index_col=False, sep=separator, engine='python')
-
-        # Rename columns to standard names
-        rename_dict = {}
-        desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
-        for j, ind in enumerate(column_to_data):
-            rename_dict[df1.columns[ind]] = desired_data[j]
-        df1 = df1.rename(columns=rename_dict)
-
-        # Using the filter if provided, remove unwanted rows
-        if filter is not None:
-            df1 = df1[df1[filter[0]] == filter[1]]
-
-        # Convert columns to NDArray[Decimal]
-        timestamps_np = np.array([Decimal(str(ts)) for ts in df1['timestamp']], dtype=object)
-        positions_np = np.array([[Decimal(str(x)), Decimal(str(y)), Decimal(str(z))] 
-                                 for x, y, z in zip(df1['x'], df1['y'], df1['z'])], dtype=object)
-        orientations_np = np.array([[Decimal(str(qx)), Decimal(str(qy)), Decimal(str(qz)), Decimal(str(qw))]
-                                    for qx, qy, qz, qw in zip(df1['qx'], df1['qy'], df1['qz'], df1['qw'])], dtype=object)
-        
-        # If timestamps are in ns, convert to s
-        if ts_in_ns:
-            timestamps_np = timestamps_np / Decimal('1e9')
-
-        # Reorder the data if needed
-        if reorder_data:
-            print("Warning: This code is not tested yet!")
-            sort_indices = np.argsort(timestamps_np)
-            timestamps_np = timestamps_np[sort_indices]
-            positions_np = positions_np[sort_indices]
-            orientations_np = orientations_np[sort_indices]
-
-        # Create an OdometryData class
-        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
+        path_data = super().from_csv(csv_path, frame_id, frame, header_included, column_to_data,
+                                     separator, filter, ts_in_ns, reorder_data)
+        return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
     
     @classmethod
     def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
                       header_included: bool, column_to_data: Union[List[int], None] = None):
         """
-        Creates and OdometryData class from a text file.
+        Creates an OdometryData class from a text file.
 
         Args:
             file_path (Path | str): Path to the file containing the odometry data.
@@ -212,91 +168,16 @@ class OdometryData(PathData):
             frame (CoordinateFrame): The coordinate system convention of this data.
             header_included (bool): If this text file has a header, so we can remove it.
             column_to_data (list[int]): Tells the algorithms which columns in the text file contain which
-                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus, 
-                index 0 of column_to_data should be the column that timestamp data is found in the 
+                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus,
+                index 0 of column_to_data should be the column that timestamp data is found in the
                 text file. Set to None to use [0,1,2,3,4,5,6,7].
         Returns:
             OdometryData: Instance of this class.
         """
-        
-        # If column_to_data is None, assume default
-        if column_to_data is None:
-            column_to_data = [0,1,2,3,4,5,6,7]
-        else:
-            # Check column_to_data values are valid
-            assert np.all(np.array(column_to_data) >= 0)
-            assert len(column_to_data) == 8
 
-        # Count the number of lines in the file
-        line_count = 0
-        with open(str(file_path), 'r') as file:
-            for _ in file: 
-                line_count += 1
-
-        # Setup arrays to hold data
-        timestamps_np = np.zeros((line_count), dtype=object)
-        positions_np = np.zeros((line_count, 3), dtype=object)
-        orientations_np = np.zeros((line_count, 4), dtype=object)
-
-        # Open the txt file and read in the data
-        with open(str(file_path), 'r') as file:
-            for i, line in enumerate(file):
-                line_split = line.split(' ')
-                timestamps_np[i] = line_split[column_to_data[0]]
-                positions_np[i] = np.array([line_split[column_to_data[1]], line_split[column_to_data[2]], line_split[column_to_data[3]]])
-                orientations_np[i] =  np.array([line_split[column_to_data[5]], line_split[column_to_data[6]], line_split[column_to_data[7]], line_split[column_to_data[4]]])
-
-        # Remove the header
-        if header_included:
-            timestamps_np = timestamps_np[1:]
-            positions_np = positions_np[1:]
-            orientations_np = orientations_np[1:]
-        
-        # Create an OdometryData class
-        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
+        path_data = super().from_txt_file(file_path, frame_id, frame, header_included, column_to_data)
+        return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
     
-    # =========================================================================
-    # ============================ Export Methods =============================
-    # =========================================================================
-
-    def to_csv(self, csv_path: Union[Path, str], write_header: bool = True):
-        """
-        Writes the odometry data to a .csv file. Note that data will be
-        saved in the following order: timestamp, pos.x, pos.y, pos.z,
-        ori.w, ori.x, ori.y, ori.z. Timestamp is in seconds.
-
-        Args:
-            csv_path (Path | str): Path to the output csv file.
-            write_header (bool): If false, skip the header row.
-
-        Raises:
-            ValueError: If the output file already exists.
-        """
-
-        # setup tqdm 
-        pbar = tqdm.tqdm(total=None, desc="Saving to csv... ", unit=" frames")
-
-        # Check that file path doesn't already exist
-        file_path = Path(csv_path)
-        if os.path.exists(file_path):
-            raise ValueError(f"Output file already exists: {file_path}")
-        
-        # Open csv file
-        with open(file_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile, delimiter=',')
-
-            # Write the first row
-            if write_header:
-                writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
-                
-            # Write message data to the csv file
-            for i in range(len(self.timestamps)):
-                writer.writerow([str(self.timestamps[i]), 
-                    str(self.positions[i][0]), str(self.positions[i][1]), str(self.positions[i][2]),
-                    str(self.orientations[i][3]), str(self.orientations[i][0]), str(self.orientations[i][1]), 
-                    str(self.orientations[i][2])])
-                pbar.update(1)
-
     # =========================================================================
     # =========================== Conversion to ROS ===========================
     # =========================================================================

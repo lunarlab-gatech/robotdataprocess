@@ -9,8 +9,8 @@ def load_data_ROMAN(dataset_name, run_name, robot0_name, robot1_name) -> LoadDat
 
     # Load the estimated data
     user = getpass.getuser()
-    data.est_data_robot0 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '_aerial/' + run_name+ '/offline_rpgo/' + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
-    data.est_data_robot1 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '_aerial/' + run_name+ '/offline_rpgo/' + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
+    data.est_data_robot0 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '/' + run_name+ '/offline_rpgo/' + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.ENU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
+    data.est_data_robot1 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/GrAco_' + dataset_name + '/' + run_name+ '/offline_rpgo/' + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.ENU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
     data.est_data_lst = [data.est_data_robot0, data.est_data_robot1]
 
     # Load the ground truth data
@@ -21,12 +21,15 @@ def load_data_ROMAN(dataset_name, run_name, robot0_name, robot1_name) -> LoadDat
                                            robot1_name + '/' + robot1_name + '.txt', "world", "robot", CoordinateFrame.ENU,  
                                            False, [0, 1, 2, 3, 7, 4, 5, 6])
     data.gt_data_lst = [data.gt_data_robot0, data.gt_data_robot1]
+
+    data.est_data_robot0.visualize_3D([data.gt_data_robot0], ["Est", "GT"])
+    data.est_data_robot1.visualize_3D([data.gt_data_robot1], ["Est", "GT"], axes_interval=[100, 5000])
     return data
 
 def main():  
     dataset_name = "V1.0"
-    run_name = 'In_paper'
-    robot_names = ["aerial-07", "aerial-08"]
+    run_name = 'roman-run-fb01c1ca'
+    robot_names = ["ground-06", "aerial-08"]
 
     # Get robot0 name and robot1 name
     robot0_name = robot_names[0]

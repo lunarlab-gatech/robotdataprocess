@@ -3,6 +3,7 @@ from __future__ import annotations
 import colorsys
 from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
+import csv
 from .Data import CoordinateFrame, TransformType
 from .SequentialData import SequentialData
 from decimal import Decimal
@@ -16,6 +17,8 @@ import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import numpy as np
+import os
+import pandas as pd
 from pathlib import Path
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
@@ -343,15 +346,170 @@ class PathData(SequentialData):
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
 
-        return cls(frame_id=frame_id, 
-                   timestamps=pose_trajectory_3d.timestamps, 
-                   positions=pose_trajectory_3d.positions_xyz, 
+        return cls(frame_id=frame_id,
+                   timestamps=pose_trajectory_3d.timestamps,
+                   positions=pose_trajectory_3d.positions_xyz,
                    orientations=orientations_xyzw,
                    frame=frame)
-    
+
+    @classmethod
+    def from_csv(cls, csv_path: Union[Path, str], frame_id: str, frame: CoordinateFrame,
+                 header_included: bool, column_to_data: Union[List[int], None] = None,
+                 separator: Union[str, None] = None, filter: Union[Tuple[str, str], None] = None,
+                 ts_in_ns: bool = False, reorder_data: bool = False):
+        """
+        Creates a class structure from a csv file.
+
+        Args:
+            csv_path (Path | str): Path to the CSV file.
+            frame_id (str): The frame that this path is relative to.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+            header_included (bool): If this csv file has a header, so we can remove it.
+            column_to_data (list[int]): Tells the algorithms which columns in the csv contain which
+                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus,
+                index 0 of column_to_data should be the column that timestamp data is found in the
+                csv file. Set to None to use [0,1,2,3,4,5,6,7].
+            separator (str | None): The separator used in the csv file. If None, will use a comma by default.
+            filter: A tuple of (column_name, value), where only rows with column_name == value will be kept. If
+                csv file has no headers, then `column_name` should be the index of the column as a string.
+            ts_in_ns (bool): If True, assumes timestamps are in nanoseconds and converts to seconds. Otherwise,
+                assumes timestamps are already in seconds.
+            reorder_data (bool): If True, reorders the data to be in order of timestamps. If False,
+                assumes data is already ordered by timestamp.
+
+        Returns:
+            PathData: Instance of this class.
+        """
+
+        # If column_to_data is None, assume default
+        if column_to_data is None:
+            column_to_data = [0,1,2,3,4,5,6,7]
+        else:
+            # Check column_to_data values are valid
+            assert np.all(np.array(column_to_data) >= 0)
+            assert len(column_to_data) == 8
+
+        # Read the csv file
+        header = 0 if header_included else None
+        df1 = pd.read_csv(str(csv_path), header=header, index_col=False, sep=separator, engine='python')
+
+        # Rename columns to standard names
+        rename_dict = {}
+        desired_data = ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']
+        for j, ind in enumerate(column_to_data):
+            rename_dict[df1.columns[ind]] = desired_data[j]
+        df1 = df1.rename(columns=rename_dict)
+
+        # Using the filter if provided, remove unwanted rows
+        if filter is not None:
+            df1 = df1[df1[filter[0]] == filter[1]]
+
+        # Convert columns to NDArray[Decimal]
+        timestamps_np = np.array([Decimal(str(ts)) for ts in df1['timestamp']], dtype=object)
+        positions_np = np.array([[Decimal(str(x)), Decimal(str(y)), Decimal(str(z))]
+                                 for x, y, z in zip(df1['x'], df1['y'], df1['z'])], dtype=object)
+        orientations_np = np.array([[Decimal(str(qx)), Decimal(str(qy)), Decimal(str(qz)), Decimal(str(qw))]
+                                    for qx, qy, qz, qw in zip(df1['qx'], df1['qy'], df1['qz'], df1['qw'])], dtype=object)
+
+        # If timestamps are in ns, convert to s
+        if ts_in_ns:
+            timestamps_np = timestamps_np / Decimal('1e9')
+
+        # Reorder the data if needed
+        if reorder_data:
+            print("Warning: This code is not tested yet!")
+            sort_indices = np.argsort(timestamps_np)
+            timestamps_np = timestamps_np[sort_indices]
+            positions_np = positions_np[sort_indices]
+            orientations_np = orientations_np[sort_indices]
+
+        # Create a PathData instance
+        return PathData(frame_id, timestamps_np, positions_np, orientations_np, frame)
+
+    @classmethod
+    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame,
+                      header_included: bool, column_to_data: Union[List[int], None] = None):
+        """
+        Creates a PathData class from a text file.
+
+        Args:
+            file_path (Path | str): Path to the file containing the path data.
+            frame_id (str): The frame where this path is relative to.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+            header_included (bool): If this text file has a header, so we can remove it.
+            column_to_data (list[int]): Tells the algorithms which columns in the text file contain which
+                of the following data: ['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz']. Thus,
+                index 0 of column_to_data should be the column that timestamp data is found in the
+                text file. Set to None to use [0,1,2,3,4,5,6,7].
+        Returns:
+            PathData: Instance of this class.
+        """
+
+        # If column_to_data is None, assume default
+        if column_to_data is None:
+            column_to_data = [0,1,2,3,4,5,6,7]
+        else:
+            # Check column_to_data values are valid
+            assert np.all(np.array(column_to_data) >= 0)
+            assert len(column_to_data) == 8
+
+        # Count the number of lines in the file
+        line_count = 0
+        with open(str(file_path), 'r') as file:
+            for _ in file:
+                line_count += 1
+
+        # Setup arrays to hold data
+        timestamps_np = np.zeros((line_count), dtype=object)
+        positions_np = np.zeros((line_count, 3), dtype=object)
+        orientations_np = np.zeros((line_count, 4), dtype=object)
+
+        # Open the txt file and read in the data
+        with open(str(file_path), 'r') as file:
+            for i, line in enumerate(file):
+                line_split = line.split(' ')
+                timestamps_np[i] = line_split[column_to_data[0]]
+                positions_np[i] = np.array([line_split[column_to_data[1]], line_split[column_to_data[2]], line_split[column_to_data[3]]])
+                orientations_np[i] = np.array([line_split[column_to_data[5]], line_split[column_to_data[6]], line_split[column_to_data[7]], line_split[column_to_data[4]]])
+
+        # Remove the header
+        if header_included:
+            timestamps_np = timestamps_np[1:]
+            positions_np = positions_np[1:]
+            orientations_np = orientations_np[1:]
+
+        # Create a PathData instance
+        return PathData(frame_id, timestamps_np, positions_np, orientations_np, frame)
+
+    @classmethod
+    def from_tum(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame):
+        """
+        Creates a PathData class from a TUM RGB-D dataset trajectory format text file.
+
+        Each row must contain 8 space-separated values::
+
+            timestamp x y z q_x q_y q_z q_w
+
+        where ``timestamp`` is in seconds and the orientation quaternion is in
+        ``(x, y, z, w)`` order.
+
+        Args:
+            file_path (Path | str): Path to the TUM trajectory file.
+            frame_id (str): The frame where this path is relative to.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+
+        Returns:
+            PathData: Instance of this class.
+        """
+        # TUM order: ts x y z qx qy qz qw
+        # column_to_data: ts=0, x=1, y=2, z=3, qw=7, qx=4, qy=5, qz=6
+        return cls.from_txt_file(file_path, frame_id, frame,
+                                 header_included=False,
+                                 column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
+
     # =========================================================================
-    # ============================ Visualization ============================== 
-    # =========================================================================  
+    # ============================ Visualization ==============================
+    # =========================================================================
 
     @staticmethod
     def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str], 
@@ -693,8 +851,118 @@ class PathData(SequentialData):
         plt.show()
     
     # =========================================================================
-    # ============================ Export Methods ============================= 
-    # =========================================================================  
+    # ============================ Export Methods =============================
+    # =========================================================================
+
+    def to_csv(self, csv_path: Union[Path, str], write_header: bool = True):
+        """
+        Writes the path data to a .csv file. Note that data will be
+        saved in the following order: timestamp, pos.x, pos.y, pos.z,
+        ori.w, ori.x, ori.y, ori.z. Timestamp is in seconds.
+
+        Args:
+            csv_path (Path | str): Path to the output csv file.
+            write_header (bool): If false, skip the header row.
+
+        Raises:
+            ValueError: If the output file already exists.
+        """
+
+        # setup tqdm
+        pbar = tqdm.tqdm(total=None, desc="Saving to csv... ", unit=" frames")
+
+        # Check that file path doesn't already exist
+        file_path = Path(csv_path)
+        if os.path.exists(file_path):
+            raise ValueError(f"Output file already exists: {file_path}")
+
+        # Open csv file
+        with open(file_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',')
+
+            # Write the first row
+            if write_header:
+                writer.writerow(['timestamp', 'x', 'y', 'z', 'qw', 'qx', 'qy', 'qz'])
+
+            # Write message data to the csv file
+            for i in range(len(self.timestamps)):
+                writer.writerow([str(self.timestamps[i]),
+                    str(self.positions[i][0]), str(self.positions[i][1]), str(self.positions[i][2]),
+                    str(self.orientations[i][3]), str(self.orientations[i][0]), str(self.orientations[i][1]),
+                    str(self.orientations[i][2])])
+                pbar.update(1)
+
+    def to_txt_file(self, file_path: Union[Path, str], data_to_column: Union[List[int], None] = None):
+        """
+        Writes the path data to a space-separated text file. This is the inverse
+        of :meth:`from_txt_file`.
+
+        ``data_to_column`` specifies the output column index for each of the 8
+        data fields (in this fixed order): timestamp, x, y, z, qw, qx, qy, qz.
+        For example, the default ``[0, 1, 2, 3, 4, 5, 6, 7]`` produces::
+
+            timestamp x y z qw qx qy qz
+
+        Set to None to use the default ``[0, 1, 2, 3, 4, 5, 6, 7]``.
+
+        Args:
+            file_path (Path | str): Path to the output text file.
+            data_to_column (list[int] | None): Maps each data field to its output
+                column index. Must be a permutation of ``[0, 1, 2, 3, 4, 5, 6, 7]``.
+
+        Raises:
+            ValueError: If the output file already exists.
+        """
+
+        # Default column ordering
+        if data_to_column is None:
+            data_to_column = [0, 1, 2, 3, 4, 5, 6, 7]
+        else:
+            assert np.all(np.array(data_to_column) >= 0)
+            assert len(data_to_column) == 8
+
+        # Check that file path doesn't already exist
+        out_path = Path(file_path)
+        if os.path.exists(out_path):
+            raise ValueError(f"Output file already exists: {out_path}")
+
+        # setup tqdm
+        pbar = tqdm.tqdm(total=None, desc="Saving to txt... ", unit=" frames")
+
+        with open(out_path, 'w') as f:
+            for i in range(len(self.timestamps)):
+                row = [''] * 8
+                row[data_to_column[0]] = str(self.timestamps[i])
+                row[data_to_column[1]] = str(self.positions[i][0])
+                row[data_to_column[2]] = str(self.positions[i][1])
+                row[data_to_column[3]] = str(self.positions[i][2])
+                row[data_to_column[4]] = str(self.orientations[i][3])  # qw
+                row[data_to_column[5]] = str(self.orientations[i][0])  # qx
+                row[data_to_column[6]] = str(self.orientations[i][1])  # qy
+                row[data_to_column[7]] = str(self.orientations[i][2])  # qz
+                f.write(' '.join(row) + '\n')
+                pbar.update(1)
+
+    def to_tum(self, file_path: Union[Path, str]):
+        """
+        Writes the path data to a TUM RGB-D dataset trajectory format text file.
+
+        Each row contains 8 space-separated values::
+
+            timestamp x y z q_x q_y q_z q_w
+
+        where ``timestamp`` is in seconds and the orientation quaternion is in
+        ``(x, y, z, w)`` order.
+
+        Args:
+            file_path (Path | str): Path to the output text file.
+
+        Raises:
+            ValueError: If the output file already exists.
+        """
+        # TUM order: ts x y z qx qy qz qw
+        # data fields (ts, x, y, z, qw, qx, qy, qz) → columns (0, 1, 2, 3, 7, 4, 5, 6)
+        self.to_txt_file(file_path, data_to_column=[0, 1, 2, 3, 7, 4, 5, 6])
 
     def to_OdometryData(self, new_frame_id: str, new_child_frame_id: str):
         """ 

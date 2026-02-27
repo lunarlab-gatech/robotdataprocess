@@ -64,7 +64,7 @@ def main():
 
     # Calculate RMS ATE, among other metrics
     print("\n========== Merged Trajectories for dataset: ", dataset_name, "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
     print_errors(metrics_dictionary)
 
     # Visualize the result on the dataset map
