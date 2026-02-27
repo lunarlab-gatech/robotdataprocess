@@ -18,7 +18,7 @@ def main():
         robot_type = robot_name[:-3]
         est_data = OdometryData.from_csv(dataset_folder + '/results/LIO-SAM/' + robot_type + '/' + robot_name + '/' + file_name, 
                                         "world", "lidar", CoordinateFrame.ENU, True, None)
-        gt_data = OdometryData.from_txt_file(dataset_folder + "/data/" + robot_name + '/' + robot_name + '.txt', 
+        gt_data = OdometryData.from_txt(dataset_folder + "/data/" + robot_name + '/' + robot_name + '.txt', 
                                         "world", "imu", CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
              
         # Get L->I transformation

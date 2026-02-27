@@ -20,7 +20,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
                                       / robot_name / 'vins_result_no_loop_reformatted.csv', 
                                       'world', robot_name+"/odom", 
                                       CoordinateFrame.FLU, True)
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 
+    pose_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 
                                            'world', robot_name + '/ground_truth/odom', CoordinateFrame.NED)
     seg_data = ImageDataInMemory.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageDataInMemory.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')

@@ -11,10 +11,10 @@ def load_data_GAC_Mapping(dataset_name, experiment_name, robot0_name, robot1_nam
 
     # Load the estimated data
     user = getpass.getuser()
-    data.est_data_robot0 = OdometryData.from_txt_file('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/results/GAC-Mapping/' 
-                                    + experiment_name + '/0.txt', "map", 'robot0', CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
-    data.est_data_robot1 = OdometryData.from_txt_file('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/results/GAC-Mapping/' 
-                                    + experiment_name + '/1.txt', "map", 'robot1', CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
+    data.est_data_robot0 = OdometryData.from_tum('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/results/GAC-Mapping/' 
+                                    + experiment_name + '/0.txt', "map", 'robot0', CoordinateFrame.ENU)
+    data.est_data_robot1 = OdometryData.from_tum('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/results/GAC-Mapping/' 
+                                    + experiment_name + '/1.txt', "map", 'robot1', CoordinateFrame.ENU)
     data.est_data_lst = [data.est_data_robot0, data.est_data_robot1]
 
     # For some reason, GAC-Mapping orientation is 180° rotated around the axes pointed equally in the YZ direction
@@ -24,10 +24,10 @@ def load_data_GAC_Mapping(dataset_name, experiment_name, robot0_name, robot1_nam
     data.est_data_robot1._ori_apply_rotation(H_rotation)
 
     # Load the ground truth data
-    data.gt_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + \
-                                robot0_name + '/' + robot0_name + '.txt', "world", "robot0", CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
-    data.gt_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + \
-                                robot1_name + '/' + robot1_name + '.txt', "world", "robot1", CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
+    data.gt_data_robot0 = OdometryData.from_tum('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + \
+                                robot0_name + '/' + robot0_name + '.txt', "world", "robot0", CoordinateFrame.ENU)
+    data.gt_data_robot1 = OdometryData.from_tum('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + \
+                                robot1_name + '/' + robot1_name + '.txt', "world", "robot1", CoordinateFrame.ENU)
     data.gt_data_lst = [data.gt_data_robot0, data.gt_data_robot1]
     return data
 

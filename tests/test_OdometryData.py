@@ -64,7 +64,7 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data.positions[10].astype(np.float128), [-68760.22833236, -97018.3443167711, 4776.87739072918])
         np.testing.assert_array_equal(odom_data.orientations[10].astype(np.float128), [0.586834741837591, 0.199208236471664, -0.784542763433785, 0.0208258646384441])
 
-    def test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag(self):
+    def test_from_txt_AND_get_ros_msg_AND_from_ros2_bag(self):
         """
         Test that we can load Odometry data from a txt file 
         and save it into a ROS2 bag.
@@ -72,7 +72,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU, False)
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.FLU, False)
         bag_path = Path(Path('.'), 'tests', 'test_bags', 'test_from_txt_file', 'odom_bag').absolute()
         if os.path.isdir(bag_path):
             if os.path.exists(bag_path / 'odom_bag.db3'):
@@ -105,7 +105,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Check that the new arguments work properly
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom_openvins.txt').absolute()
-        odom_data_test = OdometryData.from_txt_file(file_path, 'frame', 'child_frame', CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
+        odom_data_test = OdometryData.from_txt(file_path, 'frame', 'child_frame', CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
         np.testing.assert_equal(odom_data_test.len(), 3)
         np.testing.assert_equal(odom_data_test.frame_id, 'frame')
         np.testing.assert_equal(odom_data_test.child_frame_id, 'child_frame')
@@ -128,7 +128,7 @@ class TestOdometryData(unittest.TestCase):
 
         # ===  Test NED to FLU (default CHANGE_OF_BASIS) ===
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         odom_data.to_coordinate_frame(CoordinateFrame.FLU)
         compare_with_expected(odom_data)
@@ -143,8 +143,8 @@ class TestOdometryData(unittest.TestCase):
             odom_data.to_coordinate_frame(CoordinateFrame.FLU)
 
         # === Test ROTATION vs CHANGE_OF_BASIS orientations ===
-        odom_rotation = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
-        odom_cob = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_rotation = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_cob = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
         original_ori = odom_rotation.orientations.copy()
 
         odom_rotation.to_coordinate_frame(CoordinateFrame.FLU, TransformType.ROTATION)
@@ -185,7 +185,7 @@ class TestOdometryData(unittest.TestCase):
 
         # Load the Odometry data and convert into the ROS frame
         file_path = Path(Path('.'), 'tests', 'test_outputs', 'test_from_txt_file', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
         odom_data.to_coordinate_frame(CoordinateFrame.FLU)
 
         # Shift it so that it starts at the origin
@@ -202,7 +202,7 @@ class TestOdometryData(unittest.TestCase):
     def test_crop_data(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_crop_data', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Test cropping out some data
         odom_data_cropped = deepcopy(odom_data)
@@ -214,7 +214,7 @@ class TestOdometryData(unittest.TestCase):
     def test_ori_apply_rotation(self):
         # Load the Odometry data
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
-        odom_data = OdometryData.from_txt_file(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
 
         # Ensure the rotation functions properly
         odom_data_rotated = deepcopy(odom_data)
@@ -367,6 +367,105 @@ class TestOdometryData(unittest.TestCase):
         existing_file = Path(__file__).absolute()
         with self.assertRaises(ValueError):
             odom.to_csv(existing_file)
+
+    def test_from_tum(self):
+        """
+        Test that OdometryData.from_tum() correctly loads a TUM-format file.
+        TUM format: timestamp x y z qx qy qz qw (space-separated, no header).
+        Orientations must be stored internally as (qx, qy, qz, qw).
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            tum_file = Path(d) / "tum.txt"
+            # Three rows: ts x y z qx qy qz qw
+            tum_file.write_text(
+                "1.0 1.0 2.0 3.0 0.0 0.0 0.0 1.0\n"
+                "2.0 4.0 5.0 6.0 0.5 0.5 0.5 0.5\n"
+                "3.0 7.0 8.0 9.0 0.1 0.2 0.3 0.9\n"
+            )
+
+            odom = OdometryData.from_tum(tum_file, "world", "robot", CoordinateFrame.FLU)
+
+            # Check type and metadata
+            self.assertIsInstance(odom, OdometryData)
+            self.assertEqual(odom.frame_id, "world")
+            self.assertEqual(odom.child_frame_id, "robot")
+            self.assertEqual(odom.frame, CoordinateFrame.FLU)
+            self.assertEqual(odom.len(), 3)
+
+            # Check timestamps
+            np.testing.assert_array_almost_equal(
+                odom.timestamps.astype(float), [1.0, 2.0, 3.0])
+
+            # Check positions
+            np.testing.assert_array_almost_equal(
+                odom.positions[0].astype(float), [1.0, 2.0, 3.0])
+            np.testing.assert_array_almost_equal(
+                odom.positions[1].astype(float), [4.0, 5.0, 6.0])
+            np.testing.assert_array_almost_equal(
+                odom.positions[2].astype(float), [7.0, 8.0, 9.0])
+
+            # Check orientations stored as (qx, qy, qz, qw)
+            np.testing.assert_array_almost_equal(
+                odom.orientations[0].astype(float), [0.0, 0.0, 0.0, 1.0])
+            np.testing.assert_array_almost_equal(
+                odom.orientations[1].astype(float), [0.5, 0.5, 0.5, 0.5])
+            np.testing.assert_array_almost_equal(
+                odom.orientations[2].astype(float), [0.1, 0.2, 0.3, 0.9])
+
+    def test_from_tum_column_order(self):
+        """
+        from_tum() must read qw from the last (8th) column, not the 5th.
+        Verifies the TUM mapping ts x y z qx qy qz qw is applied correctly.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            tum_file = Path(d) / "manual.txt"
+            # ts=5.0  x=1  y=2  z=3  qx=0.1  qy=0.2  qz=0.3  qw=0.9
+            tum_file.write_text("5.0 1.0 2.0 3.0 0.1 0.2 0.3 0.9\n")
+
+            odom = OdometryData.from_tum(tum_file, "map", "base_link", CoordinateFrame.FLU)
+            self.assertEqual(odom.len(), 1)
+            self.assertAlmostEqual(float(odom.timestamps[0]), 5.0)
+            np.testing.assert_array_almost_equal(
+                odom.positions[0].astype(float), [1.0, 2.0, 3.0])
+            # qw=0.9 must be last; qx=0.1, qy=0.2, qz=0.3
+            np.testing.assert_array_almost_equal(
+                odom.orientations[0].astype(float), [0.1, 0.2, 0.3, 0.9])
+
+    def test_from_tum_round_trip(self):
+        """
+        Writing with to_tum() and reading back with OdometryData.from_tum()
+        should reproduce the original data exactly.
+        """
+        import tempfile
+
+        odom = OdometryData(
+            "world", "robot",
+            np.array([10.0, 20.0], dtype=object),
+            np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=object),
+            np.array([[0.0, 0.0, 0.0, 1.0], [0.5, 0.5, 0.5, 0.5]], dtype=object),
+            CoordinateFrame.FLU
+        )
+
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "tum.txt"
+            odom.to_tum(out)
+
+            loaded = OdometryData.from_tum(out, "world", "robot", CoordinateFrame.FLU)
+
+            self.assertIsInstance(loaded, OdometryData)
+            self.assertEqual(loaded.frame_id, "world")
+            self.assertEqual(loaded.child_frame_id, "robot")
+            self.assertEqual(loaded.frame, CoordinateFrame.FLU)
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), odom.timestamps.astype(float))
+            np.testing.assert_array_almost_equal(
+                loaded.positions.astype(float), odom.positions.astype(float))
+            np.testing.assert_array_almost_equal(
+                loaded.orientations.astype(float), odom.orientations.astype(float))
 
 if __name__ == "__main__":
     unittest.main()

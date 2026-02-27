@@ -16,8 +16,8 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract data from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
+    imu_data = ImuData.from_txt(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
+    pose_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
     lidar_with_channels_path = input_path.parent / "extract" / "files_for_lio_sam" / robot_name / "lidar"
     if lidar_with_channels_path.exists():
         lidar_data = LiDARData.from_npy_files(lidar_with_channels_path, "lidar_link", CoordinateFrame.NED)

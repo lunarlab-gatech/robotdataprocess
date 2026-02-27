@@ -17,7 +17,7 @@ class TestImuData(unittest.TestCase):
     # - Orientation conversion from NED to ROS frame works as well.
     # These are technically written, but don't test on any orientation other than identity.
     
-    def test_from_txt_file(self):
+    def test_from_txt(self):
         """
         Test that we can load IMU data from a txt file 
         and save it into a ROS2 bag.
@@ -25,7 +25,7 @@ class TestImuData(unittest.TestCase):
 
         # Load the IMU data and save it into a ROS2 bag
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()
-        imu_data = ImuData.from_txt_file(file_path, '/Husky1/base_link', CoordinateFrame.FLU)
+        imu_data = ImuData.from_txt(file_path, '/Husky1/base_link', CoordinateFrame.FLU)
         bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImuData', 'test_from_txt_file', 'imu_bag').absolute()
         if os.path.isdir(bag_path):
             os.remove(bag_path / 'imu_bag.db3')
@@ -45,7 +45,7 @@ class TestImuData(unittest.TestCase):
 
         # ======== Additionaly test when Orientation data is provided
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'synthetic_imu_9axis.txt').absolute()
-        imu_data = ImuData.from_txt_file(file_path, '/Husky2/robot', CoordinateFrame.NED, nine_axis=True)
+        imu_data = ImuData.from_txt(file_path, '/Husky2/robot', CoordinateFrame.NED, nine_axis=True)
         np.testing.assert_equal(float(imu_data.timestamps[84]), 331.79)
         np.testing.assert_array_equal(imu_data.lin_acc[84].astype(np.float128), [-8.800791, -0.004754, -9.927985])
         np.testing.assert_array_equal(imu_data.ang_vel[84].astype(np.float128), [ 0.000035,  0.001181, -0.005946])
@@ -71,7 +71,7 @@ class TestImuData(unittest.TestCase):
 
         # Load the IMU data
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_crop_data', 'imu.txt').absolute()
-        imu_data = ImuData.from_txt_file(file_path, '/Husky1/base_link', CoordinateFrame.FLU)
+        imu_data = ImuData.from_txt(file_path, '/Husky1/base_link', CoordinateFrame.FLU)
 
         # Crop it and make sure it matches what we expect
         imu_data_cropped = deepcopy(imu_data)
@@ -96,14 +96,14 @@ class TestImuData(unittest.TestCase):
         ]
 
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'synthetic_imu_9axis.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.NED, nine_axis=True)
+        imu = ImuData.from_txt(file_path, '/robot', CoordinateFrame.NED, nine_axis=True)
         imu.visualize(float(imu.timestamps[0]), float(imu.timestamps[-1]))
         mock_plt.show.assert_called()
 
     def test_to_PathData_no_orientation_raises(self):
         """ Test error when use_ang_vel=False and no orientations. """
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.FLU, nine_axis=False)
+        imu = ImuData.from_txt(file_path, '/robot', CoordinateFrame.FLU, nine_axis=False)
         with self.assertRaises(ValueError):
             imu.to_PathData(
                 initial_pos=np.array([0, 0, 0], dtype=float),
@@ -114,7 +114,7 @@ class TestImuData(unittest.TestCase):
     def test_to_PathData_unsupported_frame_raises(self):
         """ Test error when frame is unsupported for to_PathData. """
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()
-        imu = ImuData.from_txt_file(file_path, '/robot', CoordinateFrame.FLU, nine_axis=False)
+        imu = ImuData.from_txt(file_path, '/robot', CoordinateFrame.FLU, nine_axis=False)
         imu.frame = CoordinateFrame.ENU
         with self.assertRaises(RuntimeError):
             imu.to_PathData(

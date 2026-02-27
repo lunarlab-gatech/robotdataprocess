@@ -40,7 +40,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
 
     # Load IMU data from text file
     print("\n1. Loading IMU data...")
-    imu_data = ImuData.from_txt_file(
+    imu_data = ImuData.from_txt(
         input_path / 'synthetic_imu.txt',
         f'{robot_name}/imu',
         CoordinateFrame.NED

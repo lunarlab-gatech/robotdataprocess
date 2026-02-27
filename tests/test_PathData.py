@@ -693,7 +693,7 @@ class TestPathData(unittest.TestCase):
     def test_to_txt_file_default_round_trip(self):
         """
         Writing with default data_to_column and reading back with default
-        column_to_data (from_txt_file) should reproduce the original data.
+        column_to_data (from_txt) should reproduce the original data.
         """
         path = self._make_path()
         with tempfile.TemporaryDirectory() as d:
@@ -707,7 +707,7 @@ class TestPathData(unittest.TestCase):
             self.assertAlmostEqual(float(first_row[1]), 1.1)   # x
             self.assertAlmostEqual(float(first_row[4]), 0.9)   # qw at index 4
 
-            loaded = PathData.from_txt_file(out, "world", CoordinateFrame.FLU, header_included=False)
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU, header_included=False)
             np.testing.assert_array_almost_equal(
                 loaded.timestamps.astype(float), path.timestamps.astype(float), decimal=9)
             np.testing.assert_array_almost_equal(
@@ -737,7 +737,7 @@ class TestPathData(unittest.TestCase):
             self.assertAlmostEqual(float(first_row[0]), 0.9)   # qw
             self.assertAlmostEqual(float(first_row[4]), 1.0)   # timestamp
 
-            loaded = PathData.from_txt_file(out, "world", CoordinateFrame.FLU,
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU,
                                             header_included=False,
                                             column_to_data=column_to_data)
             np.testing.assert_array_almost_equal(
@@ -757,7 +757,7 @@ class TestPathData(unittest.TestCase):
     def test_to_tum_format_and_round_trip(self):
         """
         to_tum() should write TUM format (ts x y z qx qy qz qw) and be
-        recoverable via from_txt_file with column_to_data=[0,1,2,3,7,4,5,6].
+        recoverable via from_txt with column_to_data=[0,1,2,3,7,4,5,6].
         """
         path = self._make_path()
         with tempfile.TemporaryDirectory() as d:
@@ -772,8 +772,8 @@ class TestPathData(unittest.TestCase):
             self.assertAlmostEqual(float(first_row[4]), 0.1)   # qx at index 4
             self.assertAlmostEqual(float(first_row[7]), 0.9)   # qw at index 7
 
-            # Round-trip via from_txt_file with TUM column_to_data
-            loaded = PathData.from_txt_file(out, "world", CoordinateFrame.FLU,
+            # Round-trip via from_txt with TUM column_to_data
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU,
                                             header_included=False,
                                             column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
             np.testing.assert_array_almost_equal(
@@ -856,20 +856,15 @@ class TestPathData(unittest.TestCase):
 
     def test_from_tum_odometrydata(self):
         """
-        OdometryData.from_tum() (inherited via super()) should return an
-        OdometryData with the correct child_frame_id set.
+        OdometryData.from_tum() should return an OdometryData with the correct
+        child_frame_id set and correctly parsed TUM column order.
         """
         from robotdataprocess.data_types.OdometryData import OdometryData
         with tempfile.TemporaryDirectory() as d:
             tum_file = Path(d) / "odom.txt"
             tum_file.write_text("10.0 1.0 2.0 3.0 0.0 0.0 0.0 1.0\n")
 
-            # OdometryData inherits from_tum from PathData via super() chain,
-            # but its from_txt_file override requires child_frame_id, so we
-            # call it through from_txt_file directly with TUM column mapping.
-            loaded = OdometryData.from_txt_file(
-                tum_file, "world", "robot", CoordinateFrame.FLU,
-                header_included=False, column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
+            loaded = OdometryData.from_tum(tum_file, "world", "robot", CoordinateFrame.FLU)
             self.assertIsInstance(loaded, OdometryData)
             self.assertEqual(loaded.child_frame_id, "robot")
             np.testing.assert_array_almost_equal(

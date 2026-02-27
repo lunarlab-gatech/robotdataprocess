@@ -15,8 +15,8 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     
     # Extract RGB and IMU from Hercules
     input_path = Path(input_dir).absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    #odom_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', '' + robot_name + '/base_link', CoordinateFrame.NED, False)
+    imu_data = ImuData.from_txt(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    #odom_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 'map', '' + robot_name + '/base_link', CoordinateFrame.NED, False)
     odom_data = OdometryData.from_csv(input_path.parent / 'extract' / 'files_for_roman_baseline' / robot_name / 'poseGT.csv', 'map', robot_name + '/base_link', CoordinateFrame.FLU, True, None)
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_right_Scene')

@@ -63,7 +63,7 @@ def run_stereo_tracking(
 
     # Load ground truth pose
     print("  Loading ground truth pose...")
-    gt_pose = OdometryData.from_txt_file(
+    gt_pose = OdometryData.from_txt(
         input_path / robot_name / 'pose_world_frame.txt',
         'world',
         robot_name + '/base_link',

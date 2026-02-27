@@ -127,7 +127,7 @@ class ImuData(SequentialData):
     
     @classmethod
     @typechecked
-    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame, nine_axis: bool = False):
+    def from_txt(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame, nine_axis: bool = False):
         """
         Creates a class structure from the TartanAir dataset format, which includes
         various .txt files with IMU data. It expects (in order) the timestamp, the linear

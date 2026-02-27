@@ -427,8 +427,8 @@ class PathData(SequentialData):
         return PathData(frame_id, timestamps_np, positions_np, orientations_np, frame)
 
     @classmethod
-    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame,
-                      header_included: bool, column_to_data: Union[List[int], None] = None):
+    def from_txt(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame,
+                 header_included: bool, column_to_data: Union[List[int], None] = None):
         """
         Creates a PathData class from a text file.
 
@@ -482,7 +482,7 @@ class PathData(SequentialData):
         return PathData(frame_id, timestamps_np, positions_np, orientations_np, frame)
 
     @classmethod
-    def from_tum(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame):
+    def from_tum(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame) -> PathData:
         """
         Creates a PathData class from a TUM RGB-D dataset trajectory format text file.
 
@@ -503,9 +503,9 @@ class PathData(SequentialData):
         """
         # TUM order: ts x y z qx qy qz qw
         # column_to_data: ts=0, x=1, y=2, z=3, qw=7, qx=4, qy=5, qz=6
-        return cls.from_txt_file(file_path, frame_id, frame,
-                                 header_included=False,
-                                 column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
+        return cls.from_txt(file_path, frame_id, frame,
+                            header_included=False,
+                            column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
 
     # =========================================================================
     # ============================ Visualization ==============================
@@ -895,7 +895,7 @@ class PathData(SequentialData):
     def to_txt_file(self, file_path: Union[Path, str], data_to_column: Union[List[int], None] = None):
         """
         Writes the path data to a space-separated text file. This is the inverse
-        of :meth:`from_txt_file`.
+        of :meth:`from_txt`.
 
         ``data_to_column`` specifies the output column index for each of the 8
         data fields (in this fixed order): timestamp, x, y, z, qw, qx, qy, qz.

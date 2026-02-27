@@ -156,8 +156,8 @@ class OdometryData(PathData):
         return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
     
     @classmethod
-    def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
-                      header_included: bool, column_to_data: Union[List[int], None] = None):
+    def from_txt(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
+                 header_included: bool, column_to_data: Union[List[int], None] = None):
         """
         Creates an OdometryData class from a text file.
 
@@ -175,8 +175,35 @@ class OdometryData(PathData):
             OdometryData: Instance of this class.
         """
 
-        path_data = super().from_txt_file(file_path, frame_id, frame, header_included, column_to_data)
+        path_data = super().from_txt(file_path, frame_id, frame, header_included, column_to_data)
         return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
+
+    @classmethod
+    def from_tum(cls, file_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame):
+        """
+        Creates an OdometryData class from a TUM RGB-D dataset trajectory format text file.
+
+        Each row must contain 8 space-separated values::
+
+            timestamp x y z q_x q_y q_z q_w
+
+        where ``timestamp`` is in seconds and the orientation quaternion is in
+        ``(x, y, z, w)`` order.
+
+        Args:
+            file_path (Path | str): Path to the TUM trajectory file.
+            frame_id (str): The frame where this odometry is relative to.
+            child_frame_id (str): The frame whose pose is represented by this odometry.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+
+        Returns:
+            OdometryData: Instance of this class.
+        """
+        # TUM order: ts x y z qx qy qz qw
+        # column_to_data: ts=0, x=1, y=2, z=3, qw=7, qx=4, qy=5, qz=6
+        return cls.from_txt(file_path, frame_id, child_frame_id, frame,
+                            header_included=False,
+                            column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
     
     # =========================================================================
     # =========================== Conversion to ROS ===========================
