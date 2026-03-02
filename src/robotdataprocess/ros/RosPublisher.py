@@ -23,6 +23,8 @@ from typing import List, Union, Any, Tuple
 ROS_PUB_QUEUE_SIZE = 10
 MSG_QUEUE_MAX_SIZE = 20 # entries
 RESTART_JUMP_MSGS = 5 # msgs
+CLOCK_TOPIC = '/clock'
+CLOCK_HZ = 100.0
 
 def neutralize_resource_tracker():
     # Create a dummy tracker class that won't crash
@@ -497,9 +499,85 @@ def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Uni
         print(traceback.format_exc())
 
 @typechecked
+def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
+                                  stop_event, all_done_event,
+                                  stats_dict: Union[DictProxy, None] = None) -> None:
+    """
+    Publishes ``/clock`` messages, advancing simulated time in lock-step with
+    wall time from ``start_sim_time``.  Runs until ``all_done_event`` is set
+    (all data publishers finished) or ``stop_event`` is set (KeyboardInterrupt).
+    """
+
+    try:
+        wall_start = time.monotonic() + 1.0  # 1-second ramp-up matches data publishers
+
+        if libtype == ROSMsgLibType.ROSPY:
+            import rospy
+            Clock = ModuleImporter.get_module_attribute('rosgraph_msgs.msg', 'Clock')
+            rospy.init_node("robotdataprocess_clock_publisher", anonymous=True)
+            pub = rospy.Publisher(CLOCK_TOPIC, Clock, queue_size=10)
+            rate = rospy.Rate(CLOCK_HZ)
+
+            while not rospy.is_shutdown() and not all_done_event.is_set() and not stop_event.is_set():
+                elapsed = max(0.0, time.monotonic() - wall_start)
+                sim_time = start_sim_time + elapsed
+                sec = int(sim_time)
+                nsec = int((sim_time - sec) * 1e9)
+                msg = Clock()
+                msg.clock = rospy.Time(secs=sec, nsecs=nsec)
+                pub.publish(msg)
+                if stats_dict is not None:
+                    entry = stats_dict[CLOCK_TOPIC]
+                    entry['last_update_time'] = time.monotonic()
+                    stats_dict[CLOCK_TOPIC] = entry
+                rate.sleep()
+
+        elif libtype == ROSMsgLibType.RCLPY:
+            import rclpy
+            from rclpy.node import Node
+            Clock = ModuleImporter.get_module_attribute('rosgraph_msgs.msg', 'Clock')
+
+            class _ClockNode(Node):
+                def __init__(self_node):
+                    super().__init__("robotdataprocess_clock_publisher")
+                    self_node._pub = self_node.create_publisher(Clock, CLOCK_TOPIC, 10)
+                    self_node._timer = self_node.create_timer(1.0 / CLOCK_HZ, self_node._cb)
+                    self_node._finished = False
+
+                def _cb(self_node):
+                    if all_done_event.is_set() or stop_event.is_set():
+                        self_node._timer.cancel()
+                        self_node._finished = True
+                        return
+                    elapsed = max(0.0, time.monotonic() - wall_start)
+                    sim_time = start_sim_time + elapsed
+                    sec = int(sim_time)
+                    nsec = int((sim_time - sec) * 1e9)
+                    msg = Clock()
+                    msg.clock.sec = sec
+                    msg.clock.nanosec = nsec
+                    self_node._pub.publish(msg)
+                    if stats_dict is not None:
+                        entry = stats_dict[CLOCK_TOPIC]
+                        entry['last_update_time'] = time.monotonic()
+                        stats_dict[CLOCK_TOPIC] = entry
+
+            if not rclpy.ok():
+                rclpy.init()
+            node = _ClockNode()
+            while rclpy.ok() and not node._finished:
+                rclpy.spin_once(node, timeout_sec=0.1)
+
+    except Exception:
+        print("Exception in clock publisher:")
+        print(traceback.format_exc())
+
+
+@typechecked
 def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: List[str], data_msg_type: List[Union[str, None]],
-                                  data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool, 
-                                  verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False) -> None:
+                                  data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool,
+                                  verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False,
+                                  publish_clock: bool = False) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
@@ -514,6 +592,7 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         verbose: Whether to print topic publishing status to the console.
         delay_seconds: Delay in seconds before doing anything (for testing purposes).
         wait_for_sub: Whether to wait for a subscriber before we start publishing (for testing purposes).
+        publish_clock: Whether to publish a ``/clock`` topic alongside the data streams.
     """
 
     # Optional delay before starting (for testing purposes)
@@ -530,8 +609,11 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
     stats_dict = manager.dict() # Shared across processes
 
     # Initialize stats_dict for each topic
-    for topic in data_topics:
-        stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0, 
+    all_topics = list(data_topics)
+    if publish_clock:
+        all_topics.append(CLOCK_TOPIC)
+    for topic in all_topics:
+        stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0,
                              "inst_hz": 0, "skipped": 0, "log_queue": manager.list(),
                              'local_buf_size': 0, 'worker_queue_size': 0}
 
@@ -550,6 +632,16 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         processes.append(p)
         topic_to_proc[topic] = p
 
+    # Launch the clock publisher if requested (tracked separately — it stops after data publishers finish)
+    clock_process: Union[Process, None] = None
+    all_done_event = Event()
+    if publish_clock:
+        start_sim_time = min(float(data.timestamps[0]) for data in data_list)
+        clock_process = Process(target=_run_clock_publisher_process,
+                                args=(libtype, start_sim_time, stop_event, all_done_event, stats_dict))
+        clock_process.start()
+        topic_to_proc[CLOCK_TOPIC] = clock_process
+
     # Helper to build the table with a Status column
     def generate_table() -> Table:
         table = Table(title="ROS Publisher Dashboard", show_header=True, header_style="bold magenta")
@@ -560,7 +652,7 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         table.add_column("Inst Hz", justify="right")
         table.add_column("Skipped Msgs", justify="right")
         table.add_column("Buffer Sizes", justify="right")
-        
+
         for topic, s in stats_dict.items():
             proc = topic_to_proc[topic]
             row_style = None
@@ -578,9 +670,9 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
 
             table.add_row(
                 status,
-                topic, 
-                f"{s['progress']}/{s['total']}", 
-                f"{s['avg_hz']:.1f}", 
+                topic,
+                f"{s['progress']}/{s['total']}",
+                f"{s['avg_hz']:.1f}",
                 f"{s['inst_hz']:.1f}",
                 f"{s['skipped']}",
                 f"{s['local_buf_size']}/∞ | {s['worker_queue_size']}/{MSG_QUEUE_MAX_SIZE}",
@@ -588,7 +680,7 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
             )
         return table
 
-    # Wait for all publishers to finish (and provide updates if requested)
+    # Wait for all data publishers to finish (and provide updates if requested)
     try:
         if verbose:
             with Live(generate_table(), refresh_per_second=10, screen=False) as live:
@@ -610,8 +702,14 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         stop_event.set()
         for p in processes:
             p.join()
+
+    # Signal the clock publisher to stop and wait for it
+    if clock_process is not None:
+        all_done_event.set()
+        clock_process.join()
+
     manager.shutdown()
-    
+
     # Shutdown if requested
     if libtype == ROSMsgLibType.RCLPY and shutdown_ros:
         import rclpy
