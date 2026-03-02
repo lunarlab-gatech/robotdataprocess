@@ -1,9 +1,10 @@
+from decimal import Decimal
 import numpy as np
 import os
 import unittest
 from pathlib import Path
 from robotdataprocess.data_types.TransformationData import TransformationData
-from robotdataprocess.data_types.Data import CoordinateFrame, TransformType
+from robotdataprocess.data_types.Data import CoordinateFrame, ROSMsgLibType, TransformType
 from scipy.spatial.transform import Rotation as R
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -488,6 +489,45 @@ class TestTransformationData(unittest.TestCase):
         # --- Error: transform name not found ---
         with self.assertRaises(KeyError):
             TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_nonexistent')
+
+
+    def test_timestamps_single_zero(self):
+        """ TransformationData has exactly one timestamp at Decimal('0'). """
+        tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        self.assertEqual(tf.len(), 1)
+        self.assertEqual(tf.timestamps[0], Decimal('0'))
+
+    def test_get_ros_msg_rosbags_fields(self):
+        """ ROSBAGS TFMessage has correct header, frame IDs, translation, and rotation. """
+        matrix = np.array([
+            [0.0, -1.0, 0.0, 1.0],
+            [1.0,  0.0, 0.0, 2.0],
+            [0.0,  0.0, 1.0, 3.0],
+            [0.0,  0.0, 0.0, 1.0],
+        ])
+        tf = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.FLU)
+        msg = tf.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+        self.assertEqual(len(msg.transforms), 1)
+        ts = msg.transforms[0]
+        self.assertEqual(ts.header.frame_id, "world")
+        self.assertEqual(ts.child_frame_id, "sensor")
+        self.assertEqual(ts.header.stamp.sec, 0)
+        self.assertEqual(ts.header.stamp.nanosec, 0)
+        np.testing.assert_array_almost_equal(
+            [ts.transform.translation.x, ts.transform.translation.y, ts.transform.translation.z],
+            [1.0, 2.0, 3.0])
+        expected_quat = R.from_matrix(matrix[:3, :3]).as_quat()
+        np.testing.assert_array_almost_equal(
+            [ts.transform.rotation.x, ts.transform.rotation.y,
+             ts.transform.rotation.z, ts.transform.rotation.w],
+            expected_quat)
+
+    def test_get_ros_msg_none_raises(self):
+        """ NONE lib type raises NotImplementedError. """
+        tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            tf.get_ros_msg(ROSMsgLibType.NONE, 0)
 
 
 if __name__ == "__main__":

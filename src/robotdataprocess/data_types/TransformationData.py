@@ -1,29 +1,38 @@
 from __future__ import annotations
 
-from .Data import Data, CoordinateFrame, TransformType
+from .Data import CoordinateFrame, ROSMsgLibType, TransformType
+from .SequentialData import SequentialData
+import decimal
+from decimal import Decimal
 import json
+from ..ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 import numpy as np
+from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
-from typing import List, Tuple, Union
+from typing import Any, List, Tuple, Union
 from scipy.spatial.transform import Rotation as R
 import yaml
 
 @typechecked
-class TransformationData(Data):
-   
+class TransformationData(SequentialData):
+
     child_frame_id: str
     translation: np.ndarray  # (3) translation vector
     orientation: np.ndarray  # (4) quaternion in xyzw format
     frame: CoordinateFrame
 
     def __init__(self, frame_id: str, child_frame_id: str, translation: np.ndarray, orientation: np.ndarray, frame: CoordinateFrame):
-                 
-        super().__init__(frame_id=frame_id)
+
+        super().__init__(frame_id=frame_id, timestamps=[Decimal('0')])
         self.child_frame_id = child_frame_id
         self.translation = translation
         self.orientation = orientation
         self.frame = frame
+
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in TransformationData. """
+        pass
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -77,7 +86,7 @@ class TransformationData(Data):
         translation = np.array([data["X"], data["Y"], data["Z"]], dtype=float)
         rotation = R.from_euler(seq="xyz", angles=[data["Roll"], data["Pitch"], data["Yaw"]], degrees=True,)
         orientation = rotation.as_quat()
-        
+
         # Create the class
         return cls(
             frame_id=robot_name,
@@ -96,7 +105,7 @@ class TransformationData(Data):
             yaml_path: Path to the GrAco YAML file.
             transform_name: Name of the transform key (e.g. 'T_Imu_Lidar').
         """
-    
+
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
 
@@ -137,13 +146,13 @@ class TransformationData(Data):
         """
         if matrix.shape != (4, 4):
             raise ValueError("Transformation matrix must be 4x4.")
-        
+
         translation = matrix[0:3, 3]
         rotation_matrix = matrix[0:3, 0:3]
         orientation = R.from_matrix(rotation_matrix).as_quat()
 
         return cls(frame_id, child_frame_id, translation, orientation, frame)
-    
+
     @classmethod
     def optical_wrt_camera(cls, frame: CoordinateFrame, frame_id: str = "camera", child_frame_id: str = "optical") -> TransformationData:
         """
@@ -257,7 +266,7 @@ class TransformationData(Data):
         """
         if self.frame != other.frame:
             raise ValueError(f"Coordinate frames must match for right-side transformation: {self.frame} vs {other.frame}")
-        
+
         if self.child_frame_id != other.frame_id:
             raise ValueError(f"Child frame ID of self must match frame ID of other for right-side transformation: {self.child_frame_id} vs {other.frame_id}")
 
@@ -287,7 +296,7 @@ class TransformationData(Data):
         matrix[0:3, 0:3] = R.from_quat(self.orientation).as_matrix()
         matrix[0:3, 3] = self.translation
         return matrix
-    
+
     # =========================================================================
     # ======================== Visualization Methods===========================
     # =========================================================================
@@ -354,3 +363,115 @@ class TransformationData(Data):
         # Show the plot
         plt.tight_layout()
         plt.show()
+
+    # =========================================================================
+    # =========================== Conversion to ROS ===========================
+    # =========================================================================
+
+    @staticmethod
+    def get_ros_msg_type(lib_type: ROSMsgLibType) -> Any:
+        """
+        Return the ROS message type class for a TFMessage message.
+
+        Args:
+            lib_type: Which ROS message library to use.
+
+        Returns:
+            The ROS message type class for ``tf2_msgs/TFMessage``.
+
+        Raises:
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
+
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            return typestore.types['tf2_msgs/msg/TFMessage'].__msgtype__
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
+            return ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
+        else:
+            raise NotImplementedError(
+                f"Unsupported ROSMsgLibType {lib_type} for TransformationData.get_ros_msg_type()!")
+
+    def get_ros_msg(self, lib_type: ROSMsgLibType, i: int = 0):
+        """
+        Build a TFMessage ROS message from this transformation data using the
+        timestamp stored at index ``i``.
+
+        Args:
+            lib_type: Which ROS message library to use.
+            i: Index into the timestamps array (default 0).
+
+        Returns:
+            A populated ``tf2_msgs/TFMessage`` containing one ``TransformStamped``.
+
+        Raises:
+            NotImplementedError: If ``lib_type`` is not supported.
+        """
+
+        seconds = int(self.timestamps[i])
+        nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(
+            rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN))
+
+        if lib_type == ROSMsgLibType.ROSBAGS:
+            typestore = get_typestore(Stores.ROS2_HUMBLE)
+            TFMessage = typestore.types['tf2_msgs/msg/TFMessage']
+            TransformStamped = typestore.types['geometry_msgs/msg/TransformStamped']
+            Transform = typestore.types['geometry_msgs/msg/Transform']
+            Header = typestore.types['std_msgs/msg/Header']
+            Time = typestore.types['builtin_interfaces/msg/Time']
+            Vector3 = typestore.types['geometry_msgs/msg/Vector3']
+            Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
+
+            return TFMessage(transforms=[
+                TransformStamped(
+                    header=Header(
+                        stamp=Time(sec=seconds, nanosec=nanoseconds),
+                        frame_id=self.frame_id),
+                    child_frame_id=self.child_frame_id,
+                    transform=Transform(
+                        translation=Vector3(
+                            x=float(self.translation[0]),
+                            y=float(self.translation[1]),
+                            z=float(self.translation[2])),
+                        rotation=Quaternion(
+                            x=float(self.orientation[0]),
+                            y=float(self.orientation[1]),
+                            z=float(self.orientation[2]),
+                            w=float(self.orientation[3]))))])
+
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
+            TFMessage = ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
+            TransformStamped = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'TransformStamped')
+            Transform = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Transform')
+            Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
+            Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+            Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+
+            ts = TransformStamped()
+            ts.header = Header()
+            if lib_type == ROSMsgLibType.RCLPY:
+                Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                ts.header.stamp = Time(seconds=seconds, nanoseconds=nanoseconds).to_msg()
+            else:
+                rospy = ModuleImporter.get_module('rospy')
+                ts.header.stamp = rospy.Time(secs=seconds, nsecs=nanoseconds)
+            ts.header.frame_id = self.frame_id
+            ts.child_frame_id = self.child_frame_id
+            ts.transform = Transform()
+            ts.transform.translation = Vector3()
+            ts.transform.translation.x = float(self.translation[0])
+            ts.transform.translation.y = float(self.translation[1])
+            ts.transform.translation.z = float(self.translation[2])
+            ts.transform.rotation = Quaternion()
+            ts.transform.rotation.x = float(self.orientation[0])
+            ts.transform.rotation.y = float(self.orientation[1])
+            ts.transform.rotation.z = float(self.orientation[2])
+            ts.transform.rotation.w = float(self.orientation[3])
+
+            msg = TFMessage()
+            msg.transforms = [ts]
+            return msg
+
+        else:
+            raise NotImplementedError(
+                f"Unsupported ROSMsgLibType {lib_type} for TransformationData.get_ros_msg()!")
