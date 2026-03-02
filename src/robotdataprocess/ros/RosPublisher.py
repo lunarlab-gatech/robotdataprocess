@@ -542,7 +542,6 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
             Clock = ModuleImporter.get_module_attribute('rosgraph_msgs.msg', 'Clock')
             rospy.init_node("robotdataprocess_clock_publisher", anonymous=True)
             pub = rospy.Publisher(CLOCK_TOPIC, Clock, queue_size=10)
-            rate = rospy.Rate(CLOCK_HZ)
 
             count = 0
             pub_start = wall_start
@@ -553,18 +552,22 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
                 msg.clock = rospy.Time(secs=sec, nsecs=nsec)
                 pub.publish(msg)
                 count = _update_clock_stats(count, pub_start, prev_time)
-                rate.sleep()
+                time.sleep(1.0 / CLOCK_HZ)
 
         elif libtype == ROSMsgLibType.RCLPY:
             import rclpy
             from rclpy.node import Node
+            from rclpy.clock import Clock as RclpyClock, ClockType
             Clock = ModuleImporter.get_module_attribute('rosgraph_msgs.msg', 'Clock')
 
             class _ClockNode(Node):
                 def __init__(self_node):
                     super().__init__("robotdataprocess_clock_publisher")
                     self_node._pub = self_node.create_publisher(Clock, CLOCK_TOPIC, 10)
-                    self_node._timer = self_node.create_timer(1.0 / CLOCK_HZ, self_node._cb)
+                    # Use a steady (wall) clock so the timer is not blocked by use_sim_time
+                    self_node._timer = self_node.create_timer(
+                        1.0 / CLOCK_HZ, self_node._cb,
+                        clock=RclpyClock(clock_type=ClockType.STEADY_TIME))
                     self_node._finished = False
                     self_node._count = 0
                     self_node._pub_start = wall_start
