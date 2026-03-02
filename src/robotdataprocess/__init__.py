@@ -5,6 +5,7 @@ from .data_types.Data import CoordinateFrame, ROSMsgLibType, TransformType
 from .data_types.ImageData.ImageData import ImageData
 from .data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from .data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
+from .data_types.CameraData import CameraData
 from .data_types.ImuData import ImuData
 from .data_types.LiDARData import LiDARData
 from .data_types.LoopClosureData import LoopClosureData
