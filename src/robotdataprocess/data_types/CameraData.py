@@ -262,10 +262,6 @@ class CameraData(SequentialData):
             msg.height = self.height
             msg.width = self.width
             msg.distortion_model = distortion_str
-            msg.d = self.D.tolist()
-            msg.k = self.K.flatten().tolist()
-            msg.r = self.R.flatten().tolist()
-            msg.p = self.P.flatten().tolist()
             msg.binning_x = 0
             msg.binning_y = 0
             roi = RegionOfInterest()
@@ -275,6 +271,18 @@ class CameraData(SequentialData):
             roi.width = 0
             roi.do_rectify = False
             msg.roi = roi
+
+            # ROS1 uses uppercase field names; ROS2 uses lowercase
+            if lib_type == ROSMsgLibType.ROSPY:
+                msg.D = self.D.tolist()
+                msg.K = self.K.flatten().tolist()
+                msg.R = self.R.flatten().tolist()
+                msg.P = self.P.flatten().tolist()
+            else:
+                msg.d = self.D.tolist()
+                msg.k = self.K.flatten().tolist()
+                msg.r = self.R.flatten().tolist()
+                msg.p = self.P.flatten().tolist()
             return msg
 
         else:
