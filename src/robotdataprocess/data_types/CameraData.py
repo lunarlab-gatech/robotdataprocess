@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from .Data import Data, ROSMsgLibType
+from .Data import ROSMsgLibType
+from .SequentialData import SequentialData
+import decimal
+from decimal import Decimal
 from enum import Enum
 from ..ModuleImporter import ModuleImporter
 import numpy as np
@@ -11,7 +14,7 @@ from typing import Any, Union
 
 
 @typechecked
-class CameraData(Data):
+class CameraData(SequentialData):
     """
     Camera calibration data that can be published as ``sensor_msgs/CameraInfo``
     ROS messages.
@@ -95,7 +98,7 @@ class CameraData(Data):
                  R: Union[NDArray, list],
                  P: Union[NDArray, list]):
 
-        super().__init__(frame_id)
+        super().__init__(frame_id, [Decimal('0')])
         self.width = width
         self.height = height
         self.distortion_model = distortion_model
@@ -108,6 +111,10 @@ class CameraData(Data):
             raise ValueError(f"width must be positive, got {self.width}")
         if self.height <= 0:
             raise ValueError(f"height must be positive, got {self.height}")
+
+    def _invalidate_cache(self):
+        """ Hook for subclasses to clear cached data after mutations. No-op in CameraData. """
+        pass
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -189,16 +196,14 @@ class CameraData(Data):
             raise NotImplementedError(
                 f"Unsupported ROSMsgLibType {lib_type} for CameraData.get_ros_msg_type()!")
 
-    def get_ros_msg(self, lib_type: ROSMsgLibType):
+    def get_ros_msg(self, lib_type: ROSMsgLibType, i: int = 0):
         """
-        Build a CameraInfo ROS message from this calibration data.
-
-        The message timestamp is set to zero (``sec=0, nanosec=0``). If you
-        need a specific stamp, set ``msg.header.stamp`` after calling this
-        method.
+        Build a CameraInfo ROS message from this calibration data using the
+        timestamp stored at index ``i``.
 
         Args:
             lib_type: Which ROS message library to use.
+            i: Index into the timestamps array (default 0).
 
         Returns:
             A populated ``sensor_msgs/CameraInfo`` message object.
@@ -206,6 +211,10 @@ class CameraData(Data):
         Raises:
             NotImplementedError: If ``lib_type`` is not supported.
         """
+
+        seconds = int(self.timestamps[i])
+        nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(
+            rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN))
 
         distortion_str = CameraData.DistortionModel.to_ros_str(self.distortion_model)
 
@@ -218,7 +227,7 @@ class CameraData(Data):
 
             return CameraInfo(
                 header=Header(
-                    stamp=Time(sec=0, nanosec=0),
+                    stamp=Time(sec=seconds, nanosec=nanoseconds),
                     frame_id=self.frame_id),
                 height=self.height,
                 width=self.width,
@@ -245,10 +254,10 @@ class CameraData(Data):
 
             if lib_type == ROSMsgLibType.RCLPY:
                 Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
-                msg.header.stamp = Time(seconds=0, nanoseconds=0).to_msg()
+                msg.header.stamp = Time(seconds=seconds, nanoseconds=nanoseconds).to_msg()
             else:
                 rospy = ModuleImporter.get_module('rospy')
-                msg.header.stamp = rospy.Time(secs=0, nsecs=0)
+                msg.header.stamp = rospy.Time(secs=seconds, nsecs=nanoseconds)
 
             msg.height = self.height
             msg.width = self.width

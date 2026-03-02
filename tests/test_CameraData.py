@@ -127,7 +127,7 @@ class TestCameraData(unittest.TestCase):
     def test_get_ros_msg_rosbags_fields(self):
         """ ROSBAGS message has correct header, dims, distortion model, and matrices. """
         cam = self._make_camera(D=self.D)
-        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS)
+        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
 
         self.assertEqual(msg.header.frame_id, self.FRAME_ID)
         self.assertEqual(msg.header.stamp.sec, 0)
@@ -143,7 +143,7 @@ class TestCameraData(unittest.TestCase):
     def test_get_ros_msg_rosbags_binning_and_roi(self):
         """ ROSBAGS message has binning and ROI zeroed out. """
         cam = self._make_camera()
-        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS)
+        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
 
         self.assertEqual(msg.binning_x, 0)
         self.assertEqual(msg.binning_y, 0)
@@ -157,7 +157,7 @@ class TestCameraData(unittest.TestCase):
         """ NONE lib type raises NotImplementedError. """
         cam = self._make_camera()
         with self.assertRaises(NotImplementedError):
-            cam.get_ros_msg(ROSMsgLibType.NONE)
+            cam.get_ros_msg(ROSMsgLibType.NONE, 0)
 
 
 if __name__ == "__main__":
