@@ -217,7 +217,8 @@ class OdometryData(PathData):
         Args:
             lib_type: Which ROS message library to use.
             msg_type: The message type name. Supported values are ``"Odometry"``,
-                ``"Path"``, and ``"maplab_msg/OdometryWithImuBiases"`` (ROSPY only).
+                ``"Path"``, ``"TFMessage"``, and ``"maplab_msg/OdometryWithImuBiases"``
+                (ROSPY only).
 
         Returns:
             The ROS message type class.
@@ -232,11 +233,15 @@ class OdometryData(PathData):
                 return typestore.types['nav_msgs/msg/Odometry'].__msgtype__
             elif msg_type == "Path":
                 return typestore.types['nav_msgs/msg/Path'].__msgtype__
+            elif msg_type == "TFMessage":
+                return typestore.types['tf2_msgs/msg/TFMessage'].__msgtype__
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.RCLPY:
             if msg_type == "Path":
                 return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
+            elif msg_type == "TFMessage":
+                return ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.ROSPY:
@@ -246,6 +251,8 @@ class OdometryData(PathData):
                 return ModuleImporter.get_module_attribute('maplab_msgs.msg', 'OdometryWithImuBiases')
             elif msg_type == "Path":
                 return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
+            elif msg_type == "TFMessage":
+                return ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         else:
@@ -264,8 +271,8 @@ class OdometryData(PathData):
         Args:
             lib_type: Which ROS message library to use.
             i: The index of the odometry data to convert.
-            msg_type: The message type name (``"Odometry"``, ``"Path"``, or
-                ``"maplab_msg/OdometryWithImuBiases"``).
+            msg_type: The message type name (``"Odometry"``, ``"Path"``,
+                ``"TFMessage"``, or ``"maplab_msg/OdometryWithImuBiases"``).
 
         Raises:
             IndexError: If ``i`` is outside the data bounds.
@@ -335,10 +342,30 @@ class OdometryData(PathData):
                                                             z=self.orientations[j][2],
                                                             w=self.orientations[j][3]))))
 
-                return Path(Header(stamp=Time(sec=int(seconds), 
+                return Path(Header(stamp=Time(sec=int(seconds),
                                             nanosec=int(nanoseconds)),
                                 frame_id=self.frame_id),
                                 poses=self.poses[0:i+1:PATH_SLICE_STEP])
+            elif msg_type == "TFMessage":
+
+                TFMessage = typestore.types['tf2_msgs/msg/TFMessage']
+                TransformStamped = typestore.types['geometry_msgs/msg/TransformStamped']
+                Transform = typestore.types['geometry_msgs/msg/Transform']
+                Vector3 = typestore.types['geometry_msgs/msg/Vector3']
+
+                return TFMessage(transforms=[
+                    TransformStamped(
+                        header=Header(stamp=Time(sec=int(seconds), nanosec=int(nanoseconds)),
+                                      frame_id=self.frame_id),
+                        child_frame_id=self.child_frame_id,
+                        transform=Transform(
+                            translation=Vector3(x=self.positions[i][0],
+                                                y=self.positions[i][1],
+                                                z=self.positions[i][2]),
+                            rotation=Quaternion(x=self.orientations[i][0],
+                                                y=self.orientations[i][1],
+                                                z=self.orientations[i][2],
+                                                w=self.orientations[i][3])))])
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSBAGS")
             
@@ -487,7 +514,41 @@ class OdometryData(PathData):
                 msg.header.frame_id = self.frame_id
                 msg.poses = self.poses_rclpy[0:i+1:PATH_SLICE_STEP]
                 return msg
-            
+
+            elif msg_type == "TFMessage":
+
+                TFMessage = ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
+                TransformStamped = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'TransformStamped')
+                Transform = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Transform')
+                Vector3 = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Vector3')
+                Quaternion = ModuleImporter.get_module_attribute('geometry_msgs.msg', 'Quaternion')
+                Header = ModuleImporter.get_module_attribute('std_msgs.msg', 'Header')
+
+                ts = TransformStamped()
+                ts.header = Header()
+                if lib_type == ROSMsgLibType.RCLPY:
+                    Time = ModuleImporter.get_module_attribute('rclpy.time', 'Time')
+                    ts.header.stamp = Time(seconds=seconds, nanoseconds=int(nanoseconds)).to_msg()
+                else:
+                    rospy = ModuleImporter.get_module('rospy')
+                    ts.header.stamp = rospy.Time(secs=seconds, nsecs=int(nanoseconds))
+                ts.header.frame_id = self.frame_id
+                ts.child_frame_id = self.child_frame_id
+                ts.transform = Transform()
+                ts.transform.translation = Vector3()
+                ts.transform.translation.x = float(self.positions[i][0])
+                ts.transform.translation.y = float(self.positions[i][1])
+                ts.transform.translation.z = float(self.positions[i][2])
+                ts.transform.rotation = Quaternion()
+                ts.transform.rotation.x = float(self.orientations[i][0])
+                ts.transform.rotation.y = float(self.orientations[i][1])
+                ts.transform.rotation.z = float(self.orientations[i][2])
+                ts.transform.rotation.w = float(self.orientations[i][3])
+
+                msg = TFMessage()
+                msg.transforms = [ts]
+                return msg
+
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type} with ROSMsgLibType.ROSPY or ROSMsgLibType.RCLPY.")
         else:

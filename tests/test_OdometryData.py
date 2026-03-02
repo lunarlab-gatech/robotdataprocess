@@ -6,7 +6,7 @@ import os
 import pandas as pd
 from pathlib import Path
 from robotdataprocess import CoordinateFrame
-from robotdataprocess.data_types.Data import TransformType
+from robotdataprocess.data_types.Data import ROSMsgLibType, TransformType
 from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
@@ -102,6 +102,24 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_equal(ros_data.timestamps[PATH_SLICE_STEP], path_data.timestamps[1])
         np.testing.assert_array_equal(ros_data.positions[PATH_SLICE_STEP], path_data.positions[1])
         np.testing.assert_array_equal(ros_data.orientations[PATH_SLICE_STEP], path_data.orientations[1])
+
+        # Check TFMessage via ROSBAGS
+        tf_msg = odom_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 32, "TFMessage")
+        self.assertEqual(len(tf_msg.transforms), 1)
+        ts = tf_msg.transforms[0]
+        self.assertEqual(ts.header.frame_id, '/Husky1')
+        self.assertEqual(ts.child_frame_id, '/Husky1/base_link')
+        np.testing.assert_almost_equal(float(ts.transform.translation.x), float(odom_data.positions[32][0]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.translation.y), float(odom_data.positions[32][1]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.translation.z), float(odom_data.positions[32][2]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.rotation.x), float(odom_data.orientations[32][0]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.rotation.y), float(odom_data.orientations[32][1]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.rotation.z), float(odom_data.orientations[32][2]), decimal=6)
+        np.testing.assert_almost_equal(float(ts.transform.rotation.w), float(odom_data.orientations[32][3]), decimal=6)
+
+        # Check that TFMessage msg_type string is returned by get_ros_msg_type
+        tf_msg_type = OdometryData.get_ros_msg_type(ROSMsgLibType.ROSBAGS, "TFMessage")
+        self.assertEqual(tf_msg_type, 'tf2_msgs/msg/TFMessage')
 
         # Check that the new arguments work properly
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom_openvins.txt').absolute()
