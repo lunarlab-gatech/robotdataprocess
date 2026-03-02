@@ -508,6 +508,32 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
     (all data publishers finished) or ``stop_event`` is set (KeyboardInterrupt).
     """
 
+    def _update_clock_stats(count: int, pub_start: float, prev_time: list) -> int:
+        """Compute and write avg/inst hz and tick count into stats_dict. Returns updated count."""
+        if stats_dict is None:
+            return count + 1
+        now = time.monotonic()
+        count += 1
+        elapsed = now - pub_start
+        avg_hz = count / elapsed if elapsed > 0 else 0.0
+        inst_hz = 1.0 / (now - prev_time[0]) if (now - prev_time[0]) > 0 else 0.0
+        prev_time[0] = now
+        entry = stats_dict[CLOCK_TOPIC]
+        entry['last_update_time'] = now
+        entry['progress'] = count
+        entry['avg_hz'] = avg_hz
+        entry['inst_hz'] = inst_hz
+        stats_dict[CLOCK_TOPIC] = entry
+        return count
+
+    def _compute_sec_nsec() -> Tuple[int, int]:
+        """Compute simulated time (sec, nsec) based on elapsed wall time."""
+        elapsed = max(0.0, time.monotonic() - wall_start)
+        sim_time = start_sim_time + elapsed
+        sec = int(sim_time)
+        nsec = int((sim_time - sec) * 1e9)
+        return sec, nsec
+
     try:
         wall_start = time.monotonic() + 1.0  # 1-second ramp-up matches data publishers
 
@@ -518,18 +544,15 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
             pub = rospy.Publisher(CLOCK_TOPIC, Clock, queue_size=10)
             rate = rospy.Rate(CLOCK_HZ)
 
+            count = 0
+            pub_start = wall_start
+            prev_time = [wall_start]
             while not rospy.is_shutdown() and not all_done_event.is_set() and not stop_event.is_set():
-                elapsed = max(0.0, time.monotonic() - wall_start)
-                sim_time = start_sim_time + elapsed
-                sec = int(sim_time)
-                nsec = int((sim_time - sec) * 1e9)
+                sec, nsec = _compute_sec_nsec()
                 msg = Clock()
                 msg.clock = rospy.Time(secs=sec, nsecs=nsec)
                 pub.publish(msg)
-                if stats_dict is not None:
-                    entry = stats_dict[CLOCK_TOPIC]
-                    entry['last_update_time'] = time.monotonic()
-                    stats_dict[CLOCK_TOPIC] = entry
+                count = _update_clock_stats(count, pub_start, prev_time)
                 rate.sleep()
 
         elif libtype == ROSMsgLibType.RCLPY:
@@ -543,24 +566,21 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
                     self_node._pub = self_node.create_publisher(Clock, CLOCK_TOPIC, 10)
                     self_node._timer = self_node.create_timer(1.0 / CLOCK_HZ, self_node._cb)
                     self_node._finished = False
+                    self_node._count = 0
+                    self_node._pub_start = wall_start
+                    self_node._prev_time = [wall_start]
 
                 def _cb(self_node):
                     if all_done_event.is_set() or stop_event.is_set():
                         self_node._timer.cancel()
                         self_node._finished = True
                         return
-                    elapsed = max(0.0, time.monotonic() - wall_start)
-                    sim_time = start_sim_time + elapsed
-                    sec = int(sim_time)
-                    nsec = int((sim_time - sec) * 1e9)
+                    sec, nsec = _compute_sec_nsec()
                     msg = Clock()
                     msg.clock.sec = sec
                     msg.clock.nanosec = nsec
                     self_node._pub.publish(msg)
-                    if stats_dict is not None:
-                        entry = stats_dict[CLOCK_TOPIC]
-                        entry['last_update_time'] = time.monotonic()
-                        stats_dict[CLOCK_TOPIC] = entry
+                    self_node._count = _update_clock_stats(self_node._count, self_node._pub_start, self_node._prev_time)
 
             if not rclpy.ok():
                 rclpy.init()
