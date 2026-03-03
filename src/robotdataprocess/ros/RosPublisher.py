@@ -62,9 +62,9 @@ class _SingleDataPublisher():
         stats_dict: Dictionary for processes to put publishing statistics for printing.
     """
 
-    def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: SequentialData, topic_name: str, 
-                 type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
-                 verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
+    def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: SequentialData, topic_name: str,
+                 type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
+                 verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
         
         # Save parameters
         self.libtype = libtype
@@ -81,6 +81,7 @@ class _SingleDataPublisher():
         self.skipped_msgs = 0
         self._is_finished = False
         self.restart_when_behind = False
+        self.latched = latched
 
         # Timing setup
         self.start_time = time.monotonic() + 1.0
@@ -121,10 +122,17 @@ class _SingleDataPublisher():
             # For ROS1, we have to intialize rospy AFTER forking processes
             import rospy
             rospy.init_node(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}", anonymous=True)
-            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=ROS_PUB_QUEUE_SIZE)
+            self.publisher = rospy.Publisher(self.topic, self._pub_type, queue_size=ROS_PUB_QUEUE_SIZE, latch=latched)
 
         elif self.libtype == ROSMsgLibType.RCLPY:
-            self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, ROS_PUB_QUEUE_SIZE)
+            if latched:
+                from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
+                qos = QoSProfile(depth=ROS_PUB_QUEUE_SIZE,
+                                 durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                                 reliability=QoSReliabilityPolicy.RELIABLE)
+                self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, qos)
+            else:
+                self.publisher = self.ros2_node_class.create_publisher(self._pub_type, self.topic, ROS_PUB_QUEUE_SIZE)
 
         # If desired, wait until we have at least one subscriber to start publishing
         if wait_for_sub:
@@ -323,6 +331,11 @@ class _SingleDataPublisher():
         # Check if we have no more messages to publish or we get a StopEvent:
         if self.index.value >= self.data.len() or self.stop_event.is_set():
 
+            # Latched publishers stay alive until stop_event is set so that
+            # late-joining subscribers can still receive the latched messages
+            if self.latched and not self.stop_event.is_set():
+                return
+
             # Tell workers to finish (if they haven't already)
             self.stop_event_workers.set()
 
@@ -443,19 +456,19 @@ class _SingleDataPublisher():
 
 @typechecked
 def _run_ROS_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
-                               num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
+                               num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
     """
-    Entry point for each ROS1 publishing multiprocessing worker. 
+    Entry point for each ROS1 publishing multiprocessing worker.
     NOTE: This function feels useless, but follows similar structure to the ROS2 version, which is more complex.
     """
-    
+
     try:
         import rospy
         class SingleDataPublisherROS1():
-            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float,stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
-                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
-                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
-        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
+                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
+                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
+        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
         while not rospy.is_shutdown() and not node._pub._is_finished:
             time.sleep(0.1)
 
@@ -464,8 +477,8 @@ def _run_ROS_publisher_process(data: SequentialData, topic_name: str, type: Unio
         print(traceback.format_exc())
 
 @typechecked
-def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, 
-                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None) -> None:
+def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
+                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
     """
@@ -477,18 +490,18 @@ def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Uni
 
         # Wrapper class that is also a ROS2 Node, so that we are in compliance with rclpy design.
         class SingleDataPublisherROS2(Node):
-            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1, 
-                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None):
+            def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
+                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
-                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
 
             def is_finished(self) -> bool:
                 return self._pub._is_finished
-     
+
         # Start ROS2 node
         if not rclpy.ok():
             rclpy.init()
-        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict)
+        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=2.0)
             if node.is_finished():
@@ -600,7 +613,7 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
 def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: List[str], data_msg_type: List[Union[str, None]],
                                   data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool,
                                   verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False,
-                                  publish_clock: bool = False) -> None:
+                                  publish_clock: bool = False, data_latched: Union[List[bool], None] = None) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
@@ -616,6 +629,9 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         delay_seconds: Delay in seconds before doing anything (for testing purposes).
         wait_for_sub: Whether to wait for a subscriber before we start publishing (for testing purposes).
         publish_clock: Whether to publish a ``/clock`` topic alongside the data streams.
+        data_latched: Per-topic flag indicating whether the publisher should be latched (e.g. for
+            static transforms). Latched publishers hold the node alive until all non-latched
+            publishers finish. Defaults to all False.
     """
 
     # Optional delay before starting (for testing purposes)
@@ -626,6 +642,11 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
     assert len(data_list) == len(data_topics), "First four arguments need to have the same length!"
     assert len(data_list) == len(data_msg_type), "First four arguments need to have the same length!"
     assert len(data_list) == len(data_workers), "First four arguments need to have the same length!"
+
+    # Default: latch topics that have only a single timestamp (e.g. static transforms)
+    if data_latched is None:
+        data_latched = [data.len() == 1 for data in data_list]
+    assert len(data_list) == len(data_latched), "data_latched must have the same length as data_list!"
 
     # Create a shared dictionary across processes for statistics
     manager = Manager()
@@ -644,13 +665,13 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
     processes: List[Process] = []
     topic_to_proc: dict = {}
     stop_event = Event()
-    for data, topic, type, hertz, workers in zip(data_list, data_topics, data_msg_type, data_hz, data_workers):
+    for data, topic, type, hertz, workers, latched in zip(data_list, data_topics, data_msg_type, data_hz, data_workers, data_latched):
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict))
+        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict, latched))
         p.start()
         processes.append(p)
         topic_to_proc[topic] = p
@@ -703,11 +724,15 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
             )
         return table
 
-    # Wait for all data publishers to finish (and provide updates if requested)
+    # Separate latched and non-latched publisher processes
+    non_latched_procs = [p for p, l in zip(processes, data_latched) if not l]
+    latched_procs = [p for p, l in zip(processes, data_latched) if l]
+
+    # Wait for non-latched publishers to finish, then signal latched ones to stop
     try:
         if verbose:
             with Live(generate_table(), refresh_per_second=10, screen=False) as live:
-                while any(p.is_alive() for p in processes):
+                while any(p.is_alive() for p in non_latched_procs):
                     for topic in data_topics:
                         logs = stats_dict[topic]["log_queue"]
                         while len(logs) > 0:
@@ -715,11 +740,21 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
                             live.console.print(f"[{topic}] {msg}", markup=False, style="")
                     live.update(generate_table())
                     time.sleep(0.1)
+                for p in non_latched_procs:
+                    p.join()
+
+                # Non-latched publishers are done; signal latched publishers to shut down
+                stop_event.set()
+                for p in latched_procs:
+                    p.join()
                 live.update(generate_table())
-            for p in processes:
-                p.join()
         else:
-            for p in processes:
+            for p in non_latched_procs:
+                p.join()
+
+            # Non-latched publishers are done; signal latched publishers to shut down
+            stop_event.set()
+            for p in latched_procs:
                 p.join()
     except KeyboardInterrupt:
         stop_event.set()
