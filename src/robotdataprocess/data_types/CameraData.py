@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, Union
+from .ImageData.ImageData import ImageData
 
 
 @typechecked
@@ -115,6 +116,22 @@ class CameraData(SequentialData):
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in CameraData. """
         pass
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    def sync_to_ImageData(self, image_data: ImageData) -> None:
+        """
+        Set this object's timestamps to exactly match those of ``image_data``.
+
+        This ensures that CameraInfo messages are published at the same times
+        as their corresponding Image messages.
+
+        Args:
+            image_data: The ImageData whose timestamps to copy.
+        """
+        self.timestamps = list(image_data.timestamps)
 
     # =========================================================================
     # ============================ Class Methods ==============================

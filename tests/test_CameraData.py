@@ -1,9 +1,12 @@
+from decimal import Decimal
 import numpy as np
 import os
 import unittest
 
 from robotdataprocess.data_types.CameraData import CameraData
 from robotdataprocess.data_types.Data import ROSMsgLibType
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.ImageData.ImageData import ImageData
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -158,6 +161,27 @@ class TestCameraData(unittest.TestCase):
         cam = self._make_camera()
         with self.assertRaises(NotImplementedError):
             cam.get_ros_msg(ROSMsgLibType.NONE, 0)
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    def test_sync_to_ImageData(self):
+        """ sync_to_ImageData copies timestamps from ImageDataInMemory exactly. """
+        timestamps = [Decimal('1.0'), Decimal('2.0'), Decimal('3.0')]
+        images = np.zeros((3, self.HEIGHT, self.WIDTH), dtype=np.uint8)
+        image_data = ImageDataInMemory(
+            frame_id=self.FRAME_ID,
+            timestamps=timestamps,
+            height=self.HEIGHT,
+            width=self.WIDTH,
+            encoding=ImageData.ImageEncoding.Mono8,
+            images=images)
+
+        cam = self._make_camera()
+        cam.sync_to_ImageData(image_data)
+
+        self.assertEqual(cam.timestamps, timestamps)
 
 
 if __name__ == "__main__":
