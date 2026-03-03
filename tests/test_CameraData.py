@@ -181,7 +181,7 @@ class TestCameraData(unittest.TestCase):
         cam = self._make_camera()
         cam.sync_to_ImageData(image_data)
 
-        self.assertEqual(cam.timestamps, timestamps)
+        np.testing.assert_array_equal(cam.timestamps, np.array(timestamps))
 
 
 if __name__ == "__main__":

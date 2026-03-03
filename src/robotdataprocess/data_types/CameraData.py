@@ -131,7 +131,7 @@ class CameraData(SequentialData):
         Args:
             image_data: The ImageData whose timestamps to copy.
         """
-        self.timestamps = list(image_data.timestamps)
+        self.timestamps = np.array(image_data.timestamps)
 
     # =========================================================================
     # ============================ Class Methods ==============================
