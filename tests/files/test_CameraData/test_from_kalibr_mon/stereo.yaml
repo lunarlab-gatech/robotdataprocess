@@ -1,0 +1,42 @@
+# General sensor definitions
+cam0:
+  rostopic: /camera_left/image_raw
+  rate_hz: 20
+  camera_model: pinhole
+  distortion_model: radial-tangential
+  intrinsics: [940.862825677534, 938.554923506332, 799.1626975233576, 559.295406893583] #fu, fv, cu, cv
+  distortion_coeffs: [-0.1008504099655989, 0.08905706623788286, 0.0007516966627205781,
+    -0.0011958374307601393]  # k1, k2, r1, r2
+  resolution: [1600, 1100]
+  sensor_type: Flir-BFS-U3-16S7C
+
+cam1:
+  rostopic: /camera_right/image_raw
+  rate_hz: 20
+  camera_model: pinhole
+  distortion_model: radial-tangential
+  intrinsics: [934.5190744321391, 932.525429508503, 792.8073165035943, 562.7061769000949] #fu, fv, cu, cv
+  distortion_coeffs: [-0.10093604150569942, 0.08966460684307566, 0.0006752623328139636,
+    -0.0015031965111152103]  # k1, k2, r1, r2
+  resolution: [1600, 1100]
+  sensor_type: Flir-BFS-U3-16S7C
+
+# Stereo extrinsics
+T_cam1_cam0:
+  cols: 4
+  rows: 4
+  data: [ 0.99965907,  0.01921468, -0.01767879, -0.23223044,
+         -0.01922979,  0.99981486, -0.00068469,  0.00288665,
+          0.01766236,  0.00102441,  0.99984348, -0.000523  ,
+          0.        ,  0.        ,  0.        ,  1.        ]
+
+T_cam0_cam1:
+  cols: 4
+  rows: 4
+  data: [ 0.99965907, -0.01922979,  0.01766236,  0.23221601,
+          0.01921468,  0.99981486,  0.00102441,  0.00157665,
+         -0.01767879, -0.00068469,  0.99984348, -0.00358066,
+          0.        ,  0.        ,  0.        ,  1.        ]
+
+
+

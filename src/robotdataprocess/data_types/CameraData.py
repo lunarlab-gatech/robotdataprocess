@@ -11,9 +11,11 @@ from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from numpy.typing import NDArray
+from pathlib import Path
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, Optional, Tuple, Union
+import yaml
 from .ImageData.ImageData import ImageData
 
 
@@ -86,6 +88,29 @@ class CameraData(SequentialData):
             else:
                 raise NotImplementedError(
                     f"ROS distortion model string '{model_str}' is not supported!")
+
+        @classmethod
+        def from_kalibr_str(cls, model_str: str) -> CameraData.DistortionModel:
+            """
+            Convert a kalibr distortion model string to a DistortionModel enum value.
+
+            Args:
+                model_str: The kalibr distortion model string
+                    (e.g. ``"radial-tangential"``).
+
+            Returns:
+                The corresponding DistortionModel enum value.
+
+            Raises:
+                NotImplementedError: If ``model_str`` is not a recognised kalibr
+                    distortion model string.
+            """
+
+            if model_str.lower().replace('_', '-') == 'radial-tangential':
+                return cls.RADIAL_TANGENTIAL
+            else:
+                raise NotImplementedError(
+                    f"kalibr distortion model string '{model_str}' is not supported!")
 
     width: int
     height: int
@@ -185,6 +210,58 @@ class CameraData(SequentialData):
         P[:3, :3] = K
 
         return cls(frame_id=frame_id, width=width, height=height,
+                   distortion_model=distortion_model,
+                   K=K, D=D, R=R, P=P)
+
+    @classmethod
+    def from_kalibr_mono(cls, yaml_path: Union[str, Path], cam_name: str) -> CameraData:
+        """
+        Load a monocular camera calibration from a kalibr YAML file.
+
+        The YAML entry for ``cam_name`` must contain:
+
+        - ``intrinsics``: ``[fu, fv, cu, cv]``
+        - ``distortion_coeffs``: distortion coefficient list
+        - ``distortion_model``: e.g. ``"radial-tangential"``
+        - ``resolution``: ``[width, height]``
+
+        R is fixed to the identity matrix and P is derived from K by
+        appending a zero fourth column.
+
+        Args:
+            yaml_path: Path to the kalibr YAML calibration file.
+            cam_name: Camera key within the YAML (e.g. ``"cam0"``).
+
+        Returns:
+            CameraData: Instance populated with the loaded calibration.
+
+        Raises:
+            KeyError: If ``cam_name`` is not present in the YAML.
+            NotImplementedError: If the distortion model is not supported.
+        """
+
+        with open(yaml_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if cam_name not in data:
+            raise KeyError(f"Camera '{cam_name}' not found in {yaml_path}.")
+
+        cam = data[cam_name]
+
+        fu, fv, cu, cv = cam['intrinsics']
+        width, height = cam['resolution']
+        D = np.array(cam['distortion_coeffs'], dtype=np.float64)
+
+        distortion_model = CameraData.DistortionModel.from_kalibr_str(cam['distortion_model'])
+
+        K = np.array([[fu, 0.0, cu],
+                      [0.0, fv, cv],
+                      [0.0, 0.0, 1.0]], dtype=np.float64)
+        R = np.eye(3, dtype=np.float64)
+        P = np.zeros((3, 4), dtype=np.float64)
+        P[:3, :3] = K
+
+        return cls(frame_id=cam_name, width=int(width), height=int(height),
                    distortion_model=distortion_model,
                    K=K, D=D, R=R, P=P)
 

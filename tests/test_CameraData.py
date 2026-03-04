@@ -3,6 +3,7 @@ matplotlib.use('Agg')
 from decimal import Decimal
 import numpy as np
 import os
+from pathlib import Path
 import unittest
 
 from robotdataprocess.data_types.CameraData import CameraData
@@ -167,6 +168,65 @@ class TestCameraData(unittest.TestCase):
     # =========================================================================
     # ========================= Manipulation Methods ==========================
     # =========================================================================
+
+    # =========================================================================
+    # =========================== from_kalibr_mono ============================
+    # =========================================================================
+
+    KALIBR_YAML = Path(Path('.'), 'tests', 'files', 'test_CameraData', 'test_from_kalibr_mon', 'stereo.yaml').absolute()
+
+    def test_from_kalibr_mono_cam0_intrinsics(self):
+        """ cam0 K matrix is assembled correctly from kalibr intrinsics. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        expected_K = np.array([[940.862825677534,  0.0,               799.1626975233576],
+                                [0.0,               938.554923506332,  559.295406893583 ],
+                                [0.0,               0.0,               1.0              ]])
+        np.testing.assert_array_almost_equal(cam.K, expected_K)
+
+    def test_from_kalibr_mono_cam0_distortion(self):
+        """ cam0 D vector matches kalibr distortion_coeffs. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        expected_D = np.array([-0.1008504099655989, 0.08905706623788286,
+                                0.0007516966627205781, -0.0011958374307601393])
+        np.testing.assert_array_almost_equal(cam.D, expected_D)
+
+    def test_from_kalibr_mono_cam0_resolution(self):
+        """ cam0 width and height match kalibr resolution. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        self.assertEqual(cam.width, 1600)
+        self.assertEqual(cam.height, 1100)
+
+    def test_from_kalibr_mono_cam0_R_and_P(self):
+        """ R is identity and P is [K|0] for a monocular load. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        np.testing.assert_array_equal(cam.R, np.eye(3))
+        expected_P = np.zeros((3, 4))
+        expected_P[:3, :3] = cam.K
+        np.testing.assert_array_almost_equal(cam.P, expected_P)
+
+    def test_from_kalibr_mono_cam0_frame_id_and_model(self):
+        """ frame_id is the camera name and distortion model is RADIAL_TANGENTIAL. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        self.assertEqual(cam.frame_id, 'cam0')
+        self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+
+    def test_from_kalibr_mono_cam1_intrinsics(self):
+        """ cam1 K matrix is assembled correctly from kalibr intrinsics. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam1')
+        expected_K = np.array([[934.5190744321391,  0.0,               792.8073165035943],
+                                [0.0,               932.525429508503,  562.7061769000949],
+                                [0.0,               0.0,               1.0             ]])
+        np.testing.assert_array_almost_equal(cam.K, expected_K)
+
+    def test_from_kalibr_mono_missing_camera_raises(self):
+        """ Requesting a camera not in the YAML raises KeyError. """
+        with self.assertRaises(KeyError):
+            CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam99')
+
+    def test_from_kalibr_str_unsupported_raises(self):
+        """ from_kalibr_str raises NotImplementedError for unknown models. """
+        with self.assertRaises(NotImplementedError):
+            CameraData.DistortionModel.from_kalibr_str('equidistant')
 
     # =========================================================================
     # ============================ visualize_FOV ==============================
