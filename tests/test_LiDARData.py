@@ -96,6 +96,28 @@ class TestLiDARData(unittest.TestCase):
         lidar_data.to_FLU_frame()
         self.assertEqual(len(lidar_data.transformations), 1)
 
+    def test_to_FLU_frame_from_ENU(self):
+        """ ENU-to-FLU transformation: X→-Y, Y→+X, Z stays. """
+        point_cloud = [np.array([[ 1.0,  0.0,  0.0],   # pure East  → FLU forward=0, left=-1
+                                  [ 0.0,  1.0,  0.0],   # pure North → FLU forward=1, left=0
+                                  [ 0.0,  0.0,  1.0],   # pure Up    → unchanged
+                                  [ 3.0,  4.0, -2.0]], dtype=np.float32)]
+        lidar_data = LiDARData("robot", [Decimal("1.0")], point_cloud, None, CoordinateFrame.ENU)
+        lidar_data.to_FLU_frame()
+
+        self.assertEqual(lidar_data.frame, CoordinateFrame.FLU)
+
+        pc, _ = lidar_data.get_point_cloud_at_index(0)
+        expected_pc = np.array([[ 0.0, -1.0,  0.0],
+                                 [ 1.0,  0.0,  0.0],
+                                 [ 0.0,  0.0,  1.0],
+                                 [ 4.0, -3.0, -2.0]], dtype=np.float32)
+        np.testing.assert_array_almost_equal(pc, expected_pc)
+
+        # Calling again should be a no-op (already FLU)
+        lidar_data.to_FLU_frame()
+        self.assertEqual(len(lidar_data.transformations), 1)
+
     def test_visualize(self):
         """ Just ensure that this code doesn't crash. """
 
