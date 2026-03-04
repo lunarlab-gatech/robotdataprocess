@@ -6,11 +6,14 @@ import decimal
 from decimal import Decimal
 from enum import Enum
 from ..ModuleImporter import ModuleImporter
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from numpy.typing import NDArray
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
-from typing import Any, Union
+from typing import Any, Optional, Tuple, Union
 from .ImageData.ImageData import ImageData
 
 
@@ -184,6 +187,160 @@ class CameraData(SequentialData):
         return cls(frame_id=frame_id, width=width, height=height,
                    distortion_model=distortion_model,
                    K=K, D=D, R=R, P=P)
+
+    # =========================================================================
+    # ============================ Visualization ==============================
+    # =========================================================================
+
+    def visualize_FOV(self, depth: float = 5.0,
+                      lidar_v_fov: Optional[Tuple[float, float]] = None,
+                      testing: bool = False) -> None:
+        """
+        Visualize the camera field of view (FOV) as a 3D frustum, with an
+        optional LiDAR FOV overlay.
+
+        The camera is assumed to point along the +Z axis (standard optical
+        convention), with X pointing right and Y pointing down. The frustum
+        is derived from the intrinsic matrix ``K`` and the image dimensions.
+
+        The optional LiDAR overlay assumes a full 360-degree horizontal FOV
+        centred at the same origin, with a user-specified vertical angular
+        range measured from the horizontal plane (positive angles are above
+        the plane, negative angles are below).
+
+        Args:
+            depth: Depth in metres at which to draw the far face of the
+                camera frustum and the LiDAR FOV rings.
+            lidar_v_fov: If provided, a ``(min_deg, max_deg)`` tuple giving
+                the vertical angle range of the LiDAR sensor in degrees.
+                The LiDAR is assumed to cover a full 360-degree horizontal
+                FOV and is drawn in the same scene.
+            testing: If ``True``, suppresses ``plt.show()`` (used in unit
+                tests).
+        """
+
+        fx = self.K[0, 0]
+        fy = self.K[1, 1]
+        cx = self.K[0, 2]
+        cy = self.K[1, 2]
+
+        # Back-project the four image corners to 3D rays at the given depth.
+        # Corner order: top-left, top-right, bottom-right, bottom-left.
+        corners_px = np.array([
+            [0,           0           ],
+            [self.width,  0           ],
+            [self.width,  self.height ],
+            [0,           self.height ],
+        ], dtype=np.float64)
+        corners_3d = np.zeros((4, 3))
+        corners_3d[:, 0] = (corners_px[:, 0] - cx) * depth / fx   # X (right)
+        corners_3d[:, 1] = (corners_px[:, 1] - cy) * depth / fy   # Y (down)
+        corners_3d[:, 2] = depth                                    # Z (forward)
+
+        # Rotate so the optical axis (+Z camera) points along +Y world,
+        # camera +X stays as world +X, and camera +Y maps to world -Z.
+        R_cam_to_world = np.array([[1,  0,  0],
+                                   [0,  0,  1],
+                                   [0, -1,  0]], dtype=np.float64)
+        corners_3d = (R_cam_to_world @ corners_3d.T).T
+
+        origin = np.array([0.0, 0.0, 0.0])
+
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Draw the four frustum edges from the origin to each far corner.
+        for c in corners_3d:
+            ax.plot([origin[0], c[0]], [origin[1], c[1]], [origin[2], c[2]],
+                    color='steelblue', linewidth=1.5)
+
+        # Draw the far-face rectangle.
+        far_face_loop = np.vstack([corners_3d, corners_3d[0]])
+        ax.plot(far_face_loop[:, 0], far_face_loop[:, 1], far_face_loop[:, 2],
+                color='steelblue', linewidth=1.5)
+
+        # Shade the five frustum faces (four side triangles + far rectangle).
+        side_faces = [
+            [origin.tolist(), corners_3d[0].tolist(), corners_3d[1].tolist()],
+            [origin.tolist(), corners_3d[1].tolist(), corners_3d[2].tolist()],
+            [origin.tolist(), corners_3d[2].tolist(), corners_3d[3].tolist()],
+            [origin.tolist(), corners_3d[3].tolist(), corners_3d[0].tolist()],
+            corners_3d.tolist(),
+        ]
+        frustum_poly = Poly3DCollection(
+            side_faces, alpha=0.12, facecolor='steelblue', edgecolor='none')
+        ax.add_collection3d(frustum_poly)
+
+        ax.scatter(*origin, color='steelblue', s=60, zorder=5)
+
+        h_fov_deg = np.degrees(2.0 * np.arctan(self.width  / (2.0 * fx)))
+        v_fov_deg = np.degrees(2.0 * np.arctan(self.height / (2.0 * fy)))
+
+        # --- Optional LiDAR FOV overlay ---
+        if lidar_v_fov is not None:
+            v_min_rad = np.radians(lidar_v_fov[0])
+            v_max_rad = np.radians(lidar_v_fov[1])
+
+            # Radius and height of the ring at each vertical extreme.
+            # Points are at constant Euclidean distance `depth` from the origin.
+            r_min = depth * np.cos(v_min_rad)
+            r_max = depth * np.cos(v_max_rad)
+            z_min = depth * np.sin(v_min_rad)
+            z_max = depth * np.sin(v_max_rad)
+
+            theta = np.linspace(0.0, 2.0 * np.pi, 200)
+
+            # Two horizontal rings at the vertical FOV boundaries.
+            ax.plot(r_min * np.cos(theta), r_min * np.sin(theta),
+                    np.full_like(theta, z_min),
+                    color='tomato', linewidth=1.5)
+            ax.plot(r_max * np.cos(theta), r_max * np.sin(theta),
+                    np.full_like(theta, z_max),
+                    color='tomato', linewidth=1.5)
+
+            # Straight spokes connecting the two rings.
+            n_spokes = 24
+            for phi in np.linspace(0.0, 2.0 * np.pi, n_spokes, endpoint=False):
+                ax.plot(
+                    [r_min * np.cos(phi), r_max * np.cos(phi)],
+                    [r_min * np.sin(phi), r_max * np.sin(phi)],
+                    [z_min, z_max],
+                    color='tomato', linewidth=0.8, alpha=0.5)
+
+        # --- Labels and legend ---
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Y (m)')
+        ax.set_zlabel('Z (m)')
+        ax.set_title('Sensor Field of View')
+
+        # Force equal scaling on all three axes by computing the max range across
+        # all plotted data and applying it symmetrically around each axis centre.
+        all_pts = np.vstack(corners_3d)
+        if lidar_v_fov is not None:
+            ring_pts = np.array([
+                [depth * np.cos(v_min_rad), 0.0, depth * np.sin(v_min_rad)],
+                [depth * np.cos(v_max_rad), 0.0, depth * np.sin(v_max_rad)],
+            ])
+            all_pts = np.vstack([all_pts, ring_pts])
+        half_range = np.max(np.abs(all_pts)) * 1.05
+        ax.set_xlim(-half_range, half_range)
+        ax.set_ylim(-half_range, half_range)
+        ax.set_zlim(-half_range, half_range)
+        ax.set_box_aspect([1, 1, 1])
+
+        legend_handles = [
+            Line2D([0], [0], color='steelblue', linewidth=2,
+                   label=f'Camera FOV  (H={h_fov_deg:.1f}°, V={v_fov_deg:.1f}°)')
+        ]
+        if lidar_v_fov is not None:
+            legend_handles.append(
+                Line2D([0], [0], color='tomato', linewidth=2,
+                       label=(f'LiDAR FOV  (360° H, '
+                              f'V=[{lidar_v_fov[0]:.1f}°, {lidar_v_fov[1]:.1f}°])')))
+        ax.legend(handles=legend_handles, loc='upper left')
+
+        if not testing:
+            plt.show()
 
     # =========================================================================
     # =========================== Conversion to ROS ===========================

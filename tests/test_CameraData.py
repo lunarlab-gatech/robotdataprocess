@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 from decimal import Decimal
 import numpy as np
 import os
@@ -161,6 +163,24 @@ class TestCameraData(unittest.TestCase):
         cam = self._make_camera()
         with self.assertRaises(NotImplementedError):
             cam.get_ros_msg(ROSMsgLibType.NONE, 0)
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    # =========================================================================
+    # ============================ visualize_FOV ==============================
+    # =========================================================================
+
+    def test_visualize_FOV_camera_only(self):
+        """ visualize_FOV with no LiDAR overlay does not crash. """
+        cam = self._make_camera()
+        cam.visualize_FOV(depth=5.0, testing=True)
+
+    def test_visualize_FOV_with_lidar(self):
+        """ visualize_FOV with a LiDAR vertical FOV overlay does not crash. """
+        cam = self._make_camera()
+        cam.visualize_FOV(depth=5.0, lidar_v_fov=(-15.0, 15.0), testing=True)
 
     # =========================================================================
     # ========================= Manipulation Methods ==========================
