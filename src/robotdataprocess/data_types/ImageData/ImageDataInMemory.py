@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from PIL import Image
 from ...ros.Ros2BagWrapper import Ros2BagWrapper
+from ...ros.Ros1BagWrapper import Ros1BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from typeguard import typechecked
@@ -109,6 +111,64 @@ class ImageDataInMemory(ImageData):
         # Create an ImageData class
         return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
     
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], img_topic: str):
+        """
+        Creates a class structure from a ROS1 bag file with an Image topic.
+        Loads all images into memory.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            img_topic (str): Topic of the Image messages.
+        Returns:
+            ImageDataInMemory: Instance of this class.
+        """
+
+        # Get topic message count and typestore
+        bag_wrapper = Ros1BagWrapper(bag_path, None)
+        typestore = bag_wrapper.get_typestore()
+        num_msgs: int = bag_wrapper.get_topic_count(img_topic)
+
+        # Extract image parameters from the first message
+        frame_id, height, width, encoding, image_shape = None, None, None, None, None
+        with Reader1(bag_path) as reader:
+            connections = [x for x in reader.connections if x.topic == img_topic]
+            for conn, _, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+                frame_id = msg.header.frame_id
+                height = msg.height
+                width = msg.width
+                encoding = ImageData.ImageEncoding.from_ros_str(msg.encoding)
+                first_img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
+                image_shape = first_img.shape
+                break
+
+        # Pre-allocate arrays
+        dtype, _ = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
+        images = np.zeros((num_msgs, *image_shape), dtype=dtype)
+        timestamps_np = np.zeros(num_msgs, dtype=object)
+
+        # Extract all images and timestamps
+        pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Images...", unit=" msgs")
+        with Reader1(bag_path) as reader:
+            i = 0
+            connections = [x for x in reader.connections if x.topic == img_topic]
+            for conn, _, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                try:
+                    img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
+                    if img.shape == image_shape:
+                        images[i] = img
+                except Exception as e:
+                    print(f"Failure decoding image msg: {e}")
+
+                timestamps_np[i] = Ros1BagWrapper.extract_timestamp(msg)
+                i += 1
+                pbar.update(1)
+
+        return cls(frame_id, timestamps_np, height, width, encoding, images)
+
     @classmethod
     def from_npy(cls, folder_path: Union[Path, str]):
         """

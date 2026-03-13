@@ -15,6 +15,8 @@ import pandas as pd
 from .PathData import PathData
 from pathlib import Path
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
+from ..ros.Ros1BagWrapper import Ros1BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -108,6 +110,54 @@ class OdometryData(PathData):
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
     
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
+        """
+        Creates a class structure from a ROS1 bag file with an Odometry topic.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            odom_topic (str): Topic of the Odometry messages.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+        Returns:
+            OdometryData: Instance of this class.
+        """
+
+        # Get topic message count and typestore
+        bag_wrapper = Ros1BagWrapper(bag_path, None)
+        typestore = bag_wrapper.get_typestore()
+        num_msgs: int = bag_wrapper.get_topic_count(odom_topic)
+
+        # Pre-allocate arrays
+        timestamps_np = np.zeros(num_msgs, dtype=Decimal)
+        positions_np = np.zeros((num_msgs, 3), dtype=Decimal)
+        orientations_np = np.zeros((num_msgs, 4), dtype=Decimal)
+
+        # Setup tqdm bar & counter
+        pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Odometry...", unit=" msgs")
+        i = 0
+
+        frame_id, child_frame_id = None, None
+        with Reader1(str(bag_path)) as reader:
+            connections = [x for x in reader.connections if x.topic == odom_topic]
+            for conn, timestamp, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                if frame_id is None:
+                    frame_id = msg.header.frame_id
+                    child_frame_id = msg.child_frame_id
+
+                timestamps_np[i] = bag_wrapper.extract_timestamp(msg)
+                pos = msg.pose.pose.position
+                positions_np[i] = np.array([Decimal(str(pos.x)), Decimal(str(pos.y)), Decimal(str(pos.z))])
+                ori = msg.pose.pose.orientation
+                orientations_np[i] = np.array([Decimal(str(ori.x)), Decimal(str(ori.y)), Decimal(str(ori.z)), Decimal(str(ori.w))])
+
+                i += 1
+                pbar.update(1)
+
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
+
     @classmethod
     def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,          
                  header_included: bool, column_to_data: Union[List[int], None] = None, 

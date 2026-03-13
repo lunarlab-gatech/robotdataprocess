@@ -9,6 +9,8 @@ from numpy.typing import NDArray
 from pathlib import Path
 from robotdataprocess.data_types.PathData import PathData
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
+from ..ros.Ros1BagWrapper import Ros1BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -107,6 +109,56 @@ class ImuData(Data):
         # Create an ImageData class
         return cls(frame_id, CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, orientation)
     
+    @classmethod
+    @typechecked
+    def from_ros1_bag(cls, bag_path: Union[Path, str], imu_topic: str, frame_id: str, frame: CoordinateFrame):
+        """
+        Creates a class structure from a ROS1 bag file with an Imu topic.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            imu_topic (str): Topic of the Imu messages.
+            frame_id (str): The frame where this IMU data was collected.
+            frame (CoordinateFrame): The coordinate system convention of this data.
+        Returns:
+            ImuData: Instance of this class.
+        """
+
+        print("WARNING: This code does not check the orientation covariance to determine if the orientation is valid; may use invalid orientations!")
+
+        # Get topic message count and typestore
+        bag_wrapper = Ros1BagWrapper(bag_path, None)
+        typestore = bag_wrapper.get_typestore()
+        num_msgs: int = bag_wrapper.get_topic_count(imu_topic)
+
+        # Setup arrays to hold data
+        timestamps = np.zeros((num_msgs), dtype=object)
+        lin_acc = np.zeros((num_msgs, 3), dtype=np.double)
+        ang_vel = np.zeros((num_msgs, 3), dtype=np.double)
+        orientation = np.zeros((num_msgs, 4), dtype=np.double)
+
+        # Extract the imu data
+        with Reader1(bag_path) as reader:
+            i = 0
+            connections = [x for x in reader.connections if x.topic == imu_topic]
+            for conn, _, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                lin_acc[i] = np.array([msg.linear_acceleration.x,
+                                       msg.linear_acceleration.y,
+                                       msg.linear_acceleration.z], dtype=np.double)
+                ang_vel[i] = np.array([msg.angular_velocity.x,
+                                       msg.angular_velocity.y,
+                                       msg.angular_velocity.z], dtype=np.double)
+                orientation[i] = np.array([msg.orientation.x,
+                                           msg.orientation.y,
+                                           msg.orientation.z,
+                                           msg.orientation.w], dtype=np.double)
+                timestamps[i] = Ros1BagWrapper.extract_timestamp(msg)
+                i += 1
+
+        return cls(frame_id, frame, timestamps, lin_acc, ang_vel, orientation)
+
     @classmethod
     @typechecked
     def from_txt_file(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame, nine_axis: bool = False):

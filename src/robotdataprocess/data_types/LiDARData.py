@@ -20,6 +20,8 @@ from ..conversion_utils import col_to_dec_arr
 from ..ModuleImporter import ModuleImporter
 from .Data import Data, CoordinateFrame, ROSMsgLibType
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
+from ..ros.Ros1BagWrapper import Ros1BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 
 @typechecked
 class LiDARData(Data):
@@ -161,7 +163,7 @@ class LiDARData(Data):
                 points_xyz = np.zeros((num_points, 3), dtype=np.float32)
                 points_ring = None
                 if "ring" in field_names:
-                    points_ring = np.zeros(num_points, dtype=np.uint8)
+                    points_ring = np.zeros(num_points, dtype=np.uint16)
                     if channels is None:
                         channels = []
 
@@ -193,9 +195,88 @@ class LiDARData(Data):
         # Create an ImageData class
         return cls(frame_id, timestamps, point_clouds, channels, frame)
     
+    @classmethod
+    @typechecked
+    def from_ros1_bag(cls, bag_path: Union[Path, str], lidar_topic: str, frame_id: str, frame: CoordinateFrame) -> 'LiDARData':
+        """
+        Creates a class structure from a ROS1 bag file with a PointCloud2 topic.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            lidar_topic (str): Topic of the PointCloud2 messages.
+            frame_id (str): The frame where this LiDAR data was collected.
+            frame: The coordinate frame of the LiDAR data.
+        Returns:
+            LiDARData: Instance of this class.
+        """
+
+        # Get topic message count and typestore
+        bag_wrapper = Ros1BagWrapper(bag_path, None)
+        typestore = bag_wrapper.get_typestore()
+        num_msgs: int = bag_wrapper.get_topic_count(lidar_topic)
+        print(f"Found {num_msgs} messages on topic {lidar_topic}")
+
+        point_clouds: List[np.ndarray] = []
+        channels: Optional[List[np.ndarray]] = None
+        timestamps: List[float] = []
+
+        pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Point Clouds...", unit=" msgs")
+        with Reader1(bag_path) as reader:
+            connections = [x for x in reader.connections if x.topic == lidar_topic]
+            for conn, _, rawdata in reader.messages(connections=connections):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                # Get useful values
+                field_names = [f.name for f in msg.fields]
+                num_points = len(msg.data) // msg.point_step
+
+                # Determine struct format for each point
+                fmt_chars = []
+                for f in msg.fields:
+                    if f.datatype == 7:  # FLOAT32
+                        fmt_chars.append('f')
+                    elif f.datatype == 4:  # UINT16
+                        fmt_chars.append('H')
+                    else:
+                        raise ValueError(f"Unsupported field datatype {f.datatype} for field {f.name}")
+                fmt = ('>' if msg.is_bigendian else '<') + ''.join(fmt_chars)
+                struct_size = struct.calcsize(fmt)
+                assert struct_size == msg.point_step, "Point step does not match struct size!"
+
+                # Initialize arrays
+                points_xyz = np.zeros((num_points, 3), dtype=np.float32)
+                points_ring = None
+                if "ring" in field_names:
+                    points_ring = np.zeros(num_points, dtype=np.uint16)
+                    if channels is None:
+                        channels = []
+
+                # Unpack each point
+                for i in range(num_points):
+                    start = i * msg.point_step
+                    end = start + msg.point_step
+                    point_bytes = msg.data[start:end]
+                    point_vals = struct.unpack(fmt, point_bytes)
+
+                    field_dict = {name: point_vals[idx] for idx, name in enumerate(field_names)}
+
+                    points_xyz[i] = [field_dict['x'], field_dict['y'], field_dict['z']]
+
+                    if points_ring is not None:
+                        points_ring[i] = field_dict['ring']
+
+                point_clouds.append(points_xyz)
+                if points_ring is not None:
+                    channels.append(points_ring)
+
+                timestamps.append(float(Ros1BagWrapper.extract_timestamp(msg)))
+                pbar.update(1)
+
+        return cls(frame_id, timestamps, point_clouds, channels, frame)
+
     # =========================================================================
-    # ========================= Reproducible Loading ========================== 
-    # =========================================================================  
+    # ========================= Reproducible Loading ==========================
+    # =========================================================================
     def get_point_cloud_at_index(self, index: int):
         """ 
         Gets the point cloud at index T and ensures all necessary transformations are applied.
