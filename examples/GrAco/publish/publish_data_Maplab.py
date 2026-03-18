@@ -9,17 +9,22 @@ from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 from typing import Union
 import numpy as np
 
+H_L_TO_I = np.array([[1.0, 0.0, 0.0, 0.0],
+                      [0.0, 1.0, 0.0, 0.0],
+                      [0.0, 0.0, 1.0, 0.0],
+                      [0.0, 0.0, 0.0, 1.0]])
+
 def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Decimal, None]):
     # Check parameters
     if crop_data and end_time is None:
         raise ValueError("end_time required if crop_data is True!")
     
     # Extract RGB and IMU from Hercules
-    input_path = Path(input_dir+'/data').absolute() 
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_200Hz.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    # odom_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
+    input_path = Path(input_dir).absolute() 
+    imu_data = ImuData.from_txt_file(input_path / robot_name / 'imu' / 'imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    odom_data = OdometryData.from_txt_file(input_path / robot_name / (robot_name + '.txt'), robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
     # odom_data.to_FLU_frame()
-    odom_data = OdometryData.from_csv(input_dir + '/results/LIO-SAM/' + robot_name + '/' + file_name, "world", "robot", CoordinateFrame.NED, True, None)
+    # odom_data = OdometryData.from_csv(input_dir + '/results/LIO-SAM/' + robot_name + '/' + file_name, "world", "robot", CoordinateFrame.NED, True, None)
 
     # Get L->I transformation
     if "Husky" in robot_name:
@@ -32,15 +37,17 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
                                     [0.0,  1.0,  0.0,  0.0],
                                     [0.0,  0.0,  1.0,  0.5],
                                     [0.0,  0.0,  0.0,  1.0]])
+    else:
+        H_L_to_I_in_NED = H_L_TO_I
     
     # LIO-SAM output is W->L. However, our GT is W->I. Thus, we need to convert it (W->I = W->L @ L->I)
     odom_data.apply_transformation_right_side(H_L_to_I_in_NED)
 
-    left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
-    right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'rgb_stereo_right', '' + robot_name + '/front_right_Scene')
+    left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_left' / 'images', '' + robot_name + '/front_center_Scene')
+    right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_right' / 'images', '' + robot_name + '/front_right_Scene')
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
-
-    lidar_data.calculate_point_channels(16, -20, 20)
+    if lidar_data is None:
+        lidar_data.calculate_point_channels(16, -20, 20)
 
     # Crop the data
     if crop_data:
@@ -81,13 +88,13 @@ def main(dataset_num: str, robot_name: str, crop_end_time: Union[float, None]):
         crop_end_time = Decimal(crop_end_time)
 
     user = getpass.getuser()
-    publish_data(input_dir='/home/' + user + '/data/Hercules_datasets/' + dataset_num,
+    publish_data(input_dir='/home/' + user + '/data/Data/GrAco_dataset/' + dataset_num,
                     robot_name=robot_name,
                     crop_data=crop_data,
                     end_time=crop_end_time)
         
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Publish Hercules data via ROS2 topics for Maplab.")
+    parser = argparse.ArgumentParser(description="Publish GrAco data via ROS2 topics for Maplab.")
     parser.add_argument('--dataset_num', type=str, default=None, help="Dataset version number (e.g., V1.6).")
     parser.add_argument('--robot_name', type=str, default=None, help="Name of the robot (e.g., Husky1).")
     parser.add_argument('--crop_end_time', type=float, default=None, help="Optional end time (in seconds) to crop the data.")
