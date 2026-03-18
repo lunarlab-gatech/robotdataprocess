@@ -158,6 +158,8 @@ class ImageData(Data):
         # Calculate the step
         if self.encoding == ImageData.ImageEncoding.RGB8:
             step = 3 * self.width
+        elif self.encoding == ImageData.ImageEncoding.Mono8:
+            step = 1 * self.width
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             step = 4 * self.width
         else:
@@ -169,6 +171,8 @@ class ImageData(Data):
 
         # Calculate the ROS2 Image data
         if self.encoding == ImageData.ImageEncoding.RGB8:
+            data = self.images[i].flatten()
+        elif self.encoding == ImageData.ImageEncoding.Mono8:
             data = self.images[i].flatten()
         elif self.encoding == ImageData.ImageEncoding._32FC1:
             data = self.images[i].flatten().view(np.uint8)
