@@ -101,7 +101,7 @@ class LiDARData(Data):
             # Separate XYZ and optional channel
             point_clouds_memmap.append(pc[:, :3])
             if has_channels:
-                channels_memmap.append(pc[:, 3])
+                channels_memmap.append(pc[:, 3].astype(np.uint16))
             pbar.update()
 
         # Return an LiDARData class
