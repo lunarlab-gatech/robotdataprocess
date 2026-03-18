@@ -95,7 +95,8 @@ class LiDARData(Data):
         pbar = tqdm.tqdm(total=len(all_npy_files_sorted), desc="Extracting Point Clouds...", unit=" files")
         for i, path in enumerate(all_npy_files_sorted):
             pc = np.load(path, mmap_mode="r")
-            assert pc.shape == first_pc.shape
+            assert len(pc.shape) == 2 and pc.shape[1] == first_pc.shape[1], \
+                f"Unexpected shape {pc.shape} at {path}, expected (..., {first_pc.shape[1]})"
 
             # Separate XYZ and optional channel
             point_clouds_memmap.append(pc[:, :3])
