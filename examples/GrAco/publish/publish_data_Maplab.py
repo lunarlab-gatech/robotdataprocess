@@ -51,7 +51,12 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
 
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_left' / 'images', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_right' / 'images', '' + robot_name + '/front_right_Scene')
-    print(left_image_data.encoding, right_image_data.encoding)
+    # Images are 20Hz; downsample to 10Hz by keeping every 2nd sample
+    step = round(len(left_image_data.timestamps) / (float(left_image_data.timestamps[-1] - left_image_data.timestamps[0]) * 10))
+    left_image_data.timestamps = left_image_data.timestamps[::step]
+    left_image_data.images = left_image_data.images[::step]
+    right_image_data.timestamps = right_image_data.timestamps[::step]
+    right_image_data.images = right_image_data.images[::step]
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
     if lidar_data is None:
         lidar_data.calculate_point_channels(16, -20, 20)

@@ -14,16 +14,16 @@ from pathlib import Path
 # Each robot entry: (robot_name, mission_id)
 # The mission_id is used to filter the maplab CSV for this specific robot
 ROBOTS = [
-    ("Drone1", " ")
+    ("ground1", " 83f1b5f02b609e180b00000000000000")
     # ("Drone2", " 0acba9b3718491180b00000000000000"),
     # ("Drone1", " <mission-id-here>"),
 ]
 
-DATASET_NAMES = ["V2.3.C"]
+DATASET_NAMES = ["V1.0"]
 
 # Base path configuration
 def get_base_path(user: str) -> str:
-    return f'/media/{user}/T7/GT/SLAM/Hercules_datasets'
+    return f'/media/{user}/T7/GT/SLAM/Data/GrAco_dataset'
 # =============================================================================
 
 
@@ -54,7 +54,7 @@ def main():
         gt_data_lst: list[OdometryData] = []
         for robot_name, _ in ROBOTS:
             input_path = Path(base_path).absolute()
-            gt_data = OdometryData.from_txt_file(input_path / dataset_name / 'data' / robot_name / 'pose_world_frame.txt', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
+            gt_data = OdometryData.from_csv(input_path / dataset_name  / robot_name / 'odom' / 'odom.csv', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, True)
             gt_data.to_FLU_frame()
             gt_data_lst.append(gt_data)
 
