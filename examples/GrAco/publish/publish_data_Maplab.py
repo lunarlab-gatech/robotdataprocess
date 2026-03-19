@@ -45,6 +45,7 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
 
     left_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_left' / 'images', '' + robot_name + '/front_center_Scene')
     right_image_data = ImageDataOnDisk.from_image_files(input_path / robot_name / 'camera_right' / 'images', '' + robot_name + '/front_right_Scene')
+    print(left_image_data.encoding, right_image_data.encoding)
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
     if lidar_data is None:
         lidar_data.calculate_point_channels(16, -20, 20)
