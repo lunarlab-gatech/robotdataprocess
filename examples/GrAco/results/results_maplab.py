@@ -14,7 +14,7 @@ from pathlib import Path
 # Each robot entry: (robot_name, mission_id)
 # The mission_id is used to filter the maplab CSV for this specific robot
 ROBOTS = [
-    ("ground1", " 83f1b5f02b609e180b00000000000000")
+    ("ground1", " d7e9b9c4a3619e180b00000000000000")
     # ("Drone2", " 0acba9b3718491180b00000000000000"),
     # ("Drone1", " <mission-id-here>"),
 ]
