@@ -22,9 +22,15 @@ def publish_data(input_dir: str, robot_name: str, crop_data: bool, end_time: Uni
     # Extract RGB and IMU from Hercules
     input_path = Path(input_dir).absolute() 
     imu_data = ImuData.from_txt_file(input_path / robot_name / 'imu' / 'imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    odom_data = OdometryData.from_txt_file(input_path / robot_name / (robot_name + '.txt'), robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, False)
+    odom_data = OdometryData.from_csv(input_path / robot_name / 'odom' / 'odom.csv', robot_name + '/odom', robot_name + '/ground_truth/base_link', CoordinateFrame.NED, True)
+    # odom.csv is 200Hz; downsample to 20Hz by keeping every 10th sample
+    step = round(len(odom_data.timestamps) / (float(odom_data.timestamps[-1] - odom_data.timestamps[0]) * 20))
+    odom_data.timestamps = odom_data.timestamps[::step]
+    odom_data.positions = odom_data.positions[::step]
+    odom_data.orientations = odom_data.orientations[::step]
+    odom_data.poses = []
+    odom_data.poses_rclpy = []
     # odom_data.to_FLU_frame()
-    # odom_data = OdometryData.from_csv(input_dir + '/results/LIO-SAM/' + robot_name + '/' + file_name, "world", "robot", CoordinateFrame.NED, True, None)
 
     # Get L->I transformation
     if "Husky" in robot_name:
