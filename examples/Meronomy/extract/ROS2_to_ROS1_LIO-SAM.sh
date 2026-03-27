@@ -5,7 +5,7 @@
 USER=$(whoami)
 
 # Define paths
-DATASET_NUM="V1.0"
+DATASET_NUM="V1.2"
 BASE_DIR="/media/${USER}/T73/Meronomy_datasets/${DATASET_NUM}/extract/bags_for_LIO-SAM"
 
 # Robot names (must match extract_data_LIO-SAM.py)

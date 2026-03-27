@@ -43,9 +43,9 @@ def plot_GT_vs_est_on_image(data: LoadDataResult, est_data_align: OdometryData, 
 
     # Define the mapping from robot name to color and robot_name to new name
     robot_name_to_color: dict = {
-        "ground-01": "#D61AD0",
+        "Husky1": "#D61AD0",
         "ground-06": "#12EF49",
-        "aerial-07": "#1A46D6",
+        "Drone1": "#1A46D6",
         "aerial-08": "#E8EF12",
     }
 

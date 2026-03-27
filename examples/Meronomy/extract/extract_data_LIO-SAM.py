@@ -35,7 +35,7 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V1.0"
+    dataset_num = "V1.2"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Meronomy_datasets/' + dataset_num + '/data'
     robot_names = ["Husky1", "Drone1"]

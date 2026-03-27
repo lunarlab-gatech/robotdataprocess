@@ -7,7 +7,7 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
 
     # Get robot name pair for this configuration
     user = getpass.getuser()
-    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/Meronomy_' + dataset_name + '_' + label_name + '/' + run_name)
+    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + label_name + '/' + run_name)
 
     # Load Loop Closure data
     lc_data = LoopClosureData.from_json(run_folder / 'align' / (robot_names[0] + '_' + robot_names[1]) / 'align.json')
@@ -22,7 +22,7 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
     lc_data.label_inliers_via_other_LoopClosureData(lc_data_inlier)
 
     # Load the GT data for both robots
-    dataset_path = '/media/' + user + '/T73/Meronomy_datasets/' + dataset_name + '/data/'
+    dataset_path = '/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/data/'
     gt_data_robot0 = OdometryData.from_txt(dataset_path + robot_names[0] + '/pose_world_frame.txt', 'world', 'robot', CoordinateFrame.NED, False)
     gt_data_robot0.to_coordinate_frame(CoordinateFrame.FLU)
     gt_data_robot1 = OdometryData.from_txt(dataset_path + robot_names[1] + '/pose_world_frame.txt', 'world', 'robot', CoordinateFrame.NED, False)
@@ -36,12 +36,13 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
 def main():
     # ====================== ROMAN ===========================
     # Set dataset configuration
-    run_names = ["17th", "17th", "25th", "25th"]
-    label_names = ["MeronomyGraph", "ROMAN", "MeronomyGraph", "ROMAN"]
-    dataset_names = ["V1.1"] * len(run_names)
-    robot_names = ["Husky1", "Drone1"]
-    run_display_names = ["ROMAN Mapper" if r == "17th" else "New Mapper" for r in run_names]
-    title_names = [label + " - " + run for label, run in zip(label_names, run_display_names)]
+    run_names =   ["27th_ROMAN_Mapper", "27th_New_Mapper", "27th_ROMAN_Mapper", "27th_New_Mapper"]
+    label_names = [            "ROMAN",           "ROMAN",     "MeronomyGraph",   "MeronomyGraph"]
+    dataset_names = ["V2.3.AC"] * len(run_names)
+    robot_names = ["Husky1", "Husky2"]
+    run_display_names = ["OG Map" if r == "27th_ROMAN_Mapper" else "New Map" for r in run_names]
+    label_names_s = ["R" if r == "ROMAN" else "MG" for r in label_names]
+    title_names = [label + " - " + run for label, run in zip(label_names_s, run_display_names)]
 
     # Calculate lc errors for each run and robot pair for ROMAN
     errors_list = []
@@ -50,8 +51,7 @@ def main():
         calculate_LC_errors_ROMAN(dataset_name, label_name, run_name, robot_names, errors_list, inliers_list)
 
     # Visualize the results
-    LoopClosureData.visualize_error_scatter(errors_list, title_names, inliers_list, max_rotation_frac=1.0, max_translation_frac=1.0,
-                                            trans_err_in_target=1.0, show_plots=False, rot_err_in_target=5.0, save_path='/home/dbutterfield3/Research/robotdataprocess/lc_fig.pdf')
+    LoopClosureData.visualize_error_scatter(errors_list, title_names, inliers_list, max_rotation_frac=1.0, max_translation_frac=1.0, trans_err_in_target=1.0, show_plots=False, rot_err_in_target=5.0, save_path='/home/dbutterfield3/Research/robotdataprocess/lc_fig.pdf')
 
 if __name__ == "__main__":
     main()

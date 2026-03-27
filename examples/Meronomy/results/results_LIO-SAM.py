@@ -7,9 +7,9 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Husky1", "Drone1"]
-    dataset_version = "V1.0"
-    file_name = 'odometry.csv'
+    robot_names = ["Drone1"]
+    dataset_version = "V1.1"
+    file_name = 'odometryHighHertz.csv'
 
     for robot_name in robot_names:
         print("\n=== Processing results for robot:", robot_name)
@@ -30,7 +30,7 @@ def main():
 
         # Calculate RMS ATE, among other metrics
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
-                                                                            visualize=True, axes_interval=500)
+                                                                            visualize=True, axes_interval=10)
         print("\nMetrics for file: ", file_name)
         print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'], "\n")

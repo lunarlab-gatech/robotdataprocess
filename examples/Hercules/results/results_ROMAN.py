@@ -3,9 +3,10 @@ from robotdataprocess import OdometryData, CoordinateFrame, PathData
 from scipy.spatial.transform import Rotation as R
 
 def main():  
-    dataset_name = "V2.3.AP"
-    run_name = 'floral-sweep-6'
-    robot_names = ["Drone1", "Drone2"]
+    dataset_name = "V2.3.AC"
+    method = "MeronomyGraph"
+    run_name = '27th'
+    robot_names = ["Husky1", "Husky2"]
 
     # Get robot0 name and robot1 name
     robot0_name = robot_names[0]
@@ -13,8 +14,8 @@ def main():
     
     # Load the estimated data
     user = getpass.getuser()
-    est_data_robot0 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '/' + run_name+ '/offline_rpgo/' + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
-    est_data_robot1 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '/' + run_name+ '/offline_rpgo/' + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
+    est_data_robot0 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + run_name+ '/offline_rpgo/' + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
+    est_data_robot1 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + run_name+ '/offline_rpgo/' + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
     est_data_lst: list[OdometryData] = [est_data_robot0, est_data_robot1]
 
     # Load the ground truth data
@@ -64,8 +65,10 @@ def main():
 
     # Get environment image path
     image_path = '/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/data/environment.png'
-    if dataset_name in "V2.3.AP":
-        x_edge = 350
+    if dataset_name in "V2.3.AP":  x_edge = 350
+    elif dataset_name in "V2.4.C": x_edge = 300
+    elif dataset_name in "V2.3.AC": x_edge = 500
+    elif dataset_name in "V2.4.F": x_edge = 150
     else:
         raise RuntimeError(f"x_edge not defined for {dataset_name}.")
 

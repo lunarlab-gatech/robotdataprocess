@@ -1,15 +1,31 @@
+from decimal import Decimal
 import getpass
 from robotdataprocess import OdometryData, CoordinateFrame, PathData
 from utils import LoadDataResult, print_errors, plot_GT_vs_est_on_image
 
-def load_data_ROMAN(dataset_name, run_name, robot0_name, robot1_name) -> LoadDataResult:
+MERONOMY_CROP_TIMES = {
+    "V1.0": {
+        "Husky1": (Decimal('1.0'), None),
+        "Drone1": (Decimal('1.0'), None),
+    },
+    "V1.1": {
+        "Husky1": (Decimal('1.0'), None),
+        "Drone1": (Decimal('10.0'), None),
+    },
+    "V1.2": {
+        "Husky1": (Decimal('1.0'), None),
+        "Drone1": (Decimal('1.0'), None),
+    },
+}
+
+def load_data_ROMAN(dataset_name, label_name: str, run_name, robot0_name, robot1_name) -> LoadDataResult:
 
     # Instantiate a class to hold the results
     data = LoadDataResult()
 
     # Load the estimated data
     user = getpass.getuser()
-    run_path = '/home/' + user + '/Research/ROMAN_DEVEL/results/Meronomy_' + dataset_name + '/' + run_name + '/offline_rpgo/'
+    run_path = '/home/' + user + '/Research/ROMAN_DEVEL/results/Meronomy_' + dataset_name + '_' + label_name + '/' + run_name + '/offline_rpgo/'
     data.est_data_robot0 = OdometryData.from_csv(run_path + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.ENU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
     data.est_data_robot1 = OdometryData.from_csv(run_path + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.ENU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
     data.est_data_lst = [data.est_data_robot0, data.est_data_robot1]
@@ -24,8 +40,9 @@ def load_data_ROMAN(dataset_name, run_name, robot0_name, robot1_name) -> LoadDat
     return data
 
 def main():  
-    dataset_name = "V1.0"
-    run_name = 'meronomy'
+    dataset_name = "V1.1"
+    run_name = '17th'
+    label_name = 'MeronomyGraph'
     robot_names = ["Husky1", "Drone1"]
 
     # Get robot0 name and robot1 name
@@ -33,7 +50,17 @@ def main():
     robot1_name = robot_names[1]
     
     # Load the data
-    data: LoadDataResult = load_data_ROMAN(dataset_name, run_name, robot0_name, robot1_name)
+    data: LoadDataResult = load_data_ROMAN(dataset_name, label_name, run_name, robot0_name, robot1_name)
+
+    # Crop the data
+    robot0_crop_times = MERONOMY_CROP_TIMES[dataset_name][robot0_name]
+    data.est_data_robot0.crop_data(robot0_crop_times[0], robot0_crop_times[1])
+    data.gt_data_robot0.crop_data(robot0_crop_times[0], robot0_crop_times[1])
+
+    robot1_crop_times = MERONOMY_CROP_TIMES[dataset_name][robot1_name]
+    data.est_data_robot1.crop_data(robot1_crop_times[0], robot1_crop_times[1])
+    data.gt_data_robot1.crop_data(robot1_crop_times[0], robot1_crop_times[1])
+
 
     # Calculate individual RMS ATE, among other metrics
     print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, run_name, "============")
