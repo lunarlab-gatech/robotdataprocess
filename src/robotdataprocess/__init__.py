@@ -8,7 +8,8 @@ from .data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 from .data_types.CameraData import CameraData
 from .data_types.ImuData import ImuData
 from .data_types.LiDARData import LiDARData
-from .data_types.LoopClosureData import LoopClosureData
+from .data_types.LoopClosureData.LoopClosureData import LoopClosureData
+from .data_types.LoopClosureData.LoopClosureDataROMAN import LoopClosureDataROMAN
 from .data_types.OdometryData import OdometryData
 from .data_types.PathData import PathData
 from .data_types.SequentialData import SequentialData

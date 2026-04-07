@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-from ..math_utils import interpolate_poses
-from .Data import Data
+from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ...math_utils import interpolate_poses
+from ..Data import Data
 from decimal import Decimal
 import json
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, StrMethodFormatter
 import numpy as np
-from .PathData import PathData
+from ..PathData import PathData
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import seaborn as sns
@@ -35,7 +35,7 @@ class LoopClosureData(Data):
     def __init__(self, timestamps_a: Union[np.ndarray, list], timestamps_b: Union[np.ndarray, list],
                  names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list],
                  detected_inliers: Union[np.ndarray, list, None] = None):
-                 
+
         super().__init__(frame_id="")
         self.timestamps_a = col_to_dec_arr(timestamps_a)
         self.timestamps_b = col_to_dec_arr(timestamps_b)
@@ -564,7 +564,9 @@ class LoopClosureData(Data):
         max_rotation_frac: float = 1.0,
         trans_err_in_target: float = 1.0,
         rot_err_in_target: float = 5.0,
-        title: str = None
+        title: str = None,
+        color_by_values: List[np.ndarray] = None,
+        color_by_label: str = None,
     ):
         """
         Scatter plot of loop closure errors (log-log scale): each point is one
@@ -583,6 +585,10 @@ class LoopClosureData(Data):
             trans_err_in_target: Translation error threshold for the highlighted region.
             rot_err_in_target: Rotation error threshold for the highlighted region.
             title: Optional plot title.
+            color_by_values: Optional list of per-loop-closure numeric arrays (one per
+                entry in ``errors``). When provided, points are colored by their value
+                using a sequential colormap instead of by label.
+            color_by_label: Label for the colorbar shown when ``color_by_values`` is set.
 
         Returns:
             matplotlib Figure object.
@@ -597,6 +603,9 @@ class LoopClosureData(Data):
 
         if inlier_masks is not None and len(inlier_masks) != len(errors):
             raise ValueError("inlier_masks must have the same length as errors")
+
+        if color_by_values is not None and len(color_by_values) != len(errors):
+            raise ValueError("color_by_values must have the same length as errors")
 
         if not (0 < max_translation_frac <= 1.0):
             raise ValueError("max_translation_frac must be in (0, 1]")
@@ -626,8 +635,18 @@ class LoopClosureData(Data):
         y_min = np.min(all_rot) * 0.95
         y_max = np.max(all_rot) * 1.05
 
+        # When coloring by values, build a shared normalizer across all entries
+        import matplotlib.cm as cm
+        from matplotlib.colors import Normalize
+        if color_by_values is not None:
+            all_cbv = np.concatenate([np.asarray(v, dtype=float) for v in color_by_values])
+            cbv_norm = Normalize(vmin=np.nanmin(all_cbv), vmax=np.nanmax(all_cbv))
+            cbv_cmap = cm.get_cmap("viridis")
+            sm = cm.ScalarMappable(norm=cbv_norm, cmap=cbv_cmap)
+            sm.set_array([])
+
         legend_handles = []
-        for err, label, color, inlier_mask in zip(errors, labels, palette, inlier_masks):
+        for idx, (err, label, color, inlier_mask) in enumerate(zip(errors, labels, palette, inlier_masks)):
             trans_err = np.asarray(err["translation_errors"])
             rot_err = np.asarray(err["rotation_errors"])
 
@@ -654,26 +673,41 @@ class LoopClosureData(Data):
             if inlier_mask is not None:
                 num_inliers = np.sum(inlier_mask)
 
+            # Determine per-point colors
+            if color_by_values is not None:
+                cbv = np.asarray(color_by_values[idx], dtype=float)
+                point_colors_out = cbv_cmap(cbv_norm(cbv[outlier_mask]))
+                point_colors_in = cbv_cmap(cbv_norm(cbv[inlier_vis_mask]))
+                scatter_color_out = point_colors_out
+                scatter_color_in = point_colors_in
+            else:
+                scatter_color_out = color
+                scatter_color_in = color
+
             # Outliers
             ax.scatter(
                 trans_err[outlier_mask], rot_err[outlier_mask],
-                alpha=0.8, s=200, color=color,
+                alpha=0.8, s=200, color=scatter_color_out,
                 marker='x', edgecolors='none', clip_on=False, zorder=5,
             )
-            # Inliers (same color, different marker, no extra legend entry)
+            # Inliers (different marker)
             if np.any(inlier_vis_mask):
                 ax.scatter(
                     trans_err[inlier_vis_mask], rot_err[inlier_vis_mask],
-                    alpha=0.8, s=800, color=color,
+                    alpha=0.8, s=800, color=scatter_color_in,
                     marker='*', edgecolors='none', clip_on=False, zorder=5,
                 )
 
-            # Save the legend entry
+            # Save the legend entry (only when not coloring by values, or always for label identification)
             updated_label = f"{label}"
             # if inlier_mask is not None: updated_label += f" - Num Inliers: {num_inliers}"
             print(f"{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target )")
             print(f"Number of inliers for {label}: {num_inliers}")
-            legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label))
+            if color_by_values is not None and np.any(in_box_mask):
+                cbv_in_box = np.asarray(color_by_values[idx], dtype=float)[in_box_mask]
+                print(f"Min {color_by_label or 'color_by'} in target box for {label}: {np.nanmin(cbv_in_box)}")
+            if color_by_values is None:
+                legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label))
         
         if title is not None:
             ax.set_title(title, fontsize=24)
@@ -748,7 +782,11 @@ class LoopClosureData(Data):
             tick.label1.set_visible(False)
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
-        ax.legend(title="Run", handles=legend_handles, frameon=True)
+        if color_by_values is not None:
+            cbar = fig.colorbar(sm, ax=ax, pad=0.02)
+            cbar.set_label(color_by_label if color_by_label is not None else "Value")
+        else:
+            ax.legend(title="Run", handles=legend_handles, frameon=True)
         sns.despine(ax=ax)
         fig.tight_layout()
 
