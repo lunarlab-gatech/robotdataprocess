@@ -126,6 +126,93 @@ class TestLoopClosureDataFromJson(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataFromJsonNamesOverride(unittest.TestCase):
+    """Test from_json names_override parameter."""
+
+    JSON_PATH = Path(__file__).parent / 'files' / 'test_LoopClosureData' / 'test_from_json' / 'align.json'
+
+    def test_names_override_replaces_all_names(self):
+        """names_override dict replaces both names for every loop closure."""
+        lc_data = LoopClosureData.from_json(
+            self.JSON_PATH,
+            names_override={"Husky1": "aerial-07", "Husky2": "ground-03"},
+        )
+
+        for name_pair in lc_data.names:
+            self.assertEqual(name_pair, ("aerial-07", "ground-03"))
+
+    def test_names_override_partial(self):
+        """Only the mapped name is replaced; unmapped names are kept as-is."""
+        lc_data = LoopClosureData.from_json(
+            self.JSON_PATH,
+            names_override={"Husky1": "aerial-07"},
+        )
+
+        for name_pair in lc_data.names:
+            self.assertEqual(name_pair, ("aerial-07", "Husky2"))
+
+    def test_names_override_empty_dict_keeps_original(self):
+        """An empty dict leaves all names unchanged."""
+        lc_data_no_override = LoopClosureData.from_json(self.JSON_PATH)
+        lc_data_empty = LoopClosureData.from_json(self.JSON_PATH, names_override={})
+
+        self.assertEqual(lc_data_no_override.names, lc_data_empty.names)
+
+    def test_names_override_none_keeps_original(self):
+        """Passing names_override=None (the default) leaves names unchanged."""
+        lc_data = LoopClosureData.from_json(self.JSON_PATH, names_override=None)
+
+        self.assertEqual(lc_data.names[0], ("Husky1", "Husky2"))
+
+    def test_names_override_flipped_entries(self):
+        """When some JSON entries have names in reverse order, the override
+        maps each name independently so the output order is also reversed."""
+        import json
+        import tempfile
+
+        entries = [
+            {
+                "seconds": [0, 10], "nanoseconds": [0, 0],
+                "names": ["Husky1", "Husky2"],
+                "translation": [1.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+            },
+            {
+                "seconds": [1, 11], "nanoseconds": [0, 0],
+                "names": ["Husky2", "Husky1"],   # flipped
+                "translation": [2.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+            },
+        ]
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(entries, f)
+            tmp_path = f.name
+
+        lc_data = LoopClosureData.from_json(
+            tmp_path,
+            names_override={"Husky1": "aerial-07", "Husky2": "ground-03"},
+        )
+
+        self.assertEqual(lc_data.names[0], ("aerial-07", "ground-03"))
+        self.assertEqual(lc_data.names[1], ("ground-03", "aerial-07"))
+
+    def test_names_override_does_not_affect_other_fields(self):
+        """names_override must not change timestamps, translations, or orientations."""
+        lc_base = LoopClosureData.from_json(self.JSON_PATH)
+        lc_override = LoopClosureData.from_json(
+            self.JSON_PATH,
+            names_override={"Husky1": "aerial-07", "Husky2": "ground-03"},
+        )
+
+        self.assertEqual(lc_base.num_loop_closures, lc_override.num_loop_closures)
+        np.testing.assert_array_equal(lc_base.timestamps_a, lc_override.timestamps_a)
+        np.testing.assert_array_equal(lc_base.timestamps_b, lc_override.timestamps_b)
+        np.testing.assert_array_equal(lc_base.translations, lc_override.translations)
+        np.testing.assert_array_equal(lc_base.orientations, lc_override.orientations)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataFromG2o(unittest.TestCase):
     """Test from_g2o loading."""
 
@@ -185,6 +272,56 @@ class TestLoopClosureDataFromG2o(unittest.TestCase):
 
         for name_pair in lc_data.names:
             self.assertEqual(name_pair, ("a", "b"))
+
+    def test_from_g2o_names_override(self):
+        """names_override dict replaces decoded character keys for all loop closures."""
+        lc_data = LoopClosureData.from_g2o(
+            self.G2O_PATH, self.TIME_PATH,
+            names_override={"a": "aerial-07", "b": "ground-03"},
+        )
+
+        for name_pair in lc_data.names:
+            self.assertEqual(name_pair, ("aerial-07", "ground-03"))
+
+        # Other fields should be unaffected
+        self.assertEqual(lc_data.num_loop_closures, 8)
+
+    def test_from_g2o_names_override_flipped_entries(self):
+        """When some g2o entries have keys in b->a order, the override maps
+        each character independently so the output pair is also flipped."""
+        import tempfile
+
+        # key encoding: char << 56 | index
+        key_a0 = 97 * (1 << 56)   # a:0
+        key_b0 = 98 * (1 << 56)   # b:0
+
+        g2o_lines = (
+            # normal a->b entry
+            f"EDGE_SE3:QUAT {key_a0} {key_b0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+            # flipped b->a entry
+            f"EDGE_SE3:QUAT {key_b0} {key_a0} 2.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+        )
+        time_lines = (
+            "0 0 100000000 xxx\n"   # robot 0 (a), keyframe 0 -> 0.1 s
+            "1 0 200000000 xxx\n"   # robot 1 (b), keyframe 0 -> 0.2 s
+        )
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.g2o', delete=False) as gf:
+            gf.write(g2o_lines)
+            g2o_tmp = gf.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+            tf.write(time_lines)
+            time_tmp = tf.name
+
+        lc_data = LoopClosureData.from_g2o(
+            g2o_tmp, time_tmp,
+            names_override={"a": "aerial-07", "b": "ground-03"},
+        )
+
+        self.assertEqual(lc_data.names[0], ("aerial-07", "ground-03"))
+        self.assertEqual(lc_data.names[1], ("ground-03", "aerial-07"))
 
     def test_from_g2o_invalid_edge_type_raises(self):
         """Lines not starting with EDGE_SE3:QUAT should raise ValueError."""
@@ -340,6 +477,99 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             lc.calculate_errors({"A": None})  # B is missing
+
+    def test_timestamp_before_range_clamped_to_first(self):
+        """A loop closure timestamp before the path range is clamped to the
+        first timestamp and does not raise."""
+        # Path spans t=1.0 to t=2.0
+        path_a = self._make_path_data(
+            timestamps=[1.0, 2.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[1.0, 2.0],
+            positions=[[5.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        # LC timestamp 0.0 is before the path start (1.0); should clamp to 1.0.
+        # GT relative transform at t=1.0: [5,0,0] - [0,0,0] = [5,0,0], identity rot.
+        # Estimated matches exactly -> zero error.
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("0.0")], dtype=object),
+            timestamps_b=np.array([Decimal("0.0")], dtype=object),
+            names=[("A", "B")],
+            translations=np.array([[5.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
+        )
+
+        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+
+        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+
+    def test_timestamp_after_range_clamped_to_last(self):
+        """A loop closure timestamp after the path range is clamped to the
+        last timestamp and does not raise."""
+        # Path spans t=0.0 to t=1.0
+        path_a = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[3.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        # LC timestamp 9.0 is after the path end (1.0); should clamp to 1.0.
+        # GT relative transform at t=1.0: [3,0,0], identity rot.
+        # Estimated matches exactly -> zero error.
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("9.0")], dtype=object),
+            timestamps_b=np.array([Decimal("9.0")], dtype=object),
+            names=[("A", "B")],
+            translations=np.array([[3.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
+        )
+
+        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+
+        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+
+    def test_one_timestamp_in_range_one_clamped(self):
+        """Only the out-of-range timestamp is clamped; the in-range one is
+        interpolated normally."""
+        # Path spans t=0.0 to t=2.0 with position moving linearly.
+        path_a = self._make_path_data(
+            timestamps=[0.0, 2.0],
+            positions=[[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[0.0, 2.0],
+            positions=[[10.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        # ts_a=1.0 is in range -> pos_a = [2, 0, 0] (midpoint interpolation)
+        # ts_b=5.0 is out of range -> clamped to 2.0 -> pos_b = [10, 0, 0]
+        # GT: [10 - 2, 0, 0] = [8, 0, 0], identity rot.
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("5.0")], dtype=object),
+            names=[("A", "B")],
+            translations=np.array([[8.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
+        )
+
+        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+
+        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

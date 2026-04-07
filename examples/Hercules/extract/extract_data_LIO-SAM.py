@@ -12,8 +12,8 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     output_path = input_path.parent / 'extract' / 'bags_for_LIO-SAM'
 
     # Extract RGB and IMU from Hercules v1.5
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
+    imu_data = ImuData.from_txt(input_path / robot_name / 'synthetic_imu_9axis_500Hz.txt', 'base_link', CoordinateFrame.NED, nine_axis=True)
+    pose_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 'map', 'base_link', CoordinateFrame.NED, False)
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Prepare LiDARData

@@ -27,7 +27,7 @@ def data_extraction(input_dir: str, robot_name: str,
         rgb_data.to_npy(output_path / robot_name / 'rgb')
 
     # Load the odometry data
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 
+    pose_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 
                                            robot_name + '/odom', robot_name + '/ground_truth/base_link', 
                                            CoordinateFrame.NED, False)
 

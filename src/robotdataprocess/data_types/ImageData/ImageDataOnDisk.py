@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, List, Callable
+from typing import Any, Tuple, Union, List, Callable
 
 class LazyImageArray:
     """A read-only array-like interface that loads PNG images from disk on demand."""
@@ -194,3 +194,81 @@ class ImageDataOnDisk(ImageData):
 
         # Return an ImageDataOnDisk class
         return cls(frame_id, timestamps_sorted, height, width, encoding, all_image_files_sorted)
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    def crop_images_to_LiDAR_FOV(self, lidar_v_fov: Tuple[float, float],
+                                  camera_data: Any) -> None:
+        """
+        Crop the top and bottom of every image so that the camera's vertical
+        FOV matches the given LiDAR vertical FOV.
+
+        The LiDAR vertical FOV is specified in degrees, measured from the
+        horizontal plane: positive angles are above horizontal, negative
+        angles are below. The crop is applied lazily via the transformation
+        pipeline, so no images are read from disk until accessed.
+
+        The crop row boundaries are computed from the camera intrinsic matrix
+        ``K`` (specifically ``fy`` and ``cy``). For a pixel row ``v`` in the
+        original image, the elevation angle is ``theta = -arctan((v - cy) / fy)``,
+        so the row that maps to a given angle is ``v = cy - fy * tan(theta)``.
+
+        Args:
+            lidar_v_fov: ``(min_deg, max_deg)`` tuple giving the LiDAR's
+                vertical angular range in degrees. Positive is above
+                horizontal, negative is below. ``min_deg < max_deg`` is
+                required.
+            camera_data: A ``CameraData`` instance whose intrinsics are used
+                to compute the crop boundaries. Its ``height``, ``K``, and
+                ``P`` fields are updated to reflect the new image dimensions.
+
+        Raises:
+            ValueError: If ``min_deg >= max_deg``.
+            ValueError: If the LiDAR FOV does not intersect the image's
+                vertical extent, or if the computed crop has zero height.
+        """
+
+        if lidar_v_fov[0] >= lidar_v_fov[1]:
+            raise ValueError(
+                f"lidar_v_fov min ({lidar_v_fov[0]}) must be less than max ({lidar_v_fov[1]}).")
+
+        # Import here to avoid circular imports
+        from ..CameraData import CameraData
+        if not isinstance(camera_data, CameraData):
+            raise TypeError(f"camera_data must be a CameraData instance, got {type(camera_data)}.")
+
+        fy = float(camera_data.K[1, 1])
+        cy = float(camera_data.K[1, 2])
+
+        v_min_rad = np.radians(lidar_v_fov[0])
+        v_max_rad = np.radians(lidar_v_fov[1])
+
+        # v_max_deg is the highest elevation → smallest row number (closest to top)
+        # v_min_deg is the lowest elevation → largest row number (closest to bottom)
+        row_top    = int(np.floor(cy - fy * np.tan(v_max_rad)))
+        row_bottom = int(np.ceil( cy - fy * np.tan(v_min_rad)))
+
+        # Clamp to valid pixel range
+        row_top    = max(0, row_top)
+        row_bottom = min(self.height, row_bottom)
+
+        new_height = row_bottom - row_top
+        if new_height <= 0:
+            raise ValueError(
+                f"LiDAR FOV ({lidar_v_fov[0]}°, {lidar_v_fov[1]}°) does not intersect "
+                f"the image's vertical extent (height={self.height}, cy={cy}, fy={fy}).")
+
+        # Register the crop as a lazy transformation
+        def _crop(image: np.ndarray) -> np.ndarray:
+            return image[row_top:row_bottom, :]
+
+        self.images.transformations.append(_crop)
+        self.height = new_height
+
+        # Update camera intrinsics to match the cropped image
+        new_cy = cy - row_top
+        camera_data.height = new_height
+        camera_data.K[1, 2] = new_cy
+        camera_data.P[1, 2] = new_cy

@@ -18,7 +18,7 @@ def main():
         robot_type = robot_name[:-3]
         est_data = OdometryData.from_csv(dataset_folder + '/results/LIO-SAM/' + robot_type + '/' + robot_name + '/' + file_name, 
                                         "world", "lidar", CoordinateFrame.ENU, True, None)
-        gt_data = OdometryData.from_txt_file(dataset_folder + "/data/" + robot_name + '/' + robot_name + '.txt', 
+        gt_data = OdometryData.from_txt(dataset_folder + "/data/" + robot_name + '/' + robot_name + '.txt', 
                                         "world", "imu", CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
              
         # Get L->I transformation
@@ -39,7 +39,7 @@ def main():
         est_data.apply_transformation_right_side(H_L_to_I_in_ENU)
 
         # Calculate RMS ATE, among other metrics
-        metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
+        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
                                                                             visualize=True, axes_interval=[5000, 50])
         print("\nMetrics for file: ", file_name)
         print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])

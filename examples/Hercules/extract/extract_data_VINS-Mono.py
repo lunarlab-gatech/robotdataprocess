@@ -15,8 +15,8 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
     output_path = input_path.parent / 'extract' / 'bags_for_vins_mono'
 
     # Extract RGB and IMU from Hercules v1.5
-    imu_data = ImuData.from_txt_file(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
-    pose_data = OdometryData.from_txt_file(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
+    imu_data = ImuData.from_txt(input_path / robot_name / 'synthetic_imu.txt', '' + robot_name + '/base_link', CoordinateFrame.NED)
+    pose_data = OdometryData.from_txt(input_path / robot_name / 'pose_world_frame.txt', 'world', 'body', CoordinateFrame.NED)
     image_data = ImageDataInMemory.from_image_files(input_path / robot_name / 'rgb_stereo_left', '' + robot_name + '/front_center_Scene')
 
     # Convert data from NED frame to ROS frame (and make sure it is at the identity)

@@ -10,7 +10,7 @@ def main():
     user = getpass.getuser()
     dataset_folder = '/home/dbutterfield3/Research/ros_workspaces/orb_slam3_ws/src/ORB_SLAM3/'
                 
-    est_data = OdometryData.from_txt_file(dataset_folder + file_name, "world", "robot", CoordinateFrame.NED, False, [0,1,2,3,5,6,7,4])
+    est_data = OdometryData.from_txt(dataset_folder + file_name, "world", "robot", CoordinateFrame.NED, False, [0,1,2,3,5,6,7,4])
     gt_data = OdometryData.from_csv('/media/dbutterfield3/T73/EuRoC/data/ASL/vicon_room1/V1_01_easy/V1_01_easy/mav0/state_groundtruth_estimate0/data.csv', "world", "robot", CoordinateFrame.NED, True, None)
 
     #est_data.visualize([gt_data], ["ORB_SLAM 3 Estimated Trajectory", "GT"], axes_interval=10000, axes_length=1)

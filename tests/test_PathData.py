@@ -672,5 +672,227 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(separated[1].orientations, path2.orientations)
 
 
+    # =========================================================================
+    # =================== to_txt_file / to_tum Tests ==========================
+    # =========================================================================
+
+    def _make_path(self):
+        """ Helper: a small PathData with known values for txt/tum tests. """
+        return PathData(
+            frame_id="world",
+            timestamps=np.array([1.0, 2.0, 3.0], dtype=object),
+            positions=np.array([[1.1, 2.2, 3.3],
+                                [4.4, 5.5, 6.6],
+                                [7.7, 8.8, 9.9]], dtype=object),
+            orientations=np.array([[0.1, 0.2, 0.3, 0.9],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.5, 0.5, 0.5, 0.5]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+    def test_to_txt_file_default_round_trip(self):
+        """
+        Writing with default data_to_column and reading back with default
+        column_to_data (from_txt) should reproduce the original data.
+        """
+        path = self._make_path()
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "out.txt"
+            path.to_txt_file(out)
+
+            # Verify column order: ts x y z qw qx qy qz
+            first_row = open(out).readline().split()
+            self.assertEqual(len(first_row), 8)
+            self.assertAlmostEqual(float(first_row[0]), 1.0)   # timestamp
+            self.assertAlmostEqual(float(first_row[1]), 1.1)   # x
+            self.assertAlmostEqual(float(first_row[4]), 0.9)   # qw at index 4
+
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU, header_included=False)
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), path.timestamps.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.positions.astype(float), path.positions.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.orientations.astype(float), path.orientations.astype(float), decimal=9)
+
+    def test_to_txt_file_custom_data_to_column(self):
+        """
+        A custom data_to_column permutation should place fields in the specified
+        columns and be recoverable via the inverse column_to_data.
+        """
+        path = self._make_path()
+        # Swap qw (index 4) and timestamp (index 0): data_to_column[0]=4, [4]=0
+        # Full permutation: ts→4, x→1, y→2, z→3, qw→0, qx→5, qy→6, qz→7
+        data_to_column = [4, 1, 2, 3, 0, 5, 6, 7]
+        # Inverse (column_to_data): col0=qw(4), col1=x(1), col2=y(2), col3=z(3),
+        #                            col4=ts(0), col5=qx(5), col6=qy(6), col7=qz(7)
+        column_to_data = [4, 1, 2, 3, 0, 5, 6, 7]  # same as data_to_column here
+
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "custom.txt"
+            path.to_txt_file(out, data_to_column=data_to_column)
+
+            # Column 0 should now hold qw of first row
+            first_row = open(out).readline().split()
+            self.assertAlmostEqual(float(first_row[0]), 0.9)   # qw
+            self.assertAlmostEqual(float(first_row[4]), 1.0)   # timestamp
+
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU,
+                                            header_included=False,
+                                            column_to_data=column_to_data)
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), path.timestamps.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.positions.astype(float), path.positions.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.orientations.astype(float), path.orientations.astype(float), decimal=9)
+
+    def test_to_txt_file_existing_file_raises(self):
+        """ to_txt_file should raise ValueError when the output file already exists. """
+        path = self._make_path()
+        existing = Path(__file__).absolute()
+        with self.assertRaises(ValueError):
+            path.to_txt_file(existing)
+
+    def test_to_tum_format_and_round_trip(self):
+        """
+        to_tum() should write TUM format (ts x y z qx qy qz qw) and be
+        recoverable via from_txt with column_to_data=[0,1,2,3,7,4,5,6].
+        """
+        path = self._make_path()
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "tum.txt"
+            path.to_tum(out)
+
+            # Verify column order: ts x y z qx qy qz qw
+            first_row = open(out).readline().split()
+            self.assertEqual(len(first_row), 8)
+            self.assertAlmostEqual(float(first_row[0]), 1.0)   # timestamp
+            self.assertAlmostEqual(float(first_row[1]), 1.1)   # x
+            self.assertAlmostEqual(float(first_row[4]), 0.1)   # qx at index 4
+            self.assertAlmostEqual(float(first_row[7]), 0.9)   # qw at index 7
+
+            # Round-trip via from_txt with TUM column_to_data
+            loaded = PathData.from_txt(out, "world", CoordinateFrame.FLU,
+                                            header_included=False,
+                                            column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), path.timestamps.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.positions.astype(float), path.positions.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.orientations.astype(float), path.orientations.astype(float), decimal=9)
+
+    def test_to_tum_existing_file_raises(self):
+        """ to_tum() should raise ValueError when the output file already exists. """
+        path = self._make_path()
+        existing = Path(__file__).absolute()
+        with self.assertRaises(ValueError):
+            path.to_tum(existing)
+
+    def test_from_tum_round_trip(self):
+        """
+        Writing with to_tum() and reading back with from_tum() should reproduce
+        the original data exactly.
+        """
+        path = self._make_path()
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "tum.txt"
+            path.to_tum(out)
+
+            loaded = PathData.from_tum(out, "world", CoordinateFrame.FLU)
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), path.timestamps.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.positions.astype(float), path.positions.astype(float), decimal=9)
+            np.testing.assert_array_almost_equal(
+                loaded.orientations.astype(float), path.orientations.astype(float), decimal=9)
+            self.assertEqual(loaded.frame_id, "world")
+            self.assertEqual(loaded.frame, CoordinateFrame.FLU)
+
+    def test_from_tum_reads_column_order(self):
+        """
+        from_tum() must interpret qw as the last (8th) column, not the 5th.
+        Use a hand-crafted file where qw != qx to confirm the mapping is correct.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            tum_file = Path(d) / "manual.txt"
+            # Row: ts=5.0  x=1  y=2  z=3  qx=0.1  qy=0.2  qz=0.3  qw=0.9
+            tum_file.write_text("5.0 1.0 2.0 3.0 0.1 0.2 0.3 0.9\n")
+
+            loaded = PathData.from_tum(tum_file, "map", CoordinateFrame.FLU)
+            self.assertEqual(loaded.len(), 1)
+            self.assertAlmostEqual(float(loaded.timestamps[0]), 5.0)
+            np.testing.assert_array_almost_equal(
+                loaded.positions[0].astype(float), [1.0, 2.0, 3.0])
+            # orientations stored as (qx, qy, qz, qw)
+            np.testing.assert_array_almost_equal(
+                loaded.orientations[0].astype(float), [0.1, 0.2, 0.3, 0.9])
+
+    def test_from_tum_multiple_rows(self):
+        """ from_tum() loads all rows and assigns the correct frame_id and frame. """
+        with tempfile.TemporaryDirectory() as d:
+            tum_file = Path(d) / "multi.txt"
+            tum_file.write_text(
+                "1.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0\n"
+                "2.0 1.0 2.0 3.0 0.5 0.5 0.5 0.5\n"
+                "3.0 4.0 5.0 6.0 0.0 0.0 1.0 0.0\n"
+            )
+
+            loaded = PathData.from_tum(tum_file, "odom", CoordinateFrame.NED)
+            self.assertEqual(loaded.len(), 3)
+            self.assertEqual(loaded.frame_id, "odom")
+            self.assertEqual(loaded.frame, CoordinateFrame.NED)
+            np.testing.assert_array_almost_equal(
+                loaded.timestamps.astype(float), [1.0, 2.0, 3.0])
+            np.testing.assert_array_almost_equal(
+                loaded.positions[1].astype(float), [1.0, 2.0, 3.0])
+            # Second row: qx=0.5, qy=0.5, qz=0.5, qw=0.5
+            np.testing.assert_array_almost_equal(
+                loaded.orientations[1].astype(float), [0.5, 0.5, 0.5, 0.5])
+            # Third row: qx=0.0, qy=0.0, qz=1.0, qw=0.0
+            np.testing.assert_array_almost_equal(
+                loaded.orientations[2].astype(float), [0.0, 0.0, 1.0, 0.0])
+
+    def test_from_tum_odometrydata(self):
+        """
+        OdometryData.from_tum() should return an OdometryData with the correct
+        child_frame_id set and correctly parsed TUM column order.
+        """
+        from robotdataprocess.data_types.OdometryData import OdometryData
+        with tempfile.TemporaryDirectory() as d:
+            tum_file = Path(d) / "odom.txt"
+            tum_file.write_text("10.0 1.0 2.0 3.0 0.0 0.0 0.0 1.0\n")
+
+            loaded = OdometryData.from_tum(tum_file, "world", "robot", CoordinateFrame.FLU)
+            self.assertIsInstance(loaded, OdometryData)
+            self.assertEqual(loaded.child_frame_id, "robot")
+            np.testing.assert_array_almost_equal(
+                loaded.positions[0].astype(float), [1.0, 2.0, 3.0])
+            np.testing.assert_array_almost_equal(
+                loaded.orientations[0].astype(float), [0.0, 0.0, 0.0, 1.0])
+
+    def test_to_txt_file_odometrydata_inherits(self):
+        """ OdometryData should inherit to_txt_file and to_tum from PathData. """
+        from robotdataprocess.data_types.OdometryData import OdometryData
+        odom = OdometryData(
+            frame_id="world", child_frame_id="robot",
+            timestamps=np.array([10.0, 11.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        with tempfile.TemporaryDirectory() as d:
+            txt_out = Path(d) / "odom.txt"
+            tum_out = Path(d) / "odom_tum.txt"
+            odom.to_txt_file(txt_out)
+            odom.to_tum(tum_out)
+            self.assertTrue(txt_out.exists())
+            self.assertTrue(tum_out.exists())
+            # Verify TUM qw is last for OdometryData as well
+            first_row = open(tum_out).readline().split()
+            self.assertAlmostEqual(float(first_row[7]), 1.0)   # qw
+
+
 if __name__ == "__main__":
     unittest.main()

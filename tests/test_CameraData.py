@@ -1,0 +1,268 @@
+import matplotlib
+matplotlib.use('Agg')
+from decimal import Decimal
+import numpy as np
+import os
+from pathlib import Path
+import unittest
+
+from robotdataprocess.data_types.CameraData import CameraData
+from robotdataprocess.data_types.Data import ROSMsgLibType
+from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
+from robotdataprocess.data_types.ImageData.ImageData import ImageData
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestCameraData(unittest.TestCase):
+
+    # Shared calibration values used across tests
+    FX, FY = 500.0, 500.0
+    CX, CY = 320.0, 240.0
+    WIDTH, HEIGHT = 640, 480
+    FRAME_ID = "camera_optical_frame"
+    D = [0.1, -0.2, 0.0, 0.0, 0.05]
+
+    def _make_camera(self, D=None) -> CameraData:
+        return CameraData.from_user_mono(
+            frame_id=self.FRAME_ID,
+            width=self.WIDTH,
+            height=self.HEIGHT,
+            fx=self.FX, fy=self.FY,
+            cx=self.CX, cy=self.CY,
+            D=D)
+
+    # =========================================================================
+    # ========================= DistortionModel enum ==========================
+    # =========================================================================
+
+    def test_distortion_model_to_ros_str(self):
+        """ RADIAL_TANGENTIAL maps to 'plumb_bob'. """
+        self.assertEqual(
+            CameraData.DistortionModel.to_ros_str(CameraData.DistortionModel.RADIAL_TANGENTIAL),
+            "plumb_bob")
+
+    def test_distortion_model_from_ros_str(self):
+        """ 'plumb_bob' maps back to RADIAL_TANGENTIAL. """
+        self.assertEqual(
+            CameraData.DistortionModel.from_ros_str("plumb_bob"),
+            CameraData.DistortionModel.RADIAL_TANGENTIAL)
+
+    def test_distortion_model_from_ros_str_unknown_raises(self):
+        """ Unknown ROS distortion string raises NotImplementedError. """
+        with self.assertRaises(NotImplementedError):
+            CameraData.DistortionModel.from_ros_str("kannala_brandt")
+
+    # =========================================================================
+    # =========================== from_user_mono ==============================
+    # =========================================================================
+
+    def test_from_user_mono_K(self):
+        """ K is assembled correctly from fx, fy, cx, cy. """
+        cam = self._make_camera()
+        expected_K = np.array([[self.FX, 0.0, self.CX],
+                                [0.0, self.FY, self.CY],
+                                [0.0, 0.0, 1.0]])
+        np.testing.assert_array_equal(cam.K, expected_K)
+
+    def test_from_user_mono_R_is_identity(self):
+        """ R is always the identity matrix for monocular cameras. """
+        cam = self._make_camera()
+        np.testing.assert_array_equal(cam.R, np.eye(3))
+
+    def test_from_user_mono_P_derived_from_K(self):
+        """ P is [K | 0], i.e. K with a zero fourth column appended. """
+        cam = self._make_camera()
+        expected_P = np.zeros((3, 4))
+        expected_P[:3, :3] = cam.K
+        np.testing.assert_array_equal(cam.P, expected_P)
+
+    def test_from_user_mono_D_default_zeros(self):
+        """ Default D is five zeros when not provided. """
+        cam = self._make_camera()
+        np.testing.assert_array_equal(cam.D, np.zeros(5))
+
+    def test_from_user_mono_D_custom(self):
+        """ Custom D values are stored correctly. """
+        cam = self._make_camera(D=self.D)
+        np.testing.assert_array_equal(cam.D, np.array(self.D))
+
+    def test_from_user_mono_metadata(self):
+        """ frame_id, width, height, and distortion_model are stored correctly. """
+        cam = self._make_camera()
+        self.assertEqual(cam.frame_id, self.FRAME_ID)
+        self.assertEqual(cam.width, self.WIDTH)
+        self.assertEqual(cam.height, self.HEIGHT)
+        self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+
+    # =========================================================================
+    # ========================= __init__ validation ===========================
+    # =========================================================================
+
+    def test_invalid_width_raises(self):
+        """ Non-positive width raises ValueError. """
+        with self.assertRaises(ValueError):
+            CameraData(frame_id=self.FRAME_ID, width=0, height=self.HEIGHT,
+                       distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
+
+    def test_invalid_height_raises(self):
+        """ Non-positive height raises ValueError. """
+        with self.assertRaises(ValueError):
+            CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=-1,
+                       distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
+
+    def test_K_wrong_shape_raises(self):
+        """ K with wrong shape raises an error. """
+        with self.assertRaises(Exception):
+            CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=self.HEIGHT,
+                       distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       K=np.eye(4), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
+
+    def test_P_wrong_shape_raises(self):
+        """ P with wrong shape raises an error. """
+        with self.assertRaises(Exception):
+            CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=self.HEIGHT,
+                       distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 3)))
+
+    # =========================================================================
+    # ============================ get_ros_msg ================================
+    # =========================================================================
+
+    def test_get_ros_msg_rosbags_fields(self):
+        """ ROSBAGS message has correct header, dims, distortion model, and matrices. """
+        cam = self._make_camera(D=self.D)
+        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+        self.assertEqual(msg.header.frame_id, self.FRAME_ID)
+        self.assertEqual(msg.header.stamp.sec, 0)
+        self.assertEqual(msg.header.stamp.nanosec, 0)
+        self.assertEqual(msg.width, self.WIDTH)
+        self.assertEqual(msg.height, self.HEIGHT)
+        self.assertEqual(msg.distortion_model, "plumb_bob")
+        np.testing.assert_array_almost_equal(msg.d, np.array(self.D))
+        np.testing.assert_array_almost_equal(msg.k, cam.K.flatten())
+        np.testing.assert_array_almost_equal(msg.r, cam.R.flatten())
+        np.testing.assert_array_almost_equal(msg.p, cam.P.flatten())
+
+    def test_get_ros_msg_rosbags_binning_and_roi(self):
+        """ ROSBAGS message has binning and ROI zeroed out. """
+        cam = self._make_camera()
+        msg = cam.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+        self.assertEqual(msg.binning_x, 0)
+        self.assertEqual(msg.binning_y, 0)
+        self.assertEqual(msg.roi.x_offset, 0)
+        self.assertEqual(msg.roi.y_offset, 0)
+        self.assertEqual(msg.roi.width, 0)
+        self.assertEqual(msg.roi.height, 0)
+        self.assertFalse(msg.roi.do_rectify)
+
+    def test_get_ros_msg_none_raises(self):
+        """ NONE lib type raises NotImplementedError. """
+        cam = self._make_camera()
+        with self.assertRaises(NotImplementedError):
+            cam.get_ros_msg(ROSMsgLibType.NONE, 0)
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    # =========================================================================
+    # =========================== from_kalibr_mono ============================
+    # =========================================================================
+
+    KALIBR_YAML = Path(Path('.'), 'tests', 'files', 'test_CameraData', 'test_from_kalibr_mon', 'stereo.yaml').absolute()
+
+    def test_from_kalibr_mono_cam0_intrinsics(self):
+        """ cam0 K matrix is assembled correctly from kalibr intrinsics. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        expected_K = np.array([[940.862825677534,  0.0,               799.1626975233576],
+                                [0.0,               938.554923506332,  559.295406893583 ],
+                                [0.0,               0.0,               1.0              ]])
+        np.testing.assert_array_almost_equal(cam.K, expected_K)
+
+    def test_from_kalibr_mono_cam0_distortion(self):
+        """ cam0 D vector matches kalibr distortion_coeffs. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        expected_D = np.array([-0.1008504099655989, 0.08905706623788286,
+                                0.0007516966627205781, -0.0011958374307601393])
+        np.testing.assert_array_almost_equal(cam.D, expected_D)
+
+    def test_from_kalibr_mono_cam0_resolution(self):
+        """ cam0 width and height match kalibr resolution. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        self.assertEqual(cam.width, 1600)
+        self.assertEqual(cam.height, 1100)
+
+    def test_from_kalibr_mono_cam0_R_and_P(self):
+        """ R is identity and P is [K|0] for a monocular load. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        np.testing.assert_array_equal(cam.R, np.eye(3))
+        expected_P = np.zeros((3, 4))
+        expected_P[:3, :3] = cam.K
+        np.testing.assert_array_almost_equal(cam.P, expected_P)
+
+    def test_from_kalibr_mono_cam0_frame_id_and_model(self):
+        """ frame_id is the camera name and distortion model is RADIAL_TANGENTIAL. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        self.assertEqual(cam.frame_id, 'cam0')
+        self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+
+    def test_from_kalibr_mono_cam1_intrinsics(self):
+        """ cam1 K matrix is assembled correctly from kalibr intrinsics. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam1')
+        expected_K = np.array([[934.5190744321391,  0.0,               792.8073165035943],
+                                [0.0,               932.525429508503,  562.7061769000949],
+                                [0.0,               0.0,               1.0             ]])
+        np.testing.assert_array_almost_equal(cam.K, expected_K)
+
+    def test_from_kalibr_mono_missing_camera_raises(self):
+        """ Requesting a camera not in the YAML raises KeyError. """
+        with self.assertRaises(KeyError):
+            CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam99')
+
+    def test_from_kalibr_str_unsupported_raises(self):
+        """ from_kalibr_str raises NotImplementedError for unknown models. """
+        with self.assertRaises(NotImplementedError):
+            CameraData.DistortionModel.from_kalibr_str('equidistant')
+
+    # =========================================================================
+    # ============================ visualize_FOV ==============================
+    # =========================================================================
+
+    def test_visualize_FOV_camera_only(self):
+        """ visualize_FOV with no LiDAR overlay does not crash. """
+        cam = self._make_camera()
+        cam.visualize_FOV(depth=5.0, testing=True)
+
+    def test_visualize_FOV_with_lidar(self):
+        """ visualize_FOV with a LiDAR vertical FOV overlay does not crash. """
+        cam = self._make_camera()
+        cam.visualize_FOV(depth=5.0, lidar_v_fov=(-15.0, 15.0), testing=True)
+
+    # =========================================================================
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    def test_sync_to_ImageData(self):
+        """ sync_to_ImageData copies timestamps from ImageDataInMemory exactly. """
+        timestamps = [Decimal('1.0'), Decimal('2.0'), Decimal('3.0')]
+        images = np.zeros((3, self.HEIGHT, self.WIDTH), dtype=np.uint8)
+        image_data = ImageDataInMemory(
+            frame_id=self.FRAME_ID,
+            timestamps=timestamps,
+            height=self.HEIGHT,
+            width=self.WIDTH,
+            encoding=ImageData.ImageEncoding.Mono8,
+            images=images)
+
+        cam = self._make_camera()
+        cam.sync_to_ImageData(image_data)
+
+        np.testing.assert_array_equal(cam.timestamps, np.array(timestamps))
+
+
+if __name__ == "__main__":
+    unittest.main()

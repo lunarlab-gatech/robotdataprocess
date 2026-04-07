@@ -351,6 +351,19 @@ class LiDARData(SequentialData):
             self.transformations.append(ned_to_flu)
             self.frame = CoordinateFrame.FLU
 
+        elif self.frame == CoordinateFrame.ENU:
+            # ENU: X=East, Y=North, Z=Up  →  FLU: X=Forward(North), Y=Left(-East), Z=Up
+            R_ENU_to_FLU = np.array([[ 0,  1,  0],
+                                      [-1,  0,  0],
+                                      [ 0,  0,  1]], dtype=np.float32)
+
+            def enu_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
+                pts = (R_ENU_to_FLU @ pts.T).T
+                return pts, channels
+
+            self.transformations.append(enu_to_flu)
+            self.frame = CoordinateFrame.FLU
+
         else:
             raise RuntimeError(f"LiDARData class is in an unexpected frame: {self.frame}!")
 
@@ -373,8 +386,71 @@ class LiDARData(SequentialData):
         self.timestamps = self.timestamps[self.data_mask]
 
     # =========================================================================
-    # =========================== Export Methods ============================== 
-    # =========================================================================  
+    # ============================ Data Analysis ==============================
+    # =========================================================================
+
+    def estimate_FOV(self, n_frames: int = 10) -> Tuple[float, float]:
+        """
+        Estimate the vertical field of view of the LiDAR sensor from the
+        point cloud data.
+
+        Samples up to ``n_frames`` evenly-spaced frames, computes the
+        elevation angle of every valid point in each frame, and returns the
+        observed vertical FOV as a ``(v_min_deg, v_max_deg)`` tuple.
+        Elevation is measured from the horizontal plane: positive angles are
+        above horizontal, negative angles are below. The data must be in the
+        FLU coordinate frame; call ``to_FLU_frame()`` first if needed.
+
+        The 1st and 99th percentiles are used rather than strict min/max to
+        guard against stray points near the sensor or at extreme ranges.
+
+        Args:
+            n_frames: Maximum number of frames to sample. Frames are drawn
+                evenly across the full dataset. Defaults to 10.
+
+        Returns:
+            ``(v_min_deg, v_max_deg)`` — the estimated vertical FOV in
+            degrees, consistent with the ``lidar_v_fov`` convention used
+            elsewhere in this library.
+
+        Raises:
+            RuntimeError: If the data is not in the FLU coordinate frame.
+            RuntimeError: If no valid points are found across the sampled frames.
+        """
+
+        if self.frame != CoordinateFrame.FLU:
+            raise RuntimeError(
+                f"compute_FOV() requires data in FLU frame, but frame is {self.frame}. "
+                "Call to_FLU_frame() first.")
+
+        all_elevations: List[np.ndarray] = []
+        indices = np.linspace(0, self.len() - 1, min(n_frames, self.len()), dtype=int)
+
+        for idx in indices:
+            pts, _ = self.get_point_cloud_at_index(int(idx))
+
+            valid = ~np.isnan(pts).any(axis=1)
+            pts = pts[valid]
+            if len(pts) == 0:
+                continue
+
+            horiz_dist = np.sqrt(pts[:, 0] ** 2 + pts[:, 1] ** 2)
+            elev = np.degrees(np.arctan2(pts[:, 2], horiz_dist))
+            all_elevations.append(elev)
+
+        if not all_elevations:
+            raise RuntimeError("No valid points found across sampled frames.")
+
+        combined = np.concatenate(all_elevations)
+        v_min = float(np.percentile(combined, 1))
+        v_max = float(np.percentile(combined, 99))
+
+        print(f"Estimated LiDAR vertical FOV: [{v_min:.2f}°, {v_max:.2f}°]")
+        return v_min, v_max
+
+    # =========================================================================
+    # =========================== Export Methods ==============================
+    # =========================================================================
 
     def to_npy_files(self, npy_folder_path: Union[Path, str]) -> None:
         """

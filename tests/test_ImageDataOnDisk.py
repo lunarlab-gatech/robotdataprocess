@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from pathlib import Path
+from robotdataprocess.data_types.CameraData import CameraData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk, LazyImageArray
@@ -139,6 +140,82 @@ class TestImageDataOnDisk(unittest.TestCase):
         # Verify every image matches InMemory
         for i in range(data.len()):
             np.testing.assert_array_equal(data.images[i], mem_data.images[i])
+
+
+    # =========================================================================
+    # ====================== crop_images_to_LiDAR_FOV ========================
+    # =========================================================================
+
+    def _make_camera(self, width=640, height=480, fx=500.0, fy=500.0, cx=320.0, cy=240.0) -> CameraData:
+        return CameraData.from_user_mono('cam', width, height, fx=fx, fy=fy, cx=cx, cy=cy)
+
+    def test_crop_images_to_LiDAR_FOV_dimensions(self):
+        """ Height and cy are updated correctly after cropping. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        cam = self._make_camera(width=img_data.width, height=img_data.height)
+
+        fy, cy = float(cam.K[1, 1]), float(cam.K[1, 2])
+        lidar_v_fov = (-10.0, 10.0)
+        img_data.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+
+        expected_row_top    = max(0, int(np.floor(cy - fy * np.tan(np.radians(lidar_v_fov[1])))))
+        expected_row_bottom = min(img_data.height + expected_row_top,
+                                  int(np.ceil(cy - fy * np.tan(np.radians(lidar_v_fov[0])))))
+        expected_height = expected_row_bottom - expected_row_top
+        expected_cy = cy - expected_row_top
+
+        self.assertEqual(img_data.height, expected_height)
+        self.assertEqual(cam.height, expected_height)
+        self.assertAlmostEqual(float(cam.K[1, 2]), expected_cy)
+        self.assertAlmostEqual(float(cam.P[1, 2]), expected_cy)
+
+    def test_crop_images_to_LiDAR_FOV_image_shape(self):
+        """ Loaded images have the cropped row count after crop_images_to_LiDAR_FOV. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        cam = self._make_camera(width=img_data.width, height=img_data.height)
+
+        img_data.crop_images_to_LiDAR_FOV((-10.0, 10.0), cam)
+
+        for i in range(img_data.len()):
+            self.assertEqual(img_data.images[i].shape[0], img_data.height)
+
+    def test_crop_images_to_LiDAR_FOV_pixel_content(self):
+        """ Cropped images contain exactly the rows [row_top:row_bottom] of the originals. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        orig = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        cropped = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        cam = self._make_camera(width=orig.width, height=orig.height)
+
+        fy, cy = float(cam.K[1, 1]), float(cam.K[1, 2])
+        lidar_v_fov = (-10.0, 10.0)
+        row_top    = max(0, int(np.floor(cy - fy * np.tan(np.radians(lidar_v_fov[1])))))
+        row_bottom = min(orig.height, int(np.ceil(cy - fy * np.tan(np.radians(lidar_v_fov[0])))))
+
+        cropped.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+
+        for i in range(orig.len()):
+            np.testing.assert_array_equal(cropped.images[i], orig.images[i][row_top:row_bottom, :])
+
+    def test_crop_images_to_LiDAR_FOV_invalid_fov_raises(self):
+        """ min >= max raises ValueError. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        cam = self._make_camera(width=img_data.width, height=img_data.height)
+
+        with self.assertRaises(ValueError):
+            img_data.crop_images_to_LiDAR_FOV((10.0, 10.0), cam)
+        with self.assertRaises(ValueError):
+            img_data.crop_images_to_LiDAR_FOV((15.0, 10.0), cam)
+
+    def test_crop_images_to_LiDAR_FOV_no_camera_raises(self):
+        """ Omitting camera_data raises ValueError. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+
+        with self.assertRaises((ValueError, TypeError)):
+            img_data.crop_images_to_LiDAR_FOV((-10.0, 10.0))
 
 
 if __name__ == "__main__":

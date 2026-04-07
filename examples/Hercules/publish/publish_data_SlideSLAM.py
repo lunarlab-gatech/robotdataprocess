@@ -15,7 +15,7 @@ def publish_data(input_dir: str, dataset_num: str, robot_name: str, crop_data: b
     # Extract RGB and IMU from Hercules v1.5
     odom_data = OdometryData.from_csv(input_path.parent.parent / 'results' / 'LIO-SAM/' / robot_name / 'odometry.csv', 
                                         "world", "robot", CoordinateFrame.NED, True, None)
-    pose_data = OdometryData.from_txt_file(input_path / 'pose_world_frame.txt', 
+    pose_data = OdometryData.from_txt(input_path / 'pose_world_frame.txt', 
                                            'world', robot_name + '/ground_truth/odom', CoordinateFrame.NED, False)
     seg_data = ImageDataOnDisk.from_image_files(input_path / 'seg', '' + robot_name + '/cam0')
     depth_data = ImageDataOnDisk.from_npy_files(input_path / 'depth', '' + robot_name + '/cam0')

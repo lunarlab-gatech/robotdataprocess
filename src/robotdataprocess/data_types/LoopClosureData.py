@@ -51,13 +51,18 @@ class LoopClosureData(Data):
     # =========================================================================
 
     @classmethod
-    def from_json(cls, json_path: Union[Path, str]) -> LoopClosureData:
+    def from_json(cls, json_path: Union[Path, str],
+                  names_override: Union[dict, None] = None) -> LoopClosureData:
         """
         Creates a LoopClosureData instance from a JSON file containing loop
         closure alignment data.
 
         Args:
             json_path: Path to the JSON file.
+            names_override: Optional dict mapping names found in the JSON to
+                desired replacement names (e.g. ``{"0": "aerial-07",
+                "1": "ground-03"}``). Names not present in the dict are kept
+                as-is.
 
         Returns:
             LoopClosureData instance.
@@ -78,7 +83,13 @@ class LoopClosureData(Data):
             timestamps_a.append(ts_a)
             timestamps_b.append(ts_b)
 
-            names.append((entry["names"][0], entry["names"][1]))
+            if names_override is not None:
+                name_a = names_override.get(entry["names"][0], entry["names"][0])
+                name_b = names_override.get(entry["names"][1], entry["names"][1])
+            else:
+                name_a = entry["names"][0]
+                name_b = entry["names"][1]
+            names.append((name_a, name_b))
             translations.append(entry["translation"])
             orientations.append(entry["rotation"])
 
@@ -93,7 +104,7 @@ class LoopClosureData(Data):
 
     @classmethod
     def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
-                 names_override: Union[tuple[str, str], None] = None) -> LoopClosureData:
+                 names_override: Union[dict, None] = None) -> LoopClosureData:
         """
         Creates a LoopClosureData instance from a g2o file containing
         EDGE_SE3:QUAT entries, using a timestamp file to map keyframe
@@ -111,8 +122,10 @@ class LoopClosureData(Data):
             g2o_path: Path to the .g2o file.
             time_path: Path to the timestamp file. Each line has:
                 robot_id keyframe_id timestamp_ns [ignored...]
-            names_override: If passed, this tuple of (name_a, name_b) will
-                be used for all loop closures instead of decoding from keys.
+            names_override: Optional dict mapping decoded character keys to
+                desired robot names (e.g. ``{"a": "aerial-07",
+                "b": "ground-03"}``). Keys not present in the dict are kept
+                as their decoded character.
 
         Returns:
             LoopClosureData instance.
@@ -170,7 +183,9 @@ class LoopClosureData(Data):
                 timestamps_a.append(time_lookup[(robot_id1, idx1)])
                 timestamps_b.append(time_lookup[(robot_id2, idx2)])
                 if names_override is not None:
-                    names.append(names_override)
+                    name_a = names_override.get(char1, char1)
+                    name_b = names_override.get(char2, char2)
+                    names.append((name_a, name_b))
                 else:
                     names.append((char1, char2))
 
@@ -285,7 +300,12 @@ class LoopClosureData(Data):
             cache[name] = (ts_float, pos_float, quat_float)
 
         ts_float, pos_float, quat_float = cache[name]
-        target = np.array([float(timestamp)], dtype=np.float64)
+
+        # Clip the target timestamp (to be robust when baselines assume submaps start at t=0)
+        target = np.clip(
+            np.array([float(timestamp)], dtype=np.float64),
+            ts_float[0], ts_float[-1],
+        )
 
         new_pos, new_quat = interpolate_poses(ts_float, pos_float, quat_float, target)
         return new_pos[0], new_quat[0]

@@ -207,7 +207,7 @@ class TestRosPublisher(unittest.TestCase):
         # Create a ImuData object
         file_path = Path(Path('.'), 'tests', 'files', os.path.basename(__file__)[:-3], 
                          inspect.currentframe().f_code.co_name, 'ImuData', 'imu.txt').absolute()
-        imu_data = ImuData.from_txt_file(file_path, "base_link", CoordinateFrame.NED, True)
+        imu_data = ImuData.from_txt(file_path, "base_link", CoordinateFrame.NED, True)
 
         # Write msg_to_dict_fn
         Imu = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
@@ -432,7 +432,7 @@ class TestRosPublisherROS1(unittest.TestCase):
         # ================== Test ImuData ==================
         file_path = Path(Path('.'), 'tests', 'files', 'test_RosPublisher',
                          'test__run_ROS2_publisher_process', 'ImuData', 'imu.txt').absolute()
-        imu_data = ImuData.from_txt_file(file_path, "base_link", CoordinateFrame.NED, True)
+        imu_data = ImuData.from_txt(file_path, "base_link", CoordinateFrame.NED, True)
 
         Imu = ModuleImporter.get_module_attribute('sensor_msgs.msg', 'Imu')
 
