@@ -36,8 +36,8 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
 def main():
     # ====================== ROMAN ===========================
     # Set dataset configuration
-    run_names = ["17th", "17th", "25th", "25th"]
-    label_names = ["MeronomyGraph", "ROMAN", "MeronomyGraph", "ROMAN"]
+    run_names = ["17th", "17th", "25th", "25th", "30th", "1st"]
+    label_names = ["MeronomyGraph", "ROMAN", "MeronomyGraph", "ROMAN", "MeronomyGraph", "MeronomyGraph"]
     dataset_names = ["V1.1"] * len(run_names)
     robot_names = ["Husky1", "Drone1"]
     run_display_names = ["ROMAN Mapper" if r == "17th" else "New Mapper" for r in run_names]

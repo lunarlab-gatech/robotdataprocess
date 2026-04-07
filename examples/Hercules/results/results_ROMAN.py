@@ -5,8 +5,8 @@ from scipy.spatial.transform import Rotation as R
 def main():  
     dataset_name = "V2.3.AC"
     method = "MeronomyGraph"
-    run_name = '27th'
-    robot_names = ["Husky1", "Husky2"]
+    robot_names = ["Drone1", "Drone2"]
+    run_name = "1st_NM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
 
     # Get robot0 name and robot1 name
     robot0_name = robot_names[0]
