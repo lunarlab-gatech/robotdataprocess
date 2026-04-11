@@ -19,11 +19,8 @@ LEFT_IMG_TOPIC   = '/camera_left/image_raw'
 RIGHT_IMG_TOPIC  = '/camera_right/image_raw'
 LIDAR_TOPIC      = '/velodyne/points'
 
-IMU_TOPIC        = None
-ODOM_TOPIC       = None
-LEFT_IMG_TOPIC   = None
-RIGHT_IMG_TOPIC  = None
-LIDAR_TOPIC      = '/velodyne/points'
+# LIDAR_TOPIC      = '/velodyne/points'
+# LIDAR_TOPIC      = None
 
 # =============================================================================
 
