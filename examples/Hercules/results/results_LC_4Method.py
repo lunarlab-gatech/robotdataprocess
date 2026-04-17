@@ -48,11 +48,11 @@ def main():
     # Set dataset configuration
     run_prefix = "1st_"
     run_centers = ["RM", "NM", "RM", "NM"]
-    run_ends = "_D1D2"
+    robot_names = ["Husky1", "Husky2"]
+    run_ends = "_" + "".join(n[0] + "".join(filter(str.isdigit, n)) for n in robot_names)
     run_names =  [run_prefix + c + run_ends for c in run_centers]
     label_names = [            "ROMAN",           "ROMAN",    "MeronomyGraph", "MeronomyGraph"]
-    dataset_names = ["V2.3.AC"] * len(run_names)
-    robot_names = ["Drone1", "Drone2"]
+    dataset_names = ["V2.4.C"] * len(run_names)
     run_display_names = ["Old Map" if r == "RM" else "New Map" for r in run_centers]
     label_names_s = ["R" if r == "ROMAN" else "MG" for r in label_names]
     title_names = [label + " - " + run for label, run in zip(label_names_s, run_display_names)]

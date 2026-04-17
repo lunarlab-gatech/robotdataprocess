@@ -5,6 +5,8 @@ from ...math_utils import interpolate_poses
 from ..Data import Data
 from decimal import Decimal
 import json
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, StrMethodFormatter
@@ -15,7 +17,6 @@ from scipy.spatial.transform import Rotation as R
 import seaborn as sns
 from typeguard import typechecked
 from typing import List, Tuple, Union
-
 
 class LoopClosureData(Data):
     """
@@ -204,6 +205,61 @@ class LoopClosureData(Data):
             detected_inliers=None,
         )
 
+    @classmethod
+    def from_maplab_json(cls, json_path: Union[Path, str],
+                         names_override: Union[dict, None] = None) -> LoopClosureData:
+        """
+        Creates a LoopClosureData instance from a maplab JSON file containing
+        loop closure constraints.
+
+        Each loop closure entry provides nanosecond timestamps, mission UUIDs,
+        the relative transform ``T_A_B`` (translation and ``rotation_xyzw``),
+        and a ``switch_variable`` flag (1 = inlier).
+
+        Args:
+            json_path: Path to the JSON file.
+            names_override: Optional dict mapping mission UUIDs found in the
+                JSON to desired replacement names (e.g.
+                ``{"99a8765349fea5180b00000000000000": "robot-01"}``). UUIDs
+                not present in the dict are kept as-is.
+
+        Returns:
+            LoopClosureData instance.
+        """
+        with open(str(json_path), 'r') as f:
+            data = json.load(f)
+
+        timestamps_a = []
+        timestamps_b = []
+        names = []
+        translations = []
+        orientations = []
+
+        for entry in data["loop_closures"]:
+            ts_a = Decimal(str(entry["from_timestamp_ns"])) / Decimal("1000000000")
+            ts_b = Decimal(str(entry["to_timestamp_ns"])) / Decimal("1000000000")
+            timestamps_a.append(ts_a)
+            timestamps_b.append(ts_b)
+
+            name_a = entry["from_mission"]
+            name_b = entry["to_mission"]
+            if names_override is not None:
+                name_a = names_override.get(name_a, name_a)
+                name_b = names_override.get(name_b, name_b)
+            names.append((name_a, name_b))
+
+            translations.append(entry["T_A_B"]["translation"])
+            orientations.append(entry["T_A_B"]["rotation_xyzw"])
+
+        return cls(
+            timestamps_a=np.array(timestamps_a, dtype=object),
+            timestamps_b=np.array(timestamps_b, dtype=object),
+            names=names,
+            translations=np.array(translations, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+            detected_inliers=None,
+        )
+
     # =========================================================================
     # ========================= Manipulation Methods ==========================
     # =========================================================================
@@ -218,6 +274,21 @@ class LoopClosureData(Data):
         quantize_val = Decimal(10) ** -decimals
         self.timestamps_a = np.array([ts.quantize(quantize_val) for ts in self.timestamps_a])
         self.timestamps_b = np.array([ts.quantize(quantize_val) for ts in self.timestamps_b])
+
+    def prune_intra_robot_loop_closures(self):
+        """
+        Removes loop closures where both names in the pair are the same,
+        i.e. intra-robot loop closures. Modifies the instance in place.
+        """
+        mask = np.array([name_a != name_b for name_a, name_b in self.names])
+        self.timestamps_a = self.timestamps_a[mask]
+        self.timestamps_b = self.timestamps_b[mask]
+        self.names = [name for name, keep in zip(self.names, mask) if keep]
+        self.translations = self.translations[mask]
+        self.orientations = self.orientations[mask]
+        if hasattr(self, 'detected_inliers'):
+            self.detected_inliers = self.detected_inliers[mask]
+        self.num_loop_closures = len(self.timestamps_a)
 
     # =========================================================================
     # ============================ Error Methods ==============================
@@ -636,8 +707,6 @@ class LoopClosureData(Data):
         y_max = np.max(all_rot) * 1.05
 
         # When coloring by values, build a shared normalizer across all entries
-        import matplotlib.cm as cm
-        from matplotlib.colors import Normalize
         if color_by_values is not None:
             all_cbv = np.concatenate([np.asarray(v, dtype=float) for v in color_by_values])
             cbv_norm = Normalize(vmin=np.nanmin(all_cbv), vmax=np.nanmax(all_cbv))
@@ -672,6 +741,8 @@ class LoopClosureData(Data):
             # Calculate # of inliers
             if inlier_mask is not None:
                 num_inliers = np.sum(inlier_mask)
+            else:
+                num_inliers = 0
 
             # Determine per-point colors
             if color_by_values is not None:

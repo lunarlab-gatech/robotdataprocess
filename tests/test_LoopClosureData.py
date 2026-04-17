@@ -334,6 +334,76 @@ class TestLoopClosureDataFromG2o(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataFromMaplabJson(unittest.TestCase):
+    """Test from_maplab_json loading."""
+
+    JSON_PATH = Path(__file__).parent / 'files' / 'test_LoopClosureData' / 'test_from_maplab_json' / 'lc.json'
+
+    def test_from_maplab_json_count(self):
+        """Load the test lc.json and verify loop closure count."""
+        lc_data = LoopClosureData.from_maplab_json(self.JSON_PATH)
+        self.assertEqual(lc_data.num_loop_closures, 51)
+
+    def test_from_maplab_json_first_entry(self):
+        """Verify first entry timestamps, names, translation, and orientation."""
+        lc_data = LoopClosureData.from_maplab_json(self.JSON_PATH)
+
+        # from_timestamp_ns=124050000000, to_timestamp_ns=356850000000
+        self.assertEqual(lc_data.timestamps_a[0], Decimal("124.05"))
+        self.assertEqual(lc_data.timestamps_b[0], Decimal("356.85"))
+
+        # Mission UUIDs used as names by default
+        self.assertEqual(lc_data.names[0], (
+            "99a8765349fea5180b00000000000000",
+            "3f67cb5349fea5180b00000000000000",
+        ))
+
+        # Translation
+        np.testing.assert_almost_equal(
+            float(lc_data.translations[0][0]), 2.4478760718183228, 10)
+        np.testing.assert_almost_equal(
+            float(lc_data.translations[0][1]), 3.5392956138660558, 10)
+        np.testing.assert_almost_equal(
+            float(lc_data.translations[0][2]), -2.0999611172827564, 10)
+
+        # Orientation (xyzw)
+        np.testing.assert_almost_equal(
+            float(lc_data.orientations[0][0]), 0.0012377342867899051, 10)
+        np.testing.assert_almost_equal(
+            float(lc_data.orientations[0][1]), -0.031413439155310738, 10)
+        np.testing.assert_almost_equal(
+            float(lc_data.orientations[0][2]), 0.12681357197506921, 10)
+        np.testing.assert_almost_equal(
+            float(lc_data.orientations[0][3]), 0.99142825348947716, 10)
+
+    def test_from_maplab_json_detected_inliers_none(self):
+        """detected_inliers should be None since switch_variable is not parsed."""
+        lc_data = LoopClosureData.from_maplab_json(self.JSON_PATH)
+        self.assertFalse(hasattr(lc_data, 'detected_inliers'))
+
+    def test_from_maplab_json_names_override(self):
+        """names_override replaces mission UUIDs with friendly names."""
+        lc_data = LoopClosureData.from_maplab_json(
+            self.JSON_PATH,
+            names_override={
+                "99a8765349fea5180b00000000000000": "robot-01",
+                "3f67cb5349fea5180b00000000000000": "robot-02",
+            },
+        )
+
+        self.assertEqual(lc_data.names[0], ("robot-01", "robot-02"))
+
+    def test_from_maplab_json_names_override_partial(self):
+        """Only mapped UUIDs are replaced; unmapped UUIDs are kept as-is."""
+        lc_data = LoopClosureData.from_maplab_json(
+            self.JSON_PATH,
+            names_override={"99a8765349fea5180b00000000000000": "robot-01"},
+        )
+
+        self.assertEqual(lc_data.names[0], ("robot-01", "3f67cb5349fea5180b00000000000000"))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataCalculateErrors(unittest.TestCase):
     """Test calculate_errors with known poses."""
 
@@ -571,6 +641,70 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
         np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
         np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
 
+    def test_flipped_names(self):
+        """When names are (B, A) instead of (A, B) the GT relative transform is
+        computed from B's frame, so the estimated LC must reflect that to get
+        zero error."""
+        # Robot A stationary at origin with identity rotation.
+        # Robot B stationary at [5, 0, 0] with a 90 deg Z rotation.
+        r_b = R.from_euler('z', 90, degrees=True)
+        path_a = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[R.identity().as_quat().tolist()] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[5.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+            orientations=[r_b.as_quat().tolist()] * 2,
+        )
+
+        # names=(B, A): GT = T_B^{-1} * T_A
+        # R_rel = R_B^{-1} * R_A = R_z(-90) * identity = R_z(-90)
+        # t_rel = R_z(-90).apply([0,0,0] - [5,0,0]) = R_z(-90).apply([-5,0,0]) = [0, 5, 0]
+        r_rel = r_b.inv()
+        t_rel = r_rel.apply([-5.0, 0.0, 0.0])
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("1.0")], dtype=object),
+            names=[("B", "A")],
+            translations=np.array([t_rel.tolist()], dtype=object),
+            orientations=np.array([r_rel.as_quat().tolist()], dtype=object),
+        )
+
+        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+
+        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+
+    def test_same_robot_both_names(self):
+        """When both names refer to the same robot the GT relative transform is
+        computed between two timestamps of that robot's own trajectory."""
+        # Robot A moves from [0,0,0] with identity rotation at t=0 to
+        # [4,0,0] with a 90 deg Z rotation at t=2.
+        r_end = R.from_euler('z', 90, degrees=True)
+        path_a = self._make_path_data(
+            timestamps=[0.0, 2.0],
+            positions=[[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+            orientations=[R.identity().as_quat().tolist(), r_end.as_quat().tolist()],
+        )
+
+        # GT: T_A(0)^{-1} * T_A(2)
+        # R_rel = identity^{-1} * R_z(90) = R_z(90)
+        # t_rel = identity^{-1}.apply([4,0,0] - [0,0,0]) = [4, 0, 0]
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("0.0")], dtype=object),
+            timestamps_b=np.array([Decimal("2.0")], dtype=object),
+            names=[("A", "A")],
+            translations=np.array([[4.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([r_end.as_quat().tolist()], dtype=object),
+        )
+
+        errors = lc.calculate_errors({"A": path_a})
+
+        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLabelInliersViaOtherLoopClosureData(unittest.TestCase):
@@ -805,6 +939,76 @@ class TestLoopClosureDataRoundTimestamps(unittest.TestCase):
         lc.round_timestamps(1)
 
         self.assertEqual(lc.num_loop_closures, 3)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestPruneIntraRobotLoopClosures(unittest.TestCase):
+    """Test prune_intra_robot_loop_closures method."""
+
+    def _make_lc(self, names, detected_inliers=None):
+        n = len(names)
+        return LoopClosureData(
+            timestamps_a=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
+            timestamps_b=np.array([Decimal(str(i + 10)) for i in range(n)], dtype=object),
+            names=names,
+            translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
+            orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
+            detected_inliers=detected_inliers,
+        )
+
+    def test_removes_intra_robot(self):
+        """Intra-robot loop closures (same name pair) are removed."""
+        lc = self._make_lc([("A", "B"), ("A", "A"), ("B", "C"), ("B", "B")])
+        lc.prune_intra_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "B"), ("B", "C")])
+        # entries 0 and 2 survive: translations [0,0,0] and [2,0,0], orientations [1,0,0,0] and [3,0,0,0]
+        np.testing.assert_almost_equal(float(lc.translations[0][0]), 0.0)
+        np.testing.assert_almost_equal(float(lc.translations[1][0]), 2.0)
+        np.testing.assert_almost_equal(float(lc.orientations[0][0]), 1.0)
+        np.testing.assert_almost_equal(float(lc.orientations[1][0]), 3.0)
+
+    def test_updates_all_fields(self):
+        """timestamps, translations, and orientations are pruned consistently."""
+        lc = self._make_lc([("A", "A"), ("A", "B"), ("C", "C")])
+        lc.prune_intra_robot_loop_closures()
+
+        # Only the middle entry (index 1) survives
+        self.assertEqual(lc.num_loop_closures, 1)
+        self.assertEqual(lc.timestamps_a[0], Decimal("1"))
+        self.assertEqual(lc.timestamps_b[0], Decimal("11"))
+        np.testing.assert_almost_equal(float(lc.translations[0][0]), 1.0)
+        np.testing.assert_almost_equal(float(lc.orientations[0][0]), 2.0)
+
+    def test_prunes_detected_inliers_when_set(self):
+        """detected_inliers array is pruned in sync with the other fields."""
+        lc = self._make_lc(
+            [("A", "B"), ("A", "A"), ("B", "C")],
+            detected_inliers=[True, True, False],
+        )
+        lc.prune_intra_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        np.testing.assert_array_equal(lc.detected_inliers, [True, False])
+
+    def test_no_intra_robot_is_noop(self):
+        """When there are no intra-robot loop closures, nothing changes."""
+        lc = self._make_lc([("A", "B"), ("B", "C")])
+        lc.prune_intra_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "B"), ("B", "C")])
+
+    def test_all_intra_robot_gives_empty(self):
+        """When all loop closures are intra-robot, the result is empty."""
+        lc = self._make_lc([("A", "A"), ("B", "B")])
+        lc.prune_intra_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 0)
+        self.assertEqual(lc.names, [])
+        self.assertEqual(len(lc.timestamps_a), 0)
+        self.assertEqual(len(lc.translations), 0)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
