@@ -14,12 +14,12 @@ from pathlib import Path
 # Each robot entry: (robot_name, mission_id)
 # The mission_id is used to filter the maplab CSV for this specific robot
 ROBOTS = [
-    ("Drone1", " ")
-    # ("Drone2", " 0acba9b3718491180b00000000000000"),
+    ("Husky1"," 3f67cb5349fea5180b00000000000000"),
+    ("Husky2"," 99a8765349fea5180b00000000000000")
     # ("Drone1", " <mission-id-here>"),
 ]
 
-DATASET_NAMES = ["V2.3.C"]
+DATASET_NAMES = ["V2.4.C"]
 
 # Base path configuration
 def get_base_path(user: str) -> str:
