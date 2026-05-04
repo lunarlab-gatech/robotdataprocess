@@ -176,6 +176,44 @@ class TestPathData(unittest.TestCase):
         self.assertEqual(path.frame_id, path_converted.frame_id)
         self.assertEqual(path.frame, path_converted.frame)
 
+    def test_from_evo(self):
+        from evo.core.trajectory import PoseTrajectory3D
+
+        timestamps = np.array([1.0, 2.0, 2.0, 3.0])
+        positions  = np.array([[0.1, 0.2, 0.3],
+                                [1.1, 2.2, 3.3],
+                                [1.1, 2.2, 3.3],   # exact duplicate of index 1
+                                [4.4, 5.5, 6.6]])
+        # orientations in wxyz (normalized, non-trivial)
+        orientations_wxyz = np.array([[1.0,  0.0,  0.0,  0.0],
+                                      [0.5,  0.5,  0.5,  0.5],
+                                      [0.5,  0.5,  0.5,  0.5],   # exact duplicate of index 1
+                                      [0.0,  0.0,  0.0,  1.0]])
+
+        # Identical duplicate should be silently removed
+        traj = PoseTrajectory3D(positions_xyz=positions, orientations_quat_wxyz=orientations_wxyz, timestamps=timestamps)
+        result = PathData.from_evo(traj, "map", CoordinateFrame.FLU)
+        self.assertEqual(result.len(), 3)
+        np.testing.assert_array_equal(result.timestamps, np.array([1.0, 2.0, 3.0]))
+
+        # Position differs by 1e-8 at duplicate timestamp → must raise
+        positions_bad_pos = positions.copy()
+        positions_bad_pos[2, 0] += 1e-8
+        traj_bad_pos = PoseTrajectory3D(positions_xyz=positions_bad_pos,
+                                        orientations_quat_wxyz=orientations_wxyz,
+                                        timestamps=timestamps)
+        with self.assertRaises(ValueError):
+            PathData.from_evo(traj_bad_pos, "map", CoordinateFrame.FLU)
+
+        # Orientation differs by 1e-8 at duplicate timestamp → must raise
+        orientations_bad_ori = orientations_wxyz.copy()
+        orientations_bad_ori[2, 1] += 1e-8
+        traj_bad_ori = PoseTrajectory3D(positions_xyz=positions,
+                                        orientations_quat_wxyz=orientations_bad_ori,
+                                        timestamps=timestamps)
+        with self.assertRaises(ValueError):
+            PathData.from_evo(traj_bad_ori, "map", CoordinateFrame.FLU)
+
     def test_concatenate_PathData(self):
 
         # Create two PathData objects

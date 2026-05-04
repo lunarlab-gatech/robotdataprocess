@@ -46,18 +46,17 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
 def main():
     # ====================== ROMAN ===========================
     # Set dataset configuration
-    run_prefix = "1st_"
-    run_centers = ["RM", "NM", "RM", "NM"]
-    robot_names = ["Husky1", "Husky2"]
+    run_centers = ["1st_RM", "1st_NM", "Apr_NM"]
+    robot_names = ["Husky1", "Drone2"]
     run_ends = "_" + "".join(n[0] + "".join(filter(str.isdigit, n)) for n in robot_names)
-    run_names =  [run_prefix + c + run_ends for c in run_centers]
-    label_names = [            "ROMAN",           "ROMAN",    "MeronomyGraph", "MeronomyGraph"]
+    run_names =  [c + run_ends for c in run_centers]
+    label_names = [            "ROMAN",           "ROMAN",    "MeronomyGraph"]
     dataset_names = ["V2.4.C"] * len(run_names)
-    run_display_names = ["Old Map" if r == "RM" else "New Map" for r in run_centers]
+    run_display_names = run_centers
     label_names_s = ["R" if r == "ROMAN" else "MG" for r in label_names]
     title_names = [label + " - " + run for label, run in zip(label_names_s, run_display_names)]
 
-    # Calculate lc errors for each run and robot pair for ROMAN
+    # Calculate lc errors for each run and robot pair for ROMANs
     errors_list = []
     inliers_list = []
     for dataset_name, label_name, run_name in zip(dataset_names, label_names, run_names):

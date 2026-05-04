@@ -3,10 +3,10 @@ from robotdataprocess import OdometryData, CoordinateFrame, PathData
 from scipy.spatial.transform import Rotation as R
 
 def main():  
-    dataset_name = "V2.3.AC"
-    method = "MeronomyGraph"
-    robot_names = ["Drone1", "Drone2"]
-    run_name = "1st_NM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
+    dataset_name = "V2.4.C"
+    method = "ROMAN"
+    robot_names = ["Husky2", "Drone1"]
+    run_name = "1st_RM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
 
     # Get robot0 name and robot1 name
     robot0_name = robot_names[0]

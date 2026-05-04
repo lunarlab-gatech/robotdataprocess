@@ -346,9 +346,23 @@ class PathData(SequentialData):
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
 
+        # Remove duplicate timestamps (can arise after sync.associate_trajectories)
+        timestamps = pose_trajectory_3d.timestamps
+        duplicate_mask = np.concatenate(([False], np.diff(timestamps) == 0))
+        if np.any(duplicate_mask):
+            dup_indices = np.where(duplicate_mask)[0]
+            for i in dup_indices:
+                if not (np.allclose(pose_trajectory_3d.positions_xyz[i], pose_trajectory_3d.positions_xyz[i - 1], atol=1e-9, rtol=0) and
+                        np.allclose(orientations_xyzw[i], orientations_xyzw[i - 1], atol=1e-9, rtol=0)):
+                    raise ValueError(f"Duplicate timestamp {timestamps[i]} at index {i} has mismatched position or orientation.")
+        unique_mask = ~duplicate_mask
+        timestamps = timestamps[unique_mask]
+        positions = pose_trajectory_3d.positions_xyz[unique_mask]
+        orientations_xyzw = orientations_xyzw[unique_mask]
+
         return cls(frame_id=frame_id,
-                   timestamps=pose_trajectory_3d.timestamps,
-                   positions=pose_trajectory_3d.positions_xyz,
+                   timestamps=timestamps,
+                   positions=positions,
                    orientations=orientations_xyzw,
                    frame=frame)
 
