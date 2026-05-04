@@ -12,6 +12,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, Optional, Tuple, Union
@@ -264,6 +265,60 @@ class CameraData(SequentialData):
         return cls(frame_id=cam_name, width=int(width), height=int(height),
                    distortion_model=distortion_model,
                    K=K, D=D, R=R, P=P)
+
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], camera_info_topic: str) -> CameraData:
+        """
+        Load a CameraData instance from a ``sensor_msgs/CameraInfo`` topic in a
+        ROS1 ``.bag`` file.
+
+        Only the first message on ``camera_info_topic`` is read; camera
+        calibration is assumed to be static across the bag.
+
+        Args:
+            bag_path: Path to the ``.bag`` file.
+            camera_info_topic: Topic name of the ``sensor_msgs/CameraInfo``
+                stream.
+
+        Returns:
+            CameraData: Instance populated with the calibration from the first
+            message.
+
+        Raises:
+            ValueError: If ``camera_info_topic`` is not present in the bag or
+                the bag contains no messages on that topic.
+            NotImplementedError: If the distortion model in the message is not
+                supported.
+        """
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+
+        with Reader1(Path(bag_path)) as reader:
+            conns = [c for c in reader.connections if c.topic == camera_info_topic]
+            if not conns:
+                raise ValueError(
+                    f"Topic {camera_info_topic!r} not found in bag {bag_path}.")
+            conn = conns[0]
+
+            msg = None
+            for _, _, rawdata in reader.messages(connections=conns):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+                break
+
+            if msg is None:
+                raise ValueError(
+                    f"No messages found on topic {camera_info_topic!r} in bag {bag_path}.")
+
+            frame_id = msg.header.frame_id
+            width = int(msg.width)
+            height = int(msg.height)
+            distortion_model = CameraData.DistortionModel.from_ros_str(msg.distortion_model)
+            K = np.array(msg.K, dtype=np.float64).reshape(3, 3)
+            D = np.array(msg.D, dtype=np.float64).flatten()
+            R = np.array(msg.R, dtype=np.float64).reshape(3, 3)
+            P = np.array(msg.P, dtype=np.float64).reshape(3, 4)
+
+        return cls(frame_id=frame_id, width=width, height=height,
+                   distortion_model=distortion_model, K=K, D=D, R=R, P=P)
 
     # =========================================================================
     # ============================ Visualization ==============================
