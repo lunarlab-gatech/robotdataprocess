@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..Data import ROSMsgLibType
 from ..SequentialData import SequentialData
+import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
@@ -11,7 +12,7 @@ from numpy.lib.format import open_memmap
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, Any
+from typing import Union, Any, Tuple
 import tqdm
 from rosbags.typesys import Stores, get_typestore
 
@@ -41,7 +42,7 @@ class ImageData(SequentialData):
                 raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
         
         @classmethod
-        def from_ros_str(cls, encoding_str: str):
+        def from_ros2_str(cls, encoding_str: str):
             encoding_str = encoding_str.lower()
             if encoding_str == 'mono8':
                 return cls.Mono8
@@ -66,6 +67,35 @@ class ImageData(SequentialData):
                 raise NotImplementedError(f"dtype {dtype} w/ {channels} channel(s) has no corresponding encoding!")
         
         @classmethod
+        def from_compressed_ros1_str(cls, format_str: str):
+            """
+            Extract encoding from a ROS1 CompressedImage ``format`` field.
+
+            The field follows the convention
+            ``"<original_enc>; <codec> compressed [<stored_enc>]"``.
+            When a stored encoding is present (e.g. ``"rgb8; jpeg compressed bgr8"``)
+            it is used directly; when absent (e.g. ``"mono8; png compressed"``) the
+            original encoding before the semicolon is used.
+
+            Args:
+                format_str: The ``format`` field of a ``sensor_msgs/msg/CompressedImage``.
+            Returns:
+                ImageEncoding matching the encoding of the decompressed image data.
+            Raises:
+                NotImplementedError: If the encoding token is not recognised.
+                ValueError: If the format string cannot be parsed.
+            """
+            lower = format_str.lower().strip()
+            if 'compressed' in lower:
+                after = lower.split('compressed', 1)[1].strip()
+                if after:
+                    return cls.from_ros2_str(after)
+                before = lower.split(';')[0].strip()
+                return cls.from_ros2_str(before)
+            raise ValueError(
+                f"Cannot determine encoding from compressed format string: {format_str!r}")
+
+        @classmethod
         def from_pillow_str(cls, encoding_str: str):
             if encoding_str == "RGB":
                 return cls.RGB8
@@ -76,7 +106,7 @@ class ImageData(SequentialData):
         
         # ================ Export Methods ================
         @staticmethod
-        def to_ros_str(encoding: ImageData.ImageEncoding):
+        def to_ros2_str(encoding: ImageData.ImageEncoding):
             if encoding == ImageData.ImageEncoding.Mono8:
                 return 'mono8'
             elif encoding == ImageData.ImageEncoding.RGB8:
@@ -101,6 +131,8 @@ class ImageData(SequentialData):
             else:
                 raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
     
+    _COMPRESSED_MSGTYPE: str = 'sensor_msgs/msg/CompressedImage'
+
     height: int
     width: int
     encoding: ImageData.ImageEncoding
@@ -121,6 +153,66 @@ class ImageData(SequentialData):
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================
+
+    @staticmethod
+    def _decode_image_msg(msg: Any, encoding: 'ImageData.ImageEncoding', height: int, width: int) -> np.ndarray:
+        """
+        Decodes raw pixel data from a ROS Image message into a numpy array.
+
+        Args:
+            msg: A ROS Image message with a ``data`` field.
+            encoding: The image encoding to interpret the bytes as.
+            height: Image height in pixels.
+            width: Image width in pixels.
+        Returns:
+            np.ndarray: Decoded image array. Shape is (H, W, C) for multi-channel
+                encodings or (H, W) for single-channel.
+        """
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
+        if channels > 1:
+            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels))
+        else:
+            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))
+
+    @staticmethod
+    def _decode_compressed_image_msg(msg: Any) -> Tuple[np.ndarray, 'ImageData.ImageEncoding']:
+        """
+        Decompresses a sensor_msgs/msg/CompressedImage message into a numpy array.
+
+        Parses the encoding from ``msg.format`` via
+        ``ImageEncoding.from_compressed_ros1_str``, decompresses the payload with
+        ``cv2.imdecode``, then calls ``_decode_image_msg`` for consistent
+        dtype/shape handling.
+
+        Args:
+            msg: A ROS1 CompressedImage message with ``format`` and ``data`` fields.
+        Returns:
+            Tuple of (image array, encoding).
+        """
+        decoded = cv2.imdecode(np.frombuffer(msg.data, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+        if decoded is None:
+            raise RuntimeError("cv2.imdecode failed to decode compressed image data.")
+        height, width = decoded.shape[:2]
+
+        try:
+            encoding = ImageData.ImageEncoding.from_compressed_ros1_str(msg.format)
+        except ValueError:
+            # Simple format string (e.g. 'jpg', 'png') with no encoding prefix — infer from shape.
+            # cv2.imdecode always produces BGR for color images.
+            channels = 1 if decoded.ndim == 2 else decoded.shape[2]
+            if channels == 3:
+                encoding = ImageData.ImageEncoding.BGR8
+            elif channels == 1:
+                encoding = ImageData.ImageEncoding.Mono8
+            else:
+                raise NotImplementedError(
+                    f"Cannot infer encoding for compressed image with {channels} channels "
+                    f"and format string {msg.format!r}.")
+
+        class _RawProxy:
+            data = decoded.tobytes()
+
+        return ImageData._decode_image_msg(_RawProxy(), encoding, height, width), encoding
 
     @classmethod
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageData:
@@ -317,7 +409,7 @@ class ImageData(SequentialData):
                                 frame_id=self.frame_id),
                         height=self.height, 
                         width=self.width, 
-                        encoding=ImageData.ImageEncoding.to_ros_str(self.encoding),
+                        encoding=ImageData.ImageEncoding.to_ros2_str(self.encoding),
                         is_bigendian=0, 
                         step=step, 
                         data=data)
@@ -340,7 +432,7 @@ class ImageData(SequentialData):
             img_msg.header.frame_id = self.frame_id 
             img_msg.height = self.height
             img_msg.width = self.width
-            img_msg.encoding = ImageData.ImageEncoding.to_ros_str(self.encoding)
+            img_msg.encoding = ImageData.ImageEncoding.to_ros2_str(self.encoding)
             img_msg.is_bigendian = 0
             img_msg.step = step
             img_msg.data = data.tolist()

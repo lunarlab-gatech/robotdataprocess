@@ -115,7 +115,7 @@ class TestRosPublisher(unittest.TestCase):
             np.testing.assert_array_equal(data_sent.images[matched_index], msg_recieved["image"])
             np.testing.assert_equal(data_sent.height, msg_recieved["height"])
             np.testing.assert_equal(data_sent.width, msg_recieved["width"])
-            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_recieved["encoding"]))
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros2_str(msg_recieved["encoding"]))
             np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
 
@@ -416,7 +416,7 @@ class TestRosPublisherROS1(unittest.TestCase):
             np.testing.assert_array_equal(data_sent.images[matched_index], msg_received["image"])
             np.testing.assert_equal(data_sent.height, msg_received["height"])
             np.testing.assert_equal(data_sent.width, msg_received["width"])
-            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_received["encoding"]))
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros2_str(msg_received["encoding"]))
             np.testing.assert_equal(data_sent.frame_id, msg_received["frame_id"])
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_received["stamp"])
 

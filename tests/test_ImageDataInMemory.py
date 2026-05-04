@@ -39,7 +39,7 @@ class TestImageDataInMemory(unittest.TestCase):
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
         with np.testing.assert_raises(NotImplementedError):
-            ImageDataInMemory.ImageEncoding.from_ros_str("fake_name")
+            ImageDataInMemory.ImageEncoding.from_ros2_str("fake_name")
 
     def test_from_npy(self):
         """
@@ -101,7 +101,7 @@ class TestImageDataInMemory(unittest.TestCase):
             os.remove(bag_path / 'rgb_data_bag.db3')
             os.remove(bag_path / 'metadata.yaml')
             os.rmdir(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [image_data], ['/cam0'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [image_data], ['/cam0'], [None], None)
 
         # Load that data directly from the rosbag
         npy_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb', 'npy').absolute()
@@ -223,7 +223,7 @@ class TestImageDataInMemory(unittest.TestCase):
         bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
         if bag_path.exists():
             shutil.rmtree(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(
+        Ros2BagWrapper.write_data_to_ros2_bag(
             bag_path,
             [image_data], 
             ['/cam0/depth'], 

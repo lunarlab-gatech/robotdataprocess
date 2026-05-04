@@ -41,22 +41,22 @@ class TestImageDataEncoding(unittest.TestCase):
 
     def test_from_ros_str_mono8(self):
         """ Test from_ros_str with mono8 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("mono8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("mono8")
         self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
 
     def test_from_ros_str_mono8_uppercase(self):
         """ Test from_ros_str with MONO8 (uppercase) encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("MONO8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("MONO8")
         self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
 
     def test_from_ros_str_rgb8(self):
         """ Test from_ros_str with rgb8 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("rgb8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("rgb8")
         self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
 
     def test_from_ros_str_32fc1(self):
         """ Test from_ros_str with 32fc1 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("32fc1")
+        encoding = ImageData.ImageEncoding.from_ros2_str("32fc1")
         self.assertEqual(encoding, ImageData.ImageEncoding._32FC1)
 
     # Note: from_ros_str invalid case is already tested in test_ImageDataInMemory.py
@@ -104,24 +104,24 @@ class TestImageDataEncoding(unittest.TestCase):
 
     def test_to_ros_str_mono8(self):
         """ Test to_ros_str with Mono8 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.Mono8)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding.Mono8)
         self.assertEqual(ros_str, 'mono8')
 
     def test_to_ros_str_rgb8(self):
         """ Test to_ros_str with RGB8 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.RGB8)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding.RGB8)
         self.assertEqual(ros_str, 'rgb8')
 
     def test_to_ros_str_32fc1(self):
         """ Test to_ros_str with 32FC1 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding._32FC1)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding._32FC1)
         self.assertEqual(ros_str, '32FC1')
 
     def test_to_ros_str_invalid(self):
         """ Test to_ros_str raises NotImplementedError for invalid encoding. """
         with self.assertRaises(NotImplementedError):
             # Pass a non-ImageEncoding value
-            ImageData.ImageEncoding.to_ros_str("invalid")
+            ImageData.ImageEncoding.to_ros2_str("invalid")
 
     # ==================== to_dtype_and_channels tests ====================
 

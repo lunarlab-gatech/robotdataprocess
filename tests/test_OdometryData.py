@@ -82,7 +82,7 @@ class TestOdometryData(unittest.TestCase):
             os.rmdir(bag_path)
 
         # Save it into a ROS2 bag
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
 
         # Load the data back again
         ros_data = OdometryData.from_ros2_bag(bag_path, '/odom', CoordinateFrame.FLU)

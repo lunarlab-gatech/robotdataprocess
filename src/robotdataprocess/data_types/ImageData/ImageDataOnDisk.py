@@ -3,9 +3,12 @@ from ...conversion_utils import col_to_dec_arr
 from .ImageData import ImageData
 import cv2
 import copy
+from decimal import Decimal
 import numpy as np
 from pathlib import Path
 from PIL import Image
+from rosbags.rosbag1 import Reader as Reader1
+from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, Tuple, Union, List, Callable
 
@@ -65,6 +68,82 @@ class LazyImageArray:
         dtype_val, _ = ImageData.ImageEncoding.to_dtype_and_channels(self.container.encoding)
         return dtype_val
 
+class BagLazyImageArray:
+    """
+    A read-only array-like interface that loads images from a ROS1 bag on demand.
+
+    Only per-message index timestamps (nanoseconds) are held in memory alongside
+    an already-open ``Reader1`` instance.  Raw image bytes are read from the
+    ``.bag`` file only when a specific index is accessed, using
+    ``reader.messages(start=ts, stop=ts+1)`` to seek directly to the right
+    position via the bag's in-memory index.  The reader is shared across slices
+    and boolean-masked views and stays open for the lifetime of the object.
+    """
+
+    container: 'ImageDataOnDisk'
+    reader: Reader1
+    conn_id: int
+    timestamps: List[Decimal]
+    msgtype: str
+    typestore: Any  # rosbags Typestore
+    transformations: List[Callable]
+
+    def __init__(self, container: 'ImageDataOnDisk', reader: Reader1, conn_id: int,
+                 timestamps: List[Decimal], msgtype: str, typestore: Any,
+                 transformations: Union[List[Callable], None] = None) -> None:
+        self.container = container
+        self.reader = reader
+        self.conn_id = conn_id
+        self.timestamps = timestamps
+        self.msgtype = msgtype
+        self.typestore = typestore
+        self.transformations = copy.deepcopy(transformations) if transformations else []
+
+    def __getitem__(self, idx: Union[int, slice, np.ndarray]) -> Union[np.ndarray, 'BagLazyImageArray']:
+        if isinstance(idx, np.ndarray) and idx.dtype == bool:
+            new_ts: List[Decimal] = [t for t, keep in zip(self.timestamps, idx) if keep]
+            return BagLazyImageArray(self.container, self.reader, self.conn_id,
+                                     new_ts, self.msgtype, self.typestore, self.transformations)
+
+        if isinstance(idx, slice):
+            return BagLazyImageArray(self.container, self.reader, self.conn_id,
+                                     self.timestamps[idx], self.msgtype, self.typestore,
+                                     self.transformations)
+
+        ts_ns: int = int(self.timestamps[idx] * Decimal('1e9'))
+        conns = [c for c in self.reader.connections if c.id == self.conn_id]
+        for _, _, rawdata in self.reader.messages(connections=conns, start=ts_ns, stop=ts_ns + 1):
+            msg = self.typestore.deserialize_ros1(rawdata, self.msgtype)
+            if self.msgtype == ImageData._COMPRESSED_MSGTYPE:
+                image, _ = ImageData._decode_compressed_image_msg(msg)
+            else:
+                image = ImageData._decode_image_msg(
+                    msg, self.container.encoding, msg.height, msg.width).copy()
+            for transform in self.transformations:
+                image = transform(image)
+            return image
+
+        raise RuntimeError(f"No message at timestamp {self.timestamps[idx]} found in bag.")
+
+    def __setitem__(self, idx: Any, value: Any) -> None:
+        raise RuntimeError("This BagLazyImageArray is read-only; writes are forbidden.")
+
+    def __len__(self) -> int:
+        return len(self.timestamps)
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        _, channels = ImageData.ImageEncoding.to_dtype_and_channels(self.container.encoding)
+        if channels == 1:
+            return (len(self), self.container.height, self.container.width)
+        return (len(self), self.container.height, self.container.width, channels)
+
+    @property
+    def dtype(self) -> np.dtype:
+        dtype_val, _ = ImageData.ImageEncoding.to_dtype_and_channels(self.container.encoding)
+        return dtype_val
+
+
 @typechecked
 class ImageDataOnDisk(ImageData):
     """
@@ -75,13 +154,21 @@ class ImageDataOnDisk(ImageData):
     """
         
     images: LazyImageArray # Not initalized here, but put here for visual code highlighting
+    _bag_reader: Union[Reader1, None]
 
-    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], height: int, width: int, 
-                 encoding: ImageData.ImageEncoding, image_paths: List[Path], transformations: Union[List[Callable], None] = None):
-        
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], height: int, width: int,
+                 encoding: ImageData.ImageEncoding, image_paths: List[Path],
+                 transformations: Union[List[Callable], None] = None,
+                 bag_reader: Union[Reader1, None] = None):
+
         super().__init__(frame_id, timestamps, height, width, encoding, None)
         transformations_copy = copy.deepcopy(transformations) if transformations else []
         self.images = LazyImageArray(self, image_paths, transformations_copy)
+        self._bag_reader = bag_reader
+
+    def __del__(self) -> None:
+        if self._bag_reader is not None:
+            self._bag_reader.close()
 
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataOnDisk. """
@@ -194,6 +281,59 @@ class ImageDataOnDisk(ImageData):
 
         # Return an ImageDataOnDisk class
         return cls(frame_id, timestamps_sorted, height, width, encoding, all_image_files_sorted)
+
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], img_topic: str) -> 'ImageDataOnDisk':
+        """
+        Creates a class structure from a ROS1 bag file lazily.  The bag is
+        opened once and kept open for the lifetime of the returned object.
+        Only per-message index timestamps are loaded into memory; image bytes
+        are read on demand when a specific index is accessed.
+
+        Args:
+            bag_path (Path | str): Path to the ``.bag`` file.
+            img_topic (str): Topic name of the ``sensor_msgs/msg/Image`` stream.
+        Returns:
+            ImageDataOnDisk: Instance of this class.
+        Raises:
+            ValueError: If ``img_topic`` is not present in the bag.
+        """
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        reader = Reader1(Path(bag_path))
+        reader.open()
+
+        conns = [c for c in reader.connections if c.topic == img_topic]
+        if not conns:
+            reader.close()
+            raise ValueError(f"Topic {img_topic!r} not found in bag {bag_path}.")
+        conn = conns[0]
+
+        # Read metadata from the first message
+        frame_id: str = ''
+        height: int = 0
+        width: int = 0
+        encoding: ImageData.ImageEncoding = ImageData.ImageEncoding.RGB8
+        for _, _, rawdata in reader.messages(connections=conns):
+            msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+            frame_id = msg.header.frame_id
+            if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
+                first_image, encoding = ImageData._decode_compressed_image_msg(msg)
+                height, width = first_image.shape[:2]
+            else:
+                height = msg.height
+                width = msg.width
+                encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+            break
+
+        # Collect per-message timestamps (seconds) for this connection, sorted
+        timestamps: List[Decimal] = sorted(
+            Decimal(entry.time) * Decimal('1e-9') for entry in reader.indexes[conn.id]
+        )
+
+        instance = cls(frame_id, timestamps, height, width, encoding, [], bag_reader=reader)
+        instance.images = BagLazyImageArray(instance, reader, conn.id, timestamps,
+                                            conn.msgtype, typestore)
+        return instance
 
     # =========================================================================
     # ========================= Manipulation Methods ==========================

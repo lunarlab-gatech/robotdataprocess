@@ -350,8 +350,8 @@ class Ros2BagWrapper:
     
     @staticmethod
     @typechecked
-    def write_data_to_rosbag(bag_path: Union[Path, str], data_list: List[SequentialData], 
-                             data_topics: List[str], data_msg_type: List[Union[str, None]],
+    def write_data_to_ros2_bag(bag_path: Union[Path, str], data_list: List[SequentialData],
+                              data_topics: List[str], data_msg_type: List[Union[str, None]],
                              external_msgs_path: Union[Path, str, None]):
         """
         This helper method writes a new bag with the data in the provided Data classes.

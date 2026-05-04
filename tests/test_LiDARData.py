@@ -357,7 +357,7 @@ class TestLiDARData(unittest.TestCase):
         if bag_path.is_dir():
             shutil.rmtree(bag_path)
         bag_path.parent.mkdir(parents=True, exist_ok=True)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [lidar_data], ['/lidar'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [lidar_data], ['/lidar'], [None], None)
 
         # Read it back -- frame_id should be loaded from the bag header
         loaded_data = LiDARData.from_ros2_bag(bag_path, '/lidar', CoordinateFrame.NED)

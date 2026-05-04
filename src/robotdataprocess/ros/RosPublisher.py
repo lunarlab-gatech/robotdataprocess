@@ -455,8 +455,8 @@ class _SingleDataPublisher():
                 self.next_msg = None
 
 @typechecked
-def _run_ROS_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
-                               num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
+def _run_ROS1_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
+                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker.
     NOTE: This function feels useless, but follows similar structure to the ROS2 version, which is more complex.
@@ -669,7 +669,7 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
-            pub_proc_func = _run_ROS_publisher_process
+            pub_proc_func = _run_ROS1_publisher_process
 
         p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict, latched))
         p.start()
