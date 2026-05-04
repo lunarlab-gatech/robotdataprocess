@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from .PathData import PathData
 from pathlib import Path
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -120,7 +121,55 @@ class OdometryData(PathData):
 
         # Create an OdometryData class
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
-    
+
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
+        """
+        Creates a class structure from a ROS1 bag file with an Odometry topic.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            odom_topic (str): Topic of the nav_msgs/Odometry messages.
+            frame (CoordinateFrame): The coordinate frame convention of this data.
+        Returns:
+            OdometryData: Instance of this class.
+        Raises:
+            ValueError: If ``odom_topic`` is not present in the bag.
+        """
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+
+        with Reader1(Path(bag_path)) as reader:
+            conns = [c for c in reader.connections if c.topic == odom_topic]
+            if not conns:
+                raise ValueError(f"Topic {odom_topic!r} not found in bag {bag_path}.")
+            conn = conns[0]
+
+            num_msgs = len(reader.indexes[conn.id])
+            timestamps_np = np.zeros(num_msgs, dtype=Decimal)
+            positions_np = np.zeros((num_msgs, 3), dtype=Decimal)
+            orientations_np = np.zeros((num_msgs, 4), dtype=Decimal)
+
+            frame_id, child_frame_id = None, None
+            pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Odometry...", unit=" msgs")
+
+            for i, (_, _, rawdata) in enumerate(reader.messages(connections=conns)):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                if i == 0:
+                    frame_id = msg.header.frame_id
+                    child_frame_id = msg.child_frame_id
+
+                timestamps_np[i] = (Decimal(msg.header.stamp.sec) +
+                                    Decimal(msg.header.stamp.nanosec) * Decimal('1e-9'))
+                pos = msg.pose.pose.position
+                positions_np[i] = np.array([Decimal(pos.x), Decimal(pos.y), Decimal(pos.z)])
+                ori = msg.pose.pose.orientation
+                orientations_np[i] = np.array([Decimal(ori.x), Decimal(ori.y), Decimal(ori.z), Decimal(ori.w)])
+
+                pbar.update(1)
+
+        return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
+
     @classmethod
     def from_csv(cls, csv_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
                  header_included: bool, column_to_data: Union[List[int], None] = None,

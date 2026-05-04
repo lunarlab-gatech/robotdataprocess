@@ -10,7 +10,10 @@ from robotdataprocess.data_types.Data import ROSMsgLibType, TransformType
 from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag1 import Writer as Writer1
+from rosbags.typesys import Stores, get_typestore
 from scipy.spatial.transform import Rotation as R
+import tempfile
 from test_utils import safe_urlretrieve
 import unittest
 
@@ -484,6 +487,90 @@ class TestOdometryData(unittest.TestCase):
                 loaded.positions.astype(float), odom.positions.astype(float))
             np.testing.assert_array_almost_equal(
                 loaded.orientations.astype(float), odom.orientations.astype(float))
+
+    def _write_ros1_odom_bag(self, bag_path: Path, topic: str, frame_id: str,
+                              child_frame_id: str, timestamps_sec: list,
+                              positions: np.ndarray, orientations: np.ndarray) -> None:
+        """Write a ROS1 bag containing nav_msgs/msg/Odometry messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        OdomMsg       = typestore.types['nav_msgs/msg/Odometry']
+        Header        = typestore.types['std_msgs/msg/Header']
+        Time          = typestore.types['builtin_interfaces/msg/Time']
+        PoseWithCov   = typestore.types['geometry_msgs/msg/PoseWithCovariance']
+        Pose          = typestore.types['geometry_msgs/msg/Pose']
+        Point         = typestore.types['geometry_msgs/msg/Point']
+        Quaternion    = typestore.types['geometry_msgs/msg/Quaternion']
+        TwistWithCov  = typestore.types['geometry_msgs/msg/TwistWithCovariance']
+        Twist         = typestore.types['geometry_msgs/msg/Twist']
+        Vector3       = typestore.types['geometry_msgs/msg/Vector3']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, OdomMsg.__msgtype__, typestore=typestore)
+            for i, (ts, pos, ori) in enumerate(zip(timestamps_sec, positions, orientations)):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = OdomMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    child_frame_id=child_frame_id,
+                    pose=PoseWithCov(
+                        pose=Pose(
+                            position=Point(x=float(pos[0]), y=float(pos[1]), z=float(pos[2])),
+                            orientation=Quaternion(x=float(ori[0]), y=float(ori[1]),
+                                                   z=float(ori[2]), w=float(ori[3])),
+                        ),
+                        covariance=np.zeros(36),
+                    ),
+                    twist=TwistWithCov(
+                        twist=Twist(
+                            linear=Vector3(x=0.0, y=0.0, z=0.0),
+                            angular=Vector3(x=0.0, y=0.0, z=0.0),
+                        ),
+                        covariance=np.zeros(36),
+                    ),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, OdomMsg.__msgtype__))
+
+    def test_from_ros1_bag(self):
+        """Write a ROS1 bag with known Odometry messages and verify from_ros1_bag round-trips."""
+        frame_id       = 'odom'
+        child_frame_id = 'base_link'
+        topic          = '/odom'
+        timestamps_sec = [1.0, 2.0, 3.0]
+        positions      = np.array([[1.1, 2.2, 3.3],
+                                   [4.4, 5.5, 6.6],
+                                   [7.7, 8.8, 9.9]])
+        # orientations as (qx, qy, qz, qw)
+        orientations   = np.array([[0.0, 0.0, 0.0,        1.0       ],
+                                   [0.5, 0.5, 0.5,        0.5       ],
+                                   [0.0, 0.0, 0.70710678, 0.70710678]])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'odom.bag'
+            self._write_ros1_odom_bag(bag_path, topic, frame_id, child_frame_id,
+                                      timestamps_sec, positions, orientations)
+
+            data = OdometryData.from_ros1_bag(bag_path, topic, CoordinateFrame.FLU)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.child_frame_id, child_frame_id)
+            self.assertEqual(data.frame, CoordinateFrame.FLU)
+            self.assertEqual(data.len(), 3)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- positions ---
+            np.testing.assert_array_almost_equal(
+                data.positions.astype(np.float64), positions, decimal=6)
+
+            # --- orientations ---
+            np.testing.assert_array_almost_equal(
+                data.orientations.astype(np.float64), orientations, decimal=6)
+
 
 if __name__ == "__main__":
     unittest.main()
