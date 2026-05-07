@@ -26,6 +26,7 @@ class ImageData(SequentialData):
         RGB8 = 1
         _32FC1 = 2
         BGR8 = 3
+        _16UC1 = 4
 
         # ================ Class Methods ================
         @classmethod
@@ -38,9 +39,11 @@ class ImageData(SequentialData):
                 return cls._32FC1
             elif encoding_str == "ImageEncoding.BGR8":
                 return cls.BGR8
+            elif encoding_str == "ImageEncoding._16UC1":
+                return cls._16UC1
             else:
                 raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
-        
+
         @classmethod
         def from_ros2_str(cls, encoding_str: str):
             encoding_str = encoding_str.lower()
@@ -52,9 +55,11 @@ class ImageData(SequentialData):
                 return cls._32FC1
             elif encoding_str == 'bgr8':
                 return cls.BGR8
+            elif encoding_str == '16uc1':
+                return cls._16UC1
             else:
                 raise NotImplementedError(f"This encoding ({encoding_str}) is not yet implemented (or it doesn't exist)!")
-        
+
         @classmethod
         def from_dtype_and_channels(cls, dtype: np.dtype, channels: int):
             if dtype == np.uint8 and channels == 1:
@@ -63,6 +68,8 @@ class ImageData(SequentialData):
                 raise NotImplementedError(f"dtype {dtype} w/ {channels} channel(s) can't determine which encoding the data is in!")
             elif dtype == np.float32 and channels == 1:
                 return cls._32FC1
+            elif dtype == np.uint16 and channels == 1:
+                return cls._16UC1
             else:
                 raise NotImplementedError(f"dtype {dtype} w/ {channels} channel(s) has no corresponding encoding!")
         
@@ -115,6 +122,8 @@ class ImageData(SequentialData):
                 return '32FC1'
             elif encoding == ImageData.ImageEncoding.BGR8:
                 return 'bgr8'
+            elif encoding == ImageData.ImageEncoding._16UC1:
+                return '16UC1'
             else:
                 raise NotImplementedError(f"This ImageData.ImageEncoding.{encoding} is not yet implemented (or it doesn't exist)!")
         
@@ -128,6 +137,8 @@ class ImageData(SequentialData):
                 return (np.uint8, 3)
             elif encoding == ImageData.ImageEncoding._32FC1:
                 return (np.float32, 1)
+            elif encoding == ImageData.ImageEncoding._16UC1:
+                return (np.uint16, 1)
             else:
                 raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
     
