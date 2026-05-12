@@ -1012,6 +1012,172 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataMerge(unittest.TestCase):
+    """Test LoopClosureData.merge static method."""
+
+    def _make_lc(self, timestamps_a, timestamps_b, names, translations, orientations, detected_inliers=None):
+        return LoopClosureData(
+            timestamps_a=np.array(timestamps_a, dtype=object),
+            timestamps_b=np.array(timestamps_b, dtype=object),
+            names=names,
+            translations=np.array(translations, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+            detected_inliers=detected_inliers,
+        )
+
+    def test_merge_count(self):
+        """Merged result has num_loop_closures equal to the sum of all inputs."""
+        lc1 = self._make_lc(
+            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
+            [("A", "B"), ("A", "B")],
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        )
+        lc2 = self._make_lc(
+            [Decimal("3.0")], [Decimal("3.5")],
+            [("A", "C")],
+            [[3.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        merged = LoopClosureData.merge([lc1, lc2])
+
+        self.assertEqual(merged.num_loop_closures, 3)
+
+    def test_merge_fields_concatenated(self):
+        """timestamps, names, translations, and orientations are concatenated in order."""
+        lc1 = self._make_lc(
+            [Decimal("1.0")], [Decimal("1.5")],
+            [("A", "B")],
+            [[1.0, 2.0, 3.0]],
+            [[0.1, 0.2, 0.3, 0.9]],
+        )
+        lc2 = self._make_lc(
+            [Decimal("2.0")], [Decimal("2.5")],
+            [("C", "D")],
+            [[4.0, 5.0, 6.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        merged = LoopClosureData.merge([lc1, lc2])
+
+        self.assertEqual(merged.timestamps_a[0], Decimal("1.0"))
+        self.assertEqual(merged.timestamps_a[1], Decimal("2.0"))
+        self.assertEqual(merged.timestamps_b[0], Decimal("1.5"))
+        self.assertEqual(merged.timestamps_b[1], Decimal("2.5"))
+        self.assertEqual(merged.names[0], ("A", "B"))
+        self.assertEqual(merged.names[1], ("C", "D"))
+        np.testing.assert_almost_equal(float(merged.translations[0][0]), 1.0)
+        np.testing.assert_almost_equal(float(merged.translations[1][0]), 4.0)
+        np.testing.assert_almost_equal(float(merged.orientations[0][3]), 0.9)
+        np.testing.assert_almost_equal(float(merged.orientations[1][3]), 1.0)
+
+    def test_merge_single_item(self):
+        """Merging a single-item list returns an equivalent object."""
+        lc = self._make_lc(
+            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
+            [("A", "B"), ("A", "C")],
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        )
+
+        merged = LoopClosureData.merge([lc])
+
+        self.assertEqual(merged.num_loop_closures, 2)
+        np.testing.assert_array_equal(merged.timestamps_a, lc.timestamps_a)
+        np.testing.assert_array_equal(merged.timestamps_b, lc.timestamps_b)
+        self.assertEqual(merged.names, lc.names)
+        np.testing.assert_array_equal(merged.translations, lc.translations)
+        np.testing.assert_array_equal(merged.orientations, lc.orientations)
+
+    def test_merge_does_not_modify_inputs(self):
+        """Inputs and the input list are not modified by merge."""
+        lc1 = self._make_lc(
+            [Decimal("1.0")], [Decimal("1.5")],
+            [("A", "B")],
+            [[1.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc2 = self._make_lc(
+            [Decimal("2.0")], [Decimal("2.5")],
+            [("C", "D")],
+            [[2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+        input_list = [lc1, lc2]
+
+        LoopClosureData.merge(input_list)
+
+        self.assertEqual(lc1.num_loop_closures, 1)
+        self.assertEqual(lc2.num_loop_closures, 1)
+        self.assertEqual(lc1.names, [("A", "B")])
+        self.assertEqual(lc2.names, [("C", "D")])
+        self.assertEqual(len(input_list), 2)
+
+    def test_merge_with_detected_inliers(self):
+        """When all inputs have detected_inliers, they are concatenated."""
+        lc1 = self._make_lc(
+            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
+            [("A", "B"), ("A", "B")],
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+            detected_inliers=[True, False],
+        )
+        lc2 = self._make_lc(
+            [Decimal("3.0")], [Decimal("3.5")],
+            [("A", "C")],
+            [[3.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+            detected_inliers=[True],
+        )
+
+        merged = LoopClosureData.merge([lc1, lc2])
+
+        self.assertTrue(hasattr(merged, 'detected_inliers'))
+        np.testing.assert_array_equal(merged.detected_inliers, [True, False, True])
+
+    def test_merge_without_detected_inliers(self):
+        """When no inputs have detected_inliers, the result has none either."""
+        lc1 = self._make_lc(
+            [Decimal("1.0")], [Decimal("1.5")],
+            [("A", "B")],
+            [[1.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+        lc2 = self._make_lc(
+            [Decimal("2.0")], [Decimal("2.5")],
+            [("A", "C")],
+            [[2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        merged = LoopClosureData.merge([lc1, lc2])
+
+        self.assertFalse(hasattr(merged, 'detected_inliers'))
+
+    def test_merge_mixed_detected_inliers(self):
+        """When only some inputs have detected_inliers, missing ones default to False."""
+        lc1 = self._make_lc(
+            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
+            [("A", "B"), ("A", "B")],
+            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+            detected_inliers=[True, True],
+        )
+        lc2 = self._make_lc(
+            [Decimal("3.0")], [Decimal("3.5")],
+            [("A", "C")],
+            [[3.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0]],
+        )
+
+        merged = LoopClosureData.merge([lc1, lc2])
+
+        self.assertTrue(hasattr(merged, 'detected_inliers'))
+        np.testing.assert_array_equal(merged.detected_inliers, [True, True, False])
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataVisualization(unittest.TestCase):
     """Test visualization methods don't crash."""
 

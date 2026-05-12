@@ -77,3 +77,11 @@ class LoopClosureDataROMAN(LoopClosureData):
             n_syn_corrs=_opt_arr(n_syn_corrs),
             n_overlapping_init=_opt_arr(n_overlapping_init),
         )
+
+    # =========================================================================
+    # ===================== Multi LoopClosureData Methods =====================
+    # =========================================================================
+
+    @staticmethod
+    def merge(loop_closures: List) -> LoopClosureDataROMAN:
+        raise NotImplementedError

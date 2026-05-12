@@ -442,6 +442,38 @@ class LoopClosureData(Data):
                 f"Only {num_matched} of {other.num_loop_closures} loop closures in other were found in self (other must be a subset of self)."
             )
 
+    @staticmethod
+    def merge(loop_closures: List[LoopClosureData]) -> LoopClosureData:
+        """
+        Creates a new LoopClosureData containing all loop closures from each
+        object in the list. The input objects and list are not modified.
+
+        Args:
+            loop_closures: List of LoopClosureData instances to merge.
+
+        Returns:
+            New LoopClosureData with all loop closures concatenated.
+        """
+        timestamps_a = np.concatenate([lc.timestamps_a for lc in loop_closures])
+        timestamps_b = np.concatenate([lc.timestamps_b for lc in loop_closures])
+        names = [name for lc in loop_closures for name in lc.names]
+        translations = np.concatenate([lc.translations for lc in loop_closures])
+        orientations = np.concatenate([lc.orientations for lc in loop_closures])
+
+        any_inliers = any(hasattr(lc, 'detected_inliers') for lc in loop_closures)
+        if any_inliers:
+            parts = []
+            for lc in loop_closures:
+                if hasattr(lc, 'detected_inliers'):
+                    parts.append(lc.detected_inliers)
+                else:
+                    parts.append(np.zeros(lc.num_loop_closures, dtype=bool))
+            detected_inliers = np.concatenate(parts)
+        else:
+            detected_inliers = None
+
+        return LoopClosureData(timestamps_a, timestamps_b, names, translations, orientations, detected_inliers)
+
     # =========================================================================
     # ============================ Visualization ==============================
     # =========================================================================

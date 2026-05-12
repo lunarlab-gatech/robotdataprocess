@@ -54,11 +54,11 @@ def main():
     dataset_folder = Path('/media') / user / 'T73' / 'Kimera-Multi_Dataset'
     robot_names_text = ["acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"]
     dataset_number = "1014"
-    repository_with_results = "roman"
-    sequence_name = "Medium/Outdoor/acl_jackal_acl_jackal2_sparkal1_sparkal2_hathor_thoth"
+    repository_with_results = "ROMAN_DEVEL"
+    sequence_name = "Kimera-Multi_ROMAN_NM/Medium/Outdoor/" + "_".join(robot_names_text)
 
     # Load the estimated data
-    est_data_dir = Path('/home/') / user / 'Research' / repository_with_results / 'kimera_multi_output' / sequence_name
+    est_data_dir = Path('/home/') / user / 'Research' / repository_with_results / 'results' / sequence_name
     est_data_lst: list[OdometryData] = []
     for rn in robot_names_text:
         est_data = OdometryData.from_csv(est_data_dir / 'offline_rpgo' / (rn + ".csv"), "map", 'robot', 
@@ -93,7 +93,7 @@ def main():
         # Calculate RMS ATE, among other metrics
         print("\n========== Merged Trajectories for dataset: ==========")
         metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, 
-                                                                        est_data, max_diff=0.1, visualize=False)
+                                                                        est_data, max_diff=0.1, visualize=True)
         print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
 
