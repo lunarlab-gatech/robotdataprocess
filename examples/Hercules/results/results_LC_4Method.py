@@ -14,10 +14,16 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
     lc_data = LoopClosureData.from_json(run_folder / 'align' / (robot_names[0] + '_' + robot_names[1]) / 'align.json')
     lc_data_inlier = None
     try:
-        lc_data_inlier = LoopClosureData.from_g2o(run_folder / 'offline_rpgo' /'inlier_lc_inter_robot.g2o', run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt', 
-                                                names_override={"a": robot_names[0], "b": robot_names[1]})
+        lc_data_inlier = LoopClosureData.from_g2o(run_folder / 'offline_rpgo' /'inlier_lc_inter_robot.g2o', 
+                                                  run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt', 
+                                                  names_override={"a": robot_names[0], "b": robot_names[1]})
     except FileNotFoundError:
-        print(f"Missing inliers for {run_folder}")
+        try:
+            lc_data_inlier = LoopClosureData.from_g2o(run_folder / 'offline_rpgo' /'inlier_lc_inter_a_b.g2o', 
+                                                  run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt', 
+                                                  names_override={"a": robot_names[0], "b": robot_names[1]})
+        except FileNotFoundError:
+            print(f"Missing inliers for {run_folder}")
 
     # Round timestamps to allow proper matching
     lc_data.round_timestamps(4)
@@ -46,11 +52,11 @@ def calculate_LC_errors_ROMAN(dataset_name: str, label_name: str, run_name: str,
 def main():
     # ====================== ROMAN ===========================
     # Set dataset configuration
-    run_centers = ["1st_RM", "1st_NM", "Apr_NM"]
-    robot_names = ["Husky1", "Drone2"]
+    run_centers = ["1st_RM", "1st_NM", "Apr_NM", "May_NM"]
+    robot_names = ["Husky2", "Drone2"]
     run_ends = "_" + "".join(n[0] + "".join(filter(str.isdigit, n)) for n in robot_names)
     run_names =  [c + run_ends for c in run_centers]
-    label_names = [            "ROMAN",           "ROMAN",    "MeronomyGraph"]
+    label_names = [            "ROMAN",           "ROMAN",    "MeronomyGraph", "MeronomyGraph"]
     dataset_names = ["V2.4.C"] * len(run_names)
     run_display_names = run_centers
     label_names_s = ["R" if r == "ROMAN" else "MG" for r in label_names]

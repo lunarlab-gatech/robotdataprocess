@@ -4,9 +4,9 @@ from scipy.spatial.transform import Rotation as R
 
 def main():  
     dataset_name = "V2.4.C"
-    method = "ROMAN"
-    robot_names = ["Husky2", "Drone1"]
-    run_name = "1st_RM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
+    method = "MeronomyGraph"
+    robot_names = ["Husky2", "Drone2"]
+    run_name = "May_NM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
 
     # Get robot0 name and robot1 name
     robot0_name = robot_names[0]
@@ -47,7 +47,7 @@ def main():
 
     # Calculate RMS ATE, among other metrics
     print("\n========== Merged Trajectories for dataset: ", dataset_name, run_name, "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
     print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
     print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
 
