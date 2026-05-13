@@ -72,11 +72,13 @@ class BagLazyImageArray:
     """
     A read-only array-like interface that loads images from a ROS1 bag on demand.
 
-    Only per-message index timestamps (nanoseconds) are held in memory alongside
-    an already-open ``Reader1`` instance.  Raw image bytes are read from the
-    ``.bag`` file only when a specific index is accessed, using
-    ``reader.messages(start=ts, stop=ts+1)`` to seek directly to the right
-    position via the bag's in-memory index.  The reader is shared across slices
+    Header-stamp timestamps are held in memory alongside an already-open
+    ``Reader1`` instance and a ``header_to_rec_ns`` dict that maps each
+    header-stamp (integer nanoseconds) to its bag recording time (integer
+    nanoseconds).  On access, the recording time is used with
+    ``reader.messages(start=rec_ns, stop=rec_ns+1)`` to seek directly to the
+    right position; the retrieved message's header stamp is then verified
+    against the target before returning.  The reader is shared across slices
     and boolean-masked views and stays open for the lifetime of the object.
     """
 
@@ -84,17 +86,19 @@ class BagLazyImageArray:
     reader: Reader1
     conn_id: int
     timestamps: List[Decimal]
+    _header_to_rec_ns: dict  # {header_stamp_ns (int): recording_time_ns (int)}
     msgtype: str
     typestore: Any  # rosbags Typestore
     transformations: List[Callable]
 
     def __init__(self, container: 'ImageDataOnDisk', reader: Reader1, conn_id: int,
-                 timestamps: List[Decimal], msgtype: str, typestore: Any,
+                 timestamps: List[Decimal], header_to_rec_ns: dict, msgtype: str, typestore: Any,
                  transformations: Union[List[Callable], None] = None) -> None:
         self.container = container
         self.reader = reader
         self.conn_id = conn_id
         self.timestamps = timestamps
+        self._header_to_rec_ns = header_to_rec_ns
         self.msgtype = msgtype
         self.typestore = typestore
         self.transformations = copy.deepcopy(transformations) if transformations else []
@@ -103,17 +107,21 @@ class BagLazyImageArray:
         if isinstance(idx, np.ndarray) and idx.dtype == bool:
             new_ts: List[Decimal] = [t for t, keep in zip(self.timestamps, idx) if keep]
             return BagLazyImageArray(self.container, self.reader, self.conn_id,
-                                     new_ts, self.msgtype, self.typestore, self.transformations)
+                                     new_ts, self._header_to_rec_ns, self.msgtype,
+                                     self.typestore, self.transformations)
 
         if isinstance(idx, slice):
             return BagLazyImageArray(self.container, self.reader, self.conn_id,
-                                     self.timestamps[idx], self.msgtype, self.typestore,
-                                     self.transformations)
+                                     self.timestamps[idx], self._header_to_rec_ns, self.msgtype,
+                                     self.typestore, self.transformations)
 
-        ts_ns: int = int(self.timestamps[idx] * Decimal('1e9'))
+        target_ns: int = int(self.timestamps[idx] * Decimal('1e9'))
+        rec_ns: int = self._header_to_rec_ns[target_ns]
         conns = [c for c in self.reader.connections if c.id == self.conn_id]
-        for _, _, rawdata in self.reader.messages(connections=conns, start=ts_ns, stop=ts_ns + 1):
+        for _, _, rawdata in self.reader.messages(connections=conns, start=rec_ns, stop=rec_ns + 1):
             msg = self.typestore.deserialize_ros1(rawdata, self.msgtype)
+            if msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec != target_ns:
+                continue
             if self.msgtype == ImageData._COMPRESSED_MSGTYPE:
                 image, _ = ImageData._decode_compressed_image_msg(msg)
             else:
@@ -308,31 +316,36 @@ class ImageDataOnDisk(ImageData):
             raise ValueError(f"Topic {img_topic!r} not found in bag {bag_path}.")
         conn = conns[0]
 
-        # Read metadata from the first message
+        # Single pass: extract metadata from the first message and build a
+        # {header_stamp_ns -> recording_time_ns} mapping for all messages.
         frame_id: str = ''
         height: int = 0
         width: int = 0
         encoding: ImageData.ImageEncoding = ImageData.ImageEncoding.RGB8
-        for _, _, rawdata in reader.messages(connections=conns):
-            msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
-            frame_id = msg.header.frame_id
-            if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
-                first_image, encoding = ImageData._decode_compressed_image_msg(msg)
-                height, width = first_image.shape[:2]
-            else:
-                height = msg.height
-                width = msg.width
-                encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-            break
+        pairs: List[tuple] = []  # (header_stamp: Decimal, recording_time_ns: int)
 
-        # Collect per-message timestamps (seconds) for this connection, sorted
-        timestamps: List[Decimal] = sorted(
-            Decimal(entry.time) * Decimal('1e-9') for entry in reader.indexes[conn.id]
-        )
+        for _, rec_ns, rawdata in reader.messages(connections=conns):
+            msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+            if not pairs:
+                frame_id = msg.header.frame_id
+                if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
+                    first_image, encoding = ImageData._decode_compressed_image_msg(msg)
+                    height, width = first_image.shape[:2]
+                else:
+                    height = msg.height
+                    width = msg.width
+                    encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+            stamp = msg.header.stamp
+            h_stamp = Decimal(stamp.sec) + Decimal(stamp.nanosec) * Decimal('1e-9')
+            pairs.append((h_stamp, rec_ns))
+
+        pairs.sort(key=lambda p: p[0])
+        timestamps: List[Decimal] = [p[0] for p in pairs]
+        header_to_rec_ns: dict = {int(p[0] * Decimal('1e9')): p[1] for p in pairs}
 
         instance = cls(frame_id, timestamps, height, width, encoding, [], bag_reader=reader)
         instance.images = BagLazyImageArray(instance, reader, conn.id, timestamps,
-                                            conn.msgtype, typestore)
+                                            header_to_rec_ns, conn.msgtype, typestore)
         return instance
 
     # =========================================================================

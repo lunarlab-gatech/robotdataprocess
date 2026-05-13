@@ -1,3 +1,4 @@
+import copy
 from decimal import Decimal
 import re
 import getpass
@@ -21,6 +22,11 @@ def main():
 
         # Load the data
         est_data = OdometryData.from_ros2_bag(dataset_folder / 'data' / dataset_version / 'Kimera-VIO-Odom' / robot_name_text, '/' + robot_name_text + '/kimera_vio_ros/odometry', CoordinateFrame.NONE)
+        est_data.apply_transformation_right_side(np.array([[0, -1,  0, 0],
+                                                           [0,  0, -1, 0],
+                                                           [1,  0,  0, 0],
+                                                           [0,  0,  0, 1]], dtype=np.float64))
+
         gt_data = OdometryData.from_csv(dataset_folder / 'data' / 'ground_truth' / dataset_number / (robot_name_text + '_gt_odom.csv'), "world", "robot", CoordinateFrame.FLU, True, None, ts_in_ns=True)
 
         # Calculate RMS ATE, among other metrics
