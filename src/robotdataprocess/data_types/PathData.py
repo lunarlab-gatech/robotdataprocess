@@ -25,7 +25,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, Optional
 import tqdm
 
 @typechecked
@@ -771,13 +771,14 @@ class PathData(SequentialData):
 
         return axs
 
-    def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000):
+    def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000, save_path: Optional[Union[Path, str]] = None):
         """
         Visualizes this PathData (and all others included in otherList) on a single plot.
 
         Args:
             otherList (List[PathData]): All other PathData objects whose path should also be visualized on this plot.
             titles (List[str]): Titles for each PathData object, starting with self.
+            save_path (Path | str | None): If provided, saves the figure to this path instead of displaying it.
         """
 
         def draw_axes(data: PathData, axes_length: int, axes_interval: int):
@@ -860,9 +861,12 @@ class PathData(SequentialData):
         ax.set_ylim(y_center - max_range, y_center + max_range)
         ax.set_zlim(z_center - max_range, z_center + max_range)
 
-        # Show the plot
         plt.tight_layout()
-        plt.show()
+        if save_path is not None:
+            plt.savefig(save_path)
+            plt.close(fig)
+        else:
+            plt.show()
     
     # =========================================================================
     # ============================ Export Methods =============================

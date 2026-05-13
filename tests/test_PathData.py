@@ -305,6 +305,32 @@ class TestPathData(unittest.TestCase):
         path1.visualize_3D([path2], ['Path1', 'Path2'], axes_length=1.0, axes_interval=1)
         mock_plt.show.assert_called()
 
+    @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
+    def test_visualize_3D_save_path(self, mock_plt):
+        """ Test that visualize_3D saves to file when save_path is provided. """
+        mock_fig = unittest.mock.MagicMock()
+        mock_ax = unittest.mock.MagicMock()
+        mock_plt.figure.return_value = mock_fig
+        mock_fig.add_subplot.return_value = mock_ax
+
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        path1.visualize_3D([], ['Path1'], axes_length=1.0, axes_interval=1, save_path='/tmp/test_3d.png')
+        mock_plt.savefig.assert_called_once_with('/tmp/test_3d.png')
+        mock_plt.show.assert_not_called()
+        mock_fig.add_subplot.return_value.clear  # ensure fig closed via plt.close
+        mock_plt.close.assert_called_once_with(mock_fig)
+
     def test_visualize_error_cases(self):
         """ Test that visualize raises errors for mismatched titles, axes_length, axes_interval. """
         path1 = PathData(

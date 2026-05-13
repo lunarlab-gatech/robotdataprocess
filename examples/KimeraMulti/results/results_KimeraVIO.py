@@ -9,8 +9,8 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["12_07_sparkal2"]
-    dataset_version = "campus_tunnels_1207_compressed"
+    robot_names = ["10_14_acl_jackal"]
+    dataset_version = "campus_outdoor_1014_compressed"
     dataset_number = re.search(r'\d+', dataset_version).group()  # e.g. "1207"
     robot_name_text = re.sub(r'(\d+_)+', '', robot_names[0])
 
@@ -20,8 +20,7 @@ def main():
         dataset_folder = Path('/media') / user / 'T73' / 'Kimera-Multi_Dataset'
 
         # Load the data
-        est_data = OdometryData.from_ros2_bag(dataset_folder / 'data' / dataset_version / 'Kimera-VIO-Odom' / robot_name_text, 
-                                              '/' + robot_name_text + '/kimera_vio_ros/odometry', CoordinateFrame.NONE)
+        est_data = OdometryData.from_ros2_bag(dataset_folder / 'data' / dataset_version / 'Kimera-VIO-Odom' / robot_name_text, '/' + robot_name_text + '/kimera_vio_ros/odometry', CoordinateFrame.NONE)
         gt_data = OdometryData.from_csv(dataset_folder / 'data' / 'ground_truth' / dataset_number / (robot_name_text + '_gt_odom.csv'), "world", "robot", CoordinateFrame.FLU, True, None, ts_in_ns=True)
 
         # Calculate RMS ATE, among other metrics

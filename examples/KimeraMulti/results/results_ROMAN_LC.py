@@ -23,23 +23,24 @@ def calculate_LC_errors_ROMAN(run_path: str, robot_names: List, dataset_number: 
 
         lc_data = LoopClosureData.from_json(run_folder / 'align' / (name_a + '_' + name_b) / 'align.json')
 
-        letter_a = chr(97 + robot_names.index(name_a))
-        letter_b = chr(97 + robot_names.index(name_b))
-        lc_data_inlier = None
-        if name_a == name_b: g2o_filename = f'inlier_lc_intra_{letter_a}.g2o'
-        else: g2o_filename = f'inlier_lc_inter_{letter_a}_{letter_b}.g2o'
-        try:
-            lc_data_inlier = LoopClosureData.from_g2o(
-                run_folder / 'offline_rpgo' / g2o_filename,
-                run_folder / 'offline_rpgo' / 'sparse' / 'odom_all.time.txt',
-                names_override=g2o_symbol_to_name)
-        except FileNotFoundError as e:
-            print(f"Missing inliers for pair {name_a}_{name_b} in {run_folder}", e)
+        # === TODO: KimeraMulti uses sparsified LC, which breaks our inlier mapping logic ===
+        # letter_a = chr(97 + robot_names.index(name_a))
+        # letter_b = chr(97 + robot_names.index(name_b))
+        # lc_data_inlier = None
+        # if name_a == name_b: g2o_filename = f'inlier_lc_intra_{letter_a}.g2o'
+        # else: g2o_filename = f'inlier_lc_inter_{letter_a}_{letter_b}.g2o'
+        # try:
+        #     lc_data_inlier = LoopClosureData.from_g2o(
+        #         run_folder / 'offline_rpgo' / g2o_filename,
+        #         run_folder / 'offline_rpgo' / 'sparse' / 'odom_all.time.txt',
+        #         names_override=g2o_symbol_to_name)
+        # except FileNotFoundError as e:
+        #     print(f"Missing inliers for pair {name_a}_{name_b} in {run_folder}", e)
 
-        lc_data.round_timestamps(4)
-        if lc_data_inlier:
-            lc_data_inlier.round_timestamps(4)
-            lc_data.label_inliers_via_other_LoopClosureData(lc_data_inlier)
+        # lc_data.round_timestamps(4)
+        # if lc_data_inlier:
+        #     lc_data_inlier.round_timestamps(4)
+        #     lc_data.label_inliers_via_other_LoopClosureData(lc_data_inlier)
 
         lc_list.append(lc_data)
 
@@ -63,26 +64,27 @@ def calculate_LC_errors_ROMAN(run_path: str, robot_names: List, dataset_number: 
 
 def main():
     user = getpass.getuser()
-    #robot_names = ["acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"]
-    #dataset_number = "1014"
-    robot_names = ["acl_jackal"]
-    dataset_number = "1207"
+    robot_names = ["acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"]
+    dataset_number = "1014"
+    # robot_names = ["sparkal2"]
+    # dataset_number = "1207"
     sequence = DATASET_SEQUENCE[dataset_number]
     robots_str = "_".join(robot_names)
 
     run_paths = [
-        f"roman/kimera_multi_output/Easy/{sequence}/{robots_str}",
-        f"ROMAN_DEVEL/results/Kimera-Multi_ROMAN_NM/Easy/{sequence}/{robots_str}",
+        f"roman/kimera_multi_output/Medium/{sequence}/{robots_str}",
+        f"ROMAN_DEVEL/results/Kimera-Multi_ROMAN/Medium/{sequence}/{robots_str}",
     ]
+    run_names = ["ROMAN", "ROMAN (MG Ver.)"]
 
     errors_list = []
     inliers_list = []
     for run_path in run_paths:
         calculate_LC_errors_ROMAN(run_path, robot_names, dataset_number, errors_list, inliers_list)
 
-    LoopClosureData.visualize_error_scatter(errors_list, run_paths, inliers_list, max_rotation_frac=1.0,
+    LoopClosureData.visualize_error_scatter(errors_list, run_names, inliers_list, max_rotation_frac=1.0,
                                             max_translation_frac=1.0, trans_err_in_target=1.0, show_plots=False,
-                                            rot_err_in_target=5.0, save_path='/home/dbutterfield3/Research/robotdataprocess/lc_fig.pdf')
+                                            rot_err_in_target=5.0, save_path='/home/dbutterfield3/Research/robotdataprocess/' + dataset_number + "-" + robots_str +'.pdf')
 
 
 if __name__ == "__main__":
