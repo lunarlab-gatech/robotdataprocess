@@ -23,9 +23,11 @@ class SequentialData(Data):
         self.timestamps = col_to_dec_arr(timestamps)
 
         # Check to ensure that all timestamps are sequential
+        warned = False
         for i in range(len(self.timestamps) - 1):
-            if self.timestamps[i] >= self.timestamps[i+1]:
-                raise ValueError(f"Timestamps {self.timestamps[i]} and {self.timestamps[i+1]} do not come in sequential order!")
+            if not warned and self.timestamps[i] >= self.timestamps[i+1]:
+                print(f"Warning: Timestamps {self.timestamps[i]} and {self.timestamps[i+1]} do not come in sequential order!")
+                warned = True
 
     def len(self) -> int:
         """

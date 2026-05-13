@@ -54,18 +54,21 @@ class TestSequentialData(unittest.TestCase):
         self.assertEqual(data.frame_id, "test_frame")
         self.assertEqual(len(data.timestamps), 3)
 
-    def test_init_non_sequential_timestamps_raises(self):
-        """ Test that non-sequential timestamps raise ValueError. """
-        # Timestamps out of order
+    def test_init_non_sequential_timestamps_warns(self):
+        """ Test that non-sequential timestamps print a warning (once) but do not raise. """
         timestamps = [Decimal("0.3"), Decimal("0.2"), Decimal("0.1")]
-        with self.assertRaises(ValueError):
-            SequentialData("test_frame", timestamps)
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            data = SequentialData("test_frame", timestamps)
+        self.assertEqual(data.len(), 3)
+        self.assertEqual(mock_stdout.getvalue().count("\n"), 1)
 
-    def test_init_duplicate_timestamps_raises(self):
-        """ Test that duplicate timestamps raise ValueError. """
+    def test_init_duplicate_timestamps_warns(self):
+        """ Test that duplicate timestamps print a warning (once) but do not raise. """
         timestamps = [Decimal("0.1"), Decimal("0.1"), Decimal("0.2")]
-        with self.assertRaises(ValueError):
-            SequentialData("test_frame", timestamps)
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            data = SequentialData("test_frame", timestamps)
+        self.assertEqual(data.len(), 3)
+        self.assertEqual(mock_stdout.getvalue().count("\n"), 1)
 
     def test_init_single_timestamp(self):
         """ Test Data initialization with single timestamp (no validation needed). """
