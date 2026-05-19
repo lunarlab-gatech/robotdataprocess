@@ -3,10 +3,12 @@ from __future__ import annotations
 from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from ...math_utils import interpolate_poses
 from ..Data import Data
+from collections import Counter
 from decimal import Decimal
 import json
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, StrMethodFormatter
@@ -108,8 +110,15 @@ class LoopClosureData(Data):
                  names_override: Union[dict, None] = None) -> LoopClosureData:
         """
         Creates a LoopClosureData instance from a g2o file containing
-        EDGE_SE3:QUAT entries, using a timestamp file to map keyframe
-        indices to real timestamps.
+        EDGE_SE3:QUAT loop closure entries, using a timestamp file to map
+        keyframe indices to real timestamps.
+
+        Loop closure edges must be preceded by a comment line starting with
+        ``# LC:`` (e.g. ``# LC: some info``). Edges not preceded by ``# LC:``
+        are treated as odometry and skipped. A sanity check raises ``ValueError``
+        for any edge that lacks the ``# LC:`` marker but also cannot be an
+        odometry edge (odometry requires the same robot character and
+        consecutive keyframe indices, i.e. ``|idx1 - idx2| == 1``).
 
         GTSAM symbol keys are decoded as (character << 56 | index). The
         character is converted to a robot id ('a' -> 0, 'b' -> 1, etc.)
@@ -150,15 +159,24 @@ class LoopClosureData(Data):
         translations = []
         orientations = []
 
+        lc_marker_seen = False
+
         with open(str(g2o_path), 'r') as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
+                if line.startswith('# LC:'):
+                    lc_marker_seen = True
+                    continue
+                if line.startswith('#'):
+                    continue
                 if not line.startswith("EDGE_SE3:QUAT"):
-                    raise ValueError(
-                        f"Expected EDGE_SE3:QUAT but got: {line.split()[0]}"
-                    )
+                    lc_marker_seen = False
+                    continue
+
+                is_lc = lc_marker_seen
+                lc_marker_seen = False
 
                 parts = line.split()
                 # parts[0]    = "EDGE_SE3:QUAT"
@@ -176,6 +194,18 @@ class LoopClosureData(Data):
                 idx1 = key1 & ((1 << 56) - 1)
                 char2 = chr(key2 >> 56)
                 idx2 = key2 & ((1 << 56) - 1)
+
+                could_be_odometry = (char1 == char2 and abs(idx1 - idx2) == 1)
+
+                if not is_lc and not could_be_odometry:
+                    raise ValueError(
+                        f"Edge between robot '{char1}' keyframe {idx1} and robot '{char2}' "
+                        f"keyframe {idx2} is not marked with '# LC:' but cannot be an odometry "
+                        f"edge (odometry requires the same robot and consecutive keyframe indices)."
+                    )
+
+                if not is_lc:
+                    continue  # odometry edge, skip
 
                 # Map character to robot index ('a' -> 0, 'b' -> 1, ...)
                 robot_id1 = ord(char1) - ord('a')
@@ -436,7 +466,7 @@ class LoopClosureData(Data):
 
         self.detected_inliers = np.array(inliers, dtype=bool)
 
-        num_matched = int(np.sum(self.detected_inliers))
+        num_matched = len(matched_other_indices)
         if num_matched < other.num_loop_closures:
             raise ValueError(
                 f"Only {num_matched} of {other.num_loop_closures} loop closures in other were found in self (other must be a subset of self)."
@@ -454,6 +484,9 @@ class LoopClosureData(Data):
         Returns:
             New LoopClosureData with all loop closures concatenated.
         """
+        loop_closures = [lc for lc in loop_closures if lc.num_loop_closures > 0]
+        if not loop_closures:
+            return LoopClosureData([], [], [], [], [])
         timestamps_a = np.concatenate([lc.timestamps_a for lc in loop_closures])
         timestamps_b = np.concatenate([lc.timestamps_b for lc in loop_closures])
         names = [name for lc in loop_closures for name in lc.names]
@@ -661,6 +694,7 @@ class LoopClosureData(Data):
         errors: List[dict],
         labels: List[str],
         inlier_masks: List[np.ndarray] = None,
+        group_indices: List[int] = None,
         show_plots: bool = True,
         save_path: str = None,
         max_translation_frac: float = 1.0,
@@ -680,7 +714,12 @@ class LoopClosureData(Data):
                 and ``"rotation_errors"`` arrays.
             labels: Display name for each error dict.
             inlier_masks: Optional list of boolean arrays marking inlier loop
-                closures. If None, all points are treated as outliers.
+                closures within each entry. Mutually exclusive with ``group_indices``.
+            group_indices: Optional list of integers (one per entry in ``errors``)
+                grouping entries into pairs. Within each group, the first occurrence
+                is plotted as X markers (all loop closures) and the second as star
+                markers (inliers). Paired entries share a color. Mutually exclusive
+                with ``inlier_masks``.
             show_plots: If True, display the plot interactively.
             save_path: If provided, save the figure to this path instead of showing.
             max_translation_frac: Fraction of max translation error for axis limit.
@@ -697,15 +736,28 @@ class LoopClosureData(Data):
             matplotlib Figure object.
 
         Raises:
-            ValueError: If list lengths do not match or fraction values are out of range.
+            ValueError: If list lengths do not match, fraction values are out of range,
+                or both ``inlier_masks`` and ``group_indices`` are provided.
             RuntimeError: If both ``show_plots`` and ``save_path`` are set.
         """
+
+        if inlier_masks is not None and group_indices is not None:
+            raise ValueError("inlier_masks and group_indices are mutually exclusive — pick one")
 
         if len(labels) != len(errors):
             raise ValueError("labels must have the same length as errors")
 
         if inlier_masks is not None and len(inlier_masks) != len(errors):
             raise ValueError("inlier_masks must have the same length as errors")
+
+        if group_indices is not None and len(group_indices) != len(errors):
+            raise ValueError("group_indices must have the same length as errors")
+
+        if group_indices is not None:
+            counts = Counter(group_indices)
+            over = [g for g, c in counts.items() if c > 2]
+            if over:
+                raise ValueError(f"Each group index may appear at most twice; found >2 occurrences for: {over}")
 
         if color_by_values is not None and len(color_by_values) != len(errors):
             raise ValueError("color_by_values must have the same length as errors")
@@ -716,13 +768,38 @@ class LoopClosureData(Data):
         if not (0 < max_rotation_frac <= 1.0):
             raise ValueError("max_rotation_frac must be in (0, 1]")
 
-        if inlier_masks is None:
-            inlier_masks = [None] * len(errors)
+        using_group_indices = group_indices is not None
+        if group_indices is not None:
+            # Convert group_indices to inlier_masks: first occurrence of each group
+            # gets all-zeros (all loop closures, X marker), second gets all-ones
+            # (inliers, star marker). Entries within the same group share a color.
+            seen_groups: dict = {}
+            for gi in group_indices:
+                if gi not in seen_groups:
+                    seen_groups[gi] = len(seen_groups)
+            group_occurrence: dict = {}
+            is_inlier_entry = []
+            inlier_masks = []
+            for err, gi in zip(errors, group_indices):
+                occ = group_occurrence.get(gi, 0)
+                group_occurrence[gi] = occ + 1
+                n = len(np.asarray(err["translation_errors"]))
+                is_inlier_entry.append(occ >= 1)
+                inlier_masks.append(np.ones(n, dtype=bool) if occ >= 1 else np.zeros(n, dtype=bool))
+        else:
+            is_inlier_entry = [False] * len(errors)
+            if inlier_masks is None:
+                inlier_masks = [None] * len(errors)
 
         sns.set_theme(style="whitegrid", context="talk", palette="tab10")
         sns.set_context("poster", font_scale=1.0)
         fig, ax = plt.subplots(figsize=(10, 10))
-        palette = sns.color_palette("bright", len(errors))
+
+        if using_group_indices:
+            group_palette = sns.color_palette("bright", len(seen_groups))
+            palette = [group_palette[seen_groups[gi]] for gi in group_indices]
+        else:
+            palette = sns.color_palette("bright", len(errors))
 
         # Collect all translation and rotation errors
         all_trans = np.concatenate([np.asarray(e["translation_errors"]) for e in errors])
@@ -801,17 +878,22 @@ class LoopClosureData(Data):
                     marker='*', edgecolors='none', clip_on=False, zorder=5,
                 )
 
-            # Save the legend entry (only when not coloring by values, or always for label identification)
-            updated_label = f"{label}"
-            # if inlier_mask is not None: updated_label += f" - Num Inliers: {num_inliers}"
-            print(f"{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target )")
-            print(f"Number of inliers for {label}: {num_inliers}")
+            tag = "[inliers] " if is_inlier_entry[idx] else ""
+            print(f"{tag}{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target)")
+            if not using_group_indices:
+                print(f"Number of inliers for {label}: {num_inliers}")
             if color_by_values is not None and np.any(in_box_mask):
                 cbv_in_box = np.asarray(color_by_values[idx], dtype=float)[in_box_mask]
                 print(f"Min {color_by_label or 'color_by'} in target box for {label}: {np.nanmin(cbv_in_box)}")
-            if color_by_values is None:
-                legend_handles.append(Patch(facecolor=color, edgecolor='none', label=updated_label))
-        
+            if color_by_values is None and not is_inlier_entry[idx]:
+                legend_handles.append(Patch(facecolor=color, edgecolor='none', label=label))
+
+        if using_group_indices:
+            legend_handles.append(Line2D([0], [0], marker='x', color='black', label='All loop closures',
+                                         linestyle='None', markersize=10, markeredgewidth=2))
+            legend_handles.append(Line2D([0], [0], marker='*', color='black', label='Inliers',
+                                         linestyle='None', markersize=14))
+
         if title is not None:
             ax.set_title(title, fontsize=24)
         ax.set_xlabel("Translation Error (m)")
@@ -876,13 +958,13 @@ class LoopClosureData(Data):
                     tick.gridline.set_color("#CCCCCCD8")
                     tick.gridline.set_alpha(0.5)
 
-        plt.setp(ax.get_xticklabels(), rotation=90, horizontalalignment='center')
+                # --- LABEL VISIBILITY ---
+                # Show labels for powers of 10 (1) and even numbers (2, 4, 6, 8)
+                # Hide labels for odd numbers (3, 5, 7, 9)
+                if leading_digit in [3, 5, 7, 9]:
+                    tick.label1.set_visible(False)
 
-        # --- LABEL VISIBILITY ---
-        # Show labels for powers of 10 (1) and even numbers (2, 4, 6, 8)
-        # Hide labels for odd numbers (3, 5, 7, 9)
-        if leading_digit in [3, 5, 7, 9]:
-            tick.label1.set_visible(False)
+        plt.setp(ax.get_xticklabels(), rotation=90, horizontalalignment='center')
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_min, y_max)
         if color_by_values is not None:

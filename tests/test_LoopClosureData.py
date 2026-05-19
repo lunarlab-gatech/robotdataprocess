@@ -297,9 +297,11 @@ class TestLoopClosureDataFromG2o(unittest.TestCase):
 
         g2o_lines = (
             # normal a->b entry
+            "# LC:\n"
             f"EDGE_SE3:QUAT {key_a0} {key_b0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0 "
             "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
             # flipped b->a entry
+            "# LC:\n"
             f"EDGE_SE3:QUAT {key_b0} {key_a0} 2.0 0.0 0.0 0.0 0.0 0.0 1.0 "
             "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
         )
@@ -323,14 +325,131 @@ class TestLoopClosureDataFromG2o(unittest.TestCase):
         self.assertEqual(lc_data.names[0], ("aerial-07", "ground-03"))
         self.assertEqual(lc_data.names[1], ("ground-03", "aerial-07"))
 
-    def test_from_g2o_invalid_edge_type_raises(self):
-        """Lines not starting with EDGE_SE3:QUAT should raise ValueError."""
+    def test_from_g2o_non_edge_lines_skipped(self):
+        """VERTEX_SE3:QUAT lines, comments, and blank lines are silently
+        skipped rather than raising an error, so odom_and_lc.g2o files
+        (which contain vertex and comment lines) are accepted."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.g2o') as f:
-            f.write("VERTEX_SE3:QUAT 0 0 0 0 0 0 0 1\n")
-            f.flush()
-            with self.assertRaises(ValueError):
-                LoopClosureData.from_g2o(f.name, self.TIME_PATH)
+
+        key_a0 = 97 * (1 << 56)   # a:0
+        key_b0 = 98 * (1 << 56)   # b:0
+
+        mixed_lines = (
+            "# this is a comment\n"
+            "VERTEX_SE3:QUAT 0 0 0 0 0 0 0 1\n"
+            "\n"
+            "# LC:\n"
+            f"EDGE_SE3:QUAT {key_a0} {key_b0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+        )
+        time_lines = (
+            "0 0 100000000 xxx\n"
+            "1 0 200000000 xxx\n"
+        )
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.g2o', delete=False) as gf:
+            gf.write(mixed_lines)
+            g2o_tmp = gf.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+            tf.write(time_lines)
+            time_tmp = tf.name
+
+        lc_data = LoopClosureData.from_g2o(g2o_tmp, time_tmp)
+        self.assertEqual(lc_data.num_loop_closures, 1)
+
+    def test_from_g2o_odometry_edges_skipped(self):
+        """Consecutive same-robot keyframe edges (odometry) are skipped;
+        only loop closures are returned."""
+        import tempfile
+
+        key_a0 = 97 * (1 << 56)        # a:0
+        key_a1 = 97 * (1 << 56) | 1    # a:1  <- consecutive, odometry
+        key_b0 = 98 * (1 << 56)        # b:0
+        key_b1 = 98 * (1 << 56) | 1    # b:1  <- consecutive, odometry
+        key_a5 = 97 * (1 << 56) | 5    # a:5  <- non-consecutive, loop closure
+
+        g2o_lines = (
+            # odometry edges (consecutive, same robot) — should be skipped
+            f"EDGE_SE3:QUAT {key_a0} {key_a1} 1.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+            f"EDGE_SE3:QUAT {key_b0} {key_b1} 1.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+            # inter-robot loop closure — should be kept
+            "# LC:\n"
+            f"EDGE_SE3:QUAT {key_a0} {key_b0} 2.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+            # intra-robot non-consecutive loop closure — should be kept
+            "# LC:\n"
+            f"EDGE_SE3:QUAT {key_a0} {key_a5} 3.0 0.0 0.0 0.0 0.0 0.0 1.0 "
+            "1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1\n"
+        )
+        time_lines = (
+            "0 0 100000000 xxx\n"   # a:0 -> 0.1 s
+            "0 1 200000000 xxx\n"   # a:1 -> 0.2 s
+            "0 5 600000000 xxx\n"   # a:5 -> 0.6 s
+            "1 0 100000000 xxx\n"   # b:0 -> 0.1 s
+            "1 1 200000000 xxx\n"   # b:1 -> 0.2 s
+        )
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.g2o', delete=False) as gf:
+            gf.write(g2o_lines)
+            g2o_tmp = gf.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+            tf.write(time_lines)
+            time_tmp = tf.name
+
+        lc_data = LoopClosureData.from_g2o(g2o_tmp, time_tmp)
+        self.assertEqual(lc_data.num_loop_closures, 2)
+        self.assertEqual(lc_data.names[0], ("a", "b"))
+        self.assertEqual(lc_data.names[1], ("a", "a"))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataFromG2oOdomAndLC(unittest.TestCase):
+    """Test from_g2o with a combined odometry + loop closure g2o file."""
+
+    TEST_DIR = Path(__file__).parent / 'files' / 'test_LoopClosureData' / 'test_from_g20_odom_and_lc'
+    G2O_PATH = TEST_DIR / 'odom_and_lc.g2o'
+    TIME_PATH = TEST_DIR / 'odom_all.time.txt'
+
+    def test_count(self):
+        """Only LC-marked edges are returned; odometry edges are skipped."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+        self.assertEqual(lc_data.num_loop_closures, 368)
+
+    def test_first_entry(self):
+        """Verify first LC entry: a:1 -> a:28."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+
+        # a:1  -> robot 0, keyframe 1  -> 1670533757500283136 ns
+        # a:28 -> robot 0, keyframe 28 -> 1670533808477174784 ns
+        self.assertEqual(lc_data.timestamps_a[0], Decimal("1670533757500283136") / Decimal("1000000000"))
+        self.assertEqual(lc_data.timestamps_b[0], Decimal("1670533808477174784") / Decimal("1000000000"))
+        self.assertEqual(lc_data.names[0], ("a", "a"))
+        np.testing.assert_almost_equal(float(lc_data.translations[0][0]), -12.265847440823814, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[0][1]),   6.175869150286243, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[0][2]),  -1.3800860633298973, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][0]),   0.020047445030492685, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][1]),  -0.06214035164221092, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][2]),  -0.690281167642425, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[0][3]),   0.7205890550402095, 5)
+
+    def test_second_entry(self):
+        """Verify second LC entry: a:1 -> a:32."""
+        lc_data = LoopClosureData.from_g2o(self.G2O_PATH, self.TIME_PATH)
+
+        # a:1  -> robot 0, keyframe 1  -> 1670533757500283136 ns
+        # a:32 -> robot 0, keyframe 32 -> 1670533815327563776 ns
+        self.assertEqual(lc_data.timestamps_a[1], Decimal("1670533757500283136") / Decimal("1000000000"))
+        self.assertEqual(lc_data.timestamps_b[1], Decimal("1670533815327563776") / Decimal("1000000000"))
+        self.assertEqual(lc_data.names[1], ("a", "a"))
+        np.testing.assert_almost_equal(float(lc_data.translations[1][0]), -10.919073293432417, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[1][1]),  -2.314908451609168, 5)
+        np.testing.assert_almost_equal(float(lc_data.translations[1][2]),  -0.8056660578935075, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[1][0]),   0.015723572846883128, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[1][1]),  -0.06143692111768608, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[1][2]),  -0.6344300948836249, 5)
+        np.testing.assert_almost_equal(float(lc_data.orientations[1][3]),   0.7703744081201443, 5)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -886,6 +1005,40 @@ class TestLabelInliersViaOtherLoopClosureData(unittest.TestCase):
         lc_self.label_inliers_via_other_LoopClosureData(lc_other)
 
         np.testing.assert_array_equal(lc_self.detected_inliers, [True, False, True])
+
+    def test_duplicate_other_entries_not_fully_matched_raises(self):
+        """When other contains two identical entries and self has two entries
+        that both match the same j=0 entry (inner loop breaks on j=0 each
+        time, so j=1 is never distinctly matched), ValueError must be raised.
+
+        Bug: the check uses num_matched = np.sum(self.detected_inliers) instead
+        of len(matched_other_indices).  With two self entries both matching j=0:
+          - matched_other_indices = {0}   (size 1, j=1 never added)
+          - num_matched = 2               (both self entries are True)
+        The correct check len(matched_other_indices)=1 < other.num_loop_closures=2
+        raises ValueError.  The buggy check num_matched=2 >= 2 passes silently.
+        """
+        # other: two identical entries — j=0 and j=1 have the same values.
+        lc_other = self._make_lc(
+            timestamps_a=[Decimal("1.0"), Decimal("1.0")],
+            timestamps_b=[Decimal("1.5"), Decimal("1.5")],
+            names=[("A", "B"), ("A", "B")],
+            translations=[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        )
+        # self: two identical entries that both match j=0 (and would also match
+        # j=1, but the inner loop breaks after j=0, so j=1 is never recorded in
+        # matched_other_indices).
+        lc_self = self._make_lc(
+            timestamps_a=[Decimal("1.0"), Decimal("1.0")],
+            timestamps_b=[Decimal("1.5"), Decimal("1.5")],
+            names=[("A", "B"), ("A", "B")],
+            translations=[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+        )
+
+        with self.assertRaises(ValueError):
+            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

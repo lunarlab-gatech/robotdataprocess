@@ -23,6 +23,9 @@ def main():
     gt_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot1_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
     gt_data_lst: list[OdometryData] = [gt_data_robot0, gt_data_robot1]
 
+    # TODO: Need to make start and end times match before individual RMS ATE as well; 
+    # if we ever use those results in a paper.
+
     # Calculate individual RMS ATE, among other metrics
     print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, run_name, "============")
     metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False)

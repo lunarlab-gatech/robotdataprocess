@@ -4,6 +4,8 @@ import re
 from robotdataprocess import OdometryData, CoordinateFrame, PathData
 from scipy.spatial.transform import Rotation as R
 
+DATASET_SEQUENCE = {"1014": "Outdoor", "1208": "Hybrid", "1207": "Tunnel"}
+
 def _parse_map_runtimes(path: Path, robot_names: set) -> dict:
     """Parse map/runtime.txt, returning {robot_name: seconds} for robots in robot_names."""
     runtimes = {}
@@ -52,10 +54,11 @@ def main():
     # Set experiment configuration
     user = getpass.getuser()
     dataset_folder = Path('/media') / user / 'T73' / 'Kimera-Multi_Dataset'
-    robot_names_text = ["acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"]
+    #robot_names_text = ["acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek"]
+    robot_names_text = ["acl_jackal", "acl_jackal2"]
     dataset_number = "1014"
     repository_with_results = "ROMAN_DEVEL"
-    sequence_name = "Kimera-Multi_ROMAN_NM/Medium/Outdoor/" + "_".join(robot_names_text)
+    sequence_name = "Kimera-Multi_MG/Hard/" + DATASET_SEQUENCE[dataset_number] + "/" + "_".join(robot_names_text)
 
     # Load the estimated data
     est_data_dir = Path('/home/') / user / 'Research' / repository_with_results / 'results' / sequence_name
@@ -72,10 +75,13 @@ def main():
                                         "world", "robot", CoordinateFrame.FLU, True, None, ts_in_ns=True)
         gt_data_lst.append(gt_data)
 
+    # Match time spans before any evaluation (mirrors ROMAN_DEVEL evaluate behavior)
+    est_data_lst, gt_data_lst = PathData.make_start_and_end_times_match(est_data_lst, gt_data_lst)
+
     # Calculate individual RMS ATE, among other metrics
     for i in range(len(est_data_lst)):
-        print("=========== Individual Trajectory", robot_names_text[i], "for dataset: ============")
-        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_lst[i], est_data_lst[i], 
+        print("=========== Individual Trajectory", robot_names_text[i], "for dataset: Kimera-Multi ============")
+        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_lst[i], est_data_lst[i],
                                                                                 max_diff=0.1, visualize=False)
         print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
@@ -85,13 +91,11 @@ def main():
 
     # Calculate merged RMS ATE:
     if len(est_data_lst) > 1:
-        # Make the timestamps match and then concatenate
-        est_data_lst, gt_data_lst = PathData.make_start_and_end_times_match(est_data_lst, gt_data_lst)
         est_data: OdometryData = PathData.concatenate_PathData(est_data_lst).to_OdometryData('odom', 'base_link')
         gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
 
         # Calculate RMS ATE, among other metrics
-        print("\n========== Merged Trajectories for dataset: ==========")
+        print("\n========== Merged Trajectories for dataset: Kimera-Multi ==========")
         metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, 
                                                                         est_data, max_diff=0.1, visualize=True)
         print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
