@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from ...math_utils import interpolate_poses
+from scipy.spatial.transform import Slerp
 from ..Data import Data
 from collections import Counter
 from decimal import Decimal
@@ -383,7 +384,9 @@ class LoopClosureData(Data):
                                cache: dict) -> tuple[np.ndarray, np.ndarray]:
         """
         Get an interpolated pose for a robot at a specific timestamp.
-        Uses a cache to avoid redundant conversion of PathData to float arrays.
+        Uses a cache (keyed by robot name) to avoid redundant conversion of
+        PathData to float arrays and to reuse pre-built Slerp objects across
+        repeated calls for the same robot.
 
         Returns:
             pos: (3,) float64 position
@@ -392,15 +395,16 @@ class LoopClosureData(Data):
         if name not in name_to_path or name_to_path[name] is None:
             raise ValueError(f"Robot name '{name}' not found in name_to_path dict.")
 
-        # Cache the float arrays for each path
+        # Cache float arrays and pre-built Slerp object per robot
         if name not in cache:
             pathData: PathData = name_to_path[name]
             ts_float = dec_arr_to_float_arr(pathData.timestamps)
             pos_float = dec_arr_to_float_arr(pathData.positions)
             quat_float = dec_arr_to_float_arr(pathData.orientations)
-            cache[name] = (ts_float, pos_float, quat_float)
+            slerp = Slerp(ts_float, R.from_quat(quat_float))
+            cache[name] = (ts_float, pos_float, slerp)
 
-        ts_float, pos_float, quat_float = cache[name]
+        ts_float, pos_float, slerp = cache[name]
 
         # Clip the target timestamp (to be robust when baselines assume submaps start at t=0)
         target = np.clip(
@@ -408,7 +412,7 @@ class LoopClosureData(Data):
             ts_float[0], ts_float[-1],
         )
 
-        new_pos, new_quat = interpolate_poses(ts_float, pos_float, quat_float, target)
+        new_pos, new_quat = interpolate_poses(ts_float, pos_float, slerp, target)
         return new_pos[0], new_quat[0]
     
     # =========================================================================
@@ -824,6 +828,7 @@ class LoopClosureData(Data):
             sm.set_array([])
 
         legend_handles = []
+        stats_list = []
         for idx, (err, label, color, inlier_mask) in enumerate(zip(errors, labels, palette, inlier_masks)):
             trans_err = np.asarray(err["translation_errors"])
             rot_err = np.asarray(err["rotation_errors"])
@@ -835,6 +840,13 @@ class LoopClosureData(Data):
 
             # Avoid division by zero if a list is empty
             percent_in_box = (num_in_box / total_points * 100) if total_points > 0 else 0
+
+            stats_list.append({
+                "label": label,
+                "success_rate": percent_in_box,
+                "num_successful_loop_closures": int(num_in_box),
+                "num_loop_closures": total_points,
+            })
 
             # Mask points beyond the max fraction for plotting
             vis_mask = (trans_err <= x_max) & (rot_err <= y_max)
@@ -983,4 +995,4 @@ class LoopClosureData(Data):
             plt.savefig(save_path)
         plt.close()
 
-        return fig
+        return fig, stats_list
