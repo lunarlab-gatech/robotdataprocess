@@ -114,7 +114,8 @@ def calculate_merged_ate(dataset_name: str, method: str, robot_names: list, visu
         est_nameList =  [name_map[robot0_name], name_map[robot1_name]]
         est_colorList = [robot_name_to_color[name] for name in est_nameList]
         PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
-                           loop_closure_data=lc_data_inlier, lc_errors=lc_errors_viz, lc_line_width=2.0,
+                           loop_closure_data=lc_data_inlier, lc_errors=lc_errors_viz, lc_line_width=2.0, lc_errors_vmax=50.0,
+                           title=f"{method} LC overlaid on trajectory",
                            save_path=str(traj_lc_dir / f'traj_lc_{pair_label}_{method}.pdf'))
 
         # Configuration for Figure 2

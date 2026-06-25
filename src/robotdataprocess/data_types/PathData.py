@@ -560,7 +560,8 @@ class PathData(SequentialData):
                      background_image_path: str | None = None,
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
                      background_image_extent_offsets: Union[Tuple[float, float], None] = None,
-                     loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8):
+                     loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8,
+                     title: str | None = None, lc_errors_vmax: float = 50.0):
         """
         Plot all PathData objects on a 2D XY plane.
         
@@ -663,12 +664,14 @@ class PathData(SequentialData):
 
             if lc_errors is not None:
                 trans_errs = np.asarray(lc_errors["translation_errors"], dtype=float)
-                lc_norm = mcolors.Normalize(vmin=0, vmax=50.0, clip=True)
-                lc_cmap = plt.get_cmap("RdYlGn_r")
+                lc_norm = mcolors.Normalize(vmin=0, vmax=lc_errors_vmax, clip=True)
+                lc_cmap = mcolors.LinearSegmentedColormap.from_list(
+                    "lc_cmap", ["#1a9641", "#a6611a", "#d7191c"])
 
             for _i in range(loop_closure_data.num_loop_closures):
                 _name_a, _name_b = loop_closure_data.names[_i]
                 if _name_a not in pos_cache or _name_b not in pos_cache:
+                    print("Warning: LC robot not found in pos_cache!")
                     continue
                 _ts_a = float(loop_closure_data.timestamps_a[_i])
                 _ts_b = float(loop_closure_data.timestamps_b[_i])
@@ -679,7 +682,8 @@ class PathData(SequentialData):
                 _xb = float(np.interp(_ts_b, _ts_arr_b, _x_b))
                 _yb = float(np.interp(_ts_b, _ts_arr_b, _y_b))
                 _color = lc_cmap(lc_norm(trans_errs[_i])) if lc_errors is not None else (1.0, 1.0, 1.0, 0.6)
-                axs.plot([_xa, _xb], [_ya, _yb], color=_color, linewidth=lc_line_width, zorder=2)
+                axs.plot([_xa, _xb], [_ya, _yb], color=_color, linewidth=lc_line_width, zorder=3)
+                axs.plot([_xa, _xb], [_ya, _yb], 'o', color='black', markersize=3, zorder=4)
 
             if lc_errors is not None:
                 _sm = plt.cm.ScalarMappable(norm=lc_norm, cmap=lc_cmap)
@@ -691,8 +695,8 @@ class PathData(SequentialData):
             label = nameList[i] + (" (GT)" if isGTList[i] else " (Est.)")
             linestyle = ("dotted" if isGTList[i] else None)
             color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
-            axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1], 
-                     label=label, color=color, linewidth=line_width, linestyle=linestyle)
+            axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
+                     label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)
     
         # Calculate the current aspect ratio and make it match the target
         target_ar = 1.5  
@@ -826,10 +830,14 @@ class PathData(SequentialData):
             else: suggested_length = int(round(target_length / 10.0)) * 10
             add_google_maps_scale(axs, suggested_length, google_maps_scale_bar_loc)
 
+        if title is not None:
+            axs.set_title(title)
+
         # Save/Plot the results
         if created_fig:
             if save_path is not None:
-                fig.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=0)
+                pad = 0.05 if title is not None else 0
+                fig.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=pad)
             else:
                 plt.show()
             plt.close(fig)
