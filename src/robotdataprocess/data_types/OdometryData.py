@@ -60,6 +60,15 @@ class OdometryData(PathData):
         self.poses = []
         self.poses_rclpy = []
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.child_frame_id != other.child_frame_id:
+            print(f"  [__eq__] child_frame_id: {self.child_frame_id!r} != {other.child_frame_id!r}")
+            return False
+        return True
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

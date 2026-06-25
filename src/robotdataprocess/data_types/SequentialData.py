@@ -29,6 +29,19 @@ class SequentialData(Data):
                 print(f"Warning: Timestamps {self.timestamps[i]} and {self.timestamps[i+1]} do not come in sequential order!")
                 warned = True
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if not np.array_equal(self.timestamps, other.timestamps):
+            if self.timestamps.shape != other.timestamps.shape:
+                print(f"  [__eq__] timestamps shape: {self.timestamps.shape} != {other.timestamps.shape}")
+            else:
+                idx = next(i for i in range(len(self.timestamps)) if self.timestamps[i] != other.timestamps[i])
+                print(f"  [__eq__] timestamps first diff at idx {idx}: {self.timestamps[idx]} != {other.timestamps[idx]}")
+            return False
+        return True
+
     def len(self) -> int:
         """
         Returns the number of items in this data class.

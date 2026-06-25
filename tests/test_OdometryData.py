@@ -146,6 +146,9 @@ class TestOdometryData(unittest.TestCase):
             np.testing.assert_equal(odom_data.frame_id, '/Husky1')
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
+            # Verify Decimal dtype is preserved after frame conversion
+            self.assertIsInstance(odom_data.positions[0][0], Decimal)
+            self.assertIsInstance(odom_data.orientations[0][0], Decimal)
 
         # ===  Test NED to FLU (default CHANGE_OF_BASIS) ===
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
@@ -173,6 +176,12 @@ class TestOdometryData(unittest.TestCase):
 
         # Positions should be identical (both apply R * p)
         np.testing.assert_array_equal(odom_rotation.positions, odom_cob.positions)
+
+        # Decimal dtype must be preserved after both transform types
+        self.assertIsInstance(odom_rotation.positions[0][0], Decimal)
+        self.assertIsInstance(odom_rotation.orientations[0][0], Decimal)
+        self.assertIsInstance(odom_cob.positions[0][0], Decimal)
+        self.assertIsInstance(odom_cob.orientations[0][0], Decimal)
 
         # Orientations should differ between ROTATION and CHANGE_OF_BASIS
         self.assertFalse(np.allclose(
@@ -570,6 +579,65 @@ class TestOdometryData(unittest.TestCase):
             # --- orientations ---
             np.testing.assert_array_almost_equal(
                 data.orientations.astype(np.float64), orientations, decimal=6)
+
+
+    def _make_odom_data(self):
+        return OdometryData(
+            frame_id="world",
+            child_frame_id="base_link",
+            timestamps=np.array([1.0, 2.0, 3.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU,
+        )
+
+    def test_eq(self):
+        from copy import deepcopy
+        from decimal import Decimal
+
+        o1 = self._make_odom_data()
+        o2 = deepcopy(o1)
+        self.assertEqual(o1, o2)
+
+        # child_frame_id differs
+        o = deepcopy(o1); o.child_frame_id = "other_link"
+        self.assertNotEqual(o1, o)
+
+        # frame_id differs (inherited from Data)
+        o = deepcopy(o1); o.frame_id = "other"
+        self.assertNotEqual(o1, o)
+
+        # timestamps differ (inherited from SequentialData)
+        o = deepcopy(o1); o.timestamps[0] = Decimal("9.0")
+        self.assertNotEqual(o1, o)
+
+        # positions differ (inherited from PathData)
+        o = deepcopy(o1); o.positions[0, 0] = Decimal("99.0")
+        self.assertNotEqual(o1, o)
+
+        # orientations differ (inherited from PathData)
+        o = deepcopy(o1); o.orientations[0, 0] = Decimal("0.5")
+        self.assertNotEqual(o1, o)
+
+        # frame differs (inherited from PathData)
+        o = deepcopy(o1); o.frame = CoordinateFrame.NED
+        self.assertNotEqual(o1, o)
+
+        # OdometryData vs PathData is not equal even when common fields match
+        path = PathData(
+            frame_id=o1.frame_id,
+            timestamps=o1.timestamps,
+            positions=o1.positions,
+            orientations=o1.orientations,
+            frame=o1.frame,
+        )
+        self.assertNotEqual(o1, path)
+
+        # poses / poses_rclpy caches do not affect equality
+        o = deepcopy(o1)
+        o.poses = ["fake"]
+        o.poses_rclpy = ["fake"]
+        self.assertEqual(o1, o)
 
 
 if __name__ == "__main__":

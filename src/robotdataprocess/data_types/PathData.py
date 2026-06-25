@@ -55,6 +55,29 @@ class PathData(SequentialData):
         self.orientations = col_to_dec_arr(orientations)
         self.frame = frame
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if not np.array_equal(self.positions, other.positions):
+            if self.positions.shape != other.positions.shape:
+                print(f"  [__eq__] positions shape: {self.positions.shape} != {other.positions.shape}")
+            else:
+                idx = next(i for i in range(len(self.positions)) if not np.array_equal(self.positions[i], other.positions[i]))
+                print(f"  [__eq__] positions first diff at idx {idx}: {self.positions[idx]} != {other.positions[idx]}")
+            return False
+        if not np.array_equal(self.orientations, other.orientations):
+            if self.orientations.shape != other.orientations.shape:
+                print(f"  [__eq__] orientations shape: {self.orientations.shape} != {other.orientations.shape}")
+            else:
+                idx = next(i for i in range(len(self.orientations)) if not np.array_equal(self.orientations[i], other.orientations[i]))
+                print(f"  [__eq__] orientations first diff at idx {idx}: {self.orientations[idx]} != {other.orientations[idx]}")
+            return False
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        return True
+
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in PathData. """
         pass
@@ -183,7 +206,7 @@ class PathData(SequentialData):
                 self._convert_frame(R_frame)
             elif transform_type == TransformType.ROTATION:
                 R_frame_Q = R.from_matrix(R_frame)
-                self.positions = (R_frame @ self.positions.T).T
+                self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
                 self._ori_apply_rotation(R_frame_Q)
 
             self.frame = CoordinateFrame.FLU
@@ -239,7 +262,7 @@ class PathData(SequentialData):
     def _convert_frame(self, R_frame: np.ndarray):
         """ Uses a change of basis to update the positions and orientations. """
         R_frame_Q = R.from_matrix(R_frame)
-        self.positions = (R_frame @ self.positions.T).T
+        self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
         self._ori_change_of_basis(R_frame_Q)
 
         self._invalidate_cache()
@@ -248,6 +271,7 @@ class PathData(SequentialData):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
 
         self._invalidate_cache()
 
@@ -255,6 +279,7 @@ class PathData(SequentialData):
         """ Applies a change of basis to orientations """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i]) * R_i.inv()).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
 
         self._invalidate_cache()
 
@@ -526,15 +551,16 @@ class PathData(SequentialData):
     # =========================================================================
 
     @staticmethod
-    def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str], 
-                     save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0, 
+    def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str],
+                     save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0,
                      show_grid: bool = False, legend: bool = True,
                      no_border: bool = False, disable_x_label: bool = False, disable_y_label: bool = False,
                      google_maps_scale_bar: bool = False, google_maps_scale_bar_loc: str ="bottom-right",
                      gt_color_lightness_range_val: int = 3,
                      background_image_path: str | None = None,
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
-                     background_image_extent_offsets: Union[Tuple[float, float], None] = None):
+                     background_image_extent_offsets: Union[Tuple[float, float], None] = None,
+                     loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8):
         """
         Plot all PathData objects on a 2D XY plane.
         
@@ -620,6 +646,45 @@ class PathData(SequentialData):
         padding_y = (all_y.max() - all_y.min()) * 0.05
         x_min, x_max = all_x.min() - padding_x, all_x.max() + padding_x
         y_min, y_max = all_y.min() - padding_y, all_y.max() + padding_y
+
+        # Plot loop closures (drawn before trajectories so they appear underneath)
+        if loop_closure_data is not None:
+            name_to_est: dict = {}
+            for _path, _is_gt, _name in zip(dataList, isGTList, nameList):
+                if not _is_gt and _name not in name_to_est:
+                    name_to_est[_name] = _path
+
+            pos_cache: dict = {}
+            for _name, _path in name_to_est.items():
+                _ts = dec_arr_to_float_arr(_path.timestamps).astype(float)
+                _x = dec_arr_to_float_arr(_path.positions[:, 0]).astype(float)
+                _y = dec_arr_to_float_arr(_path.positions[:, 1]).astype(float)
+                pos_cache[_name] = (_ts, _x, _y)
+
+            if lc_errors is not None:
+                trans_errs = np.asarray(lc_errors["translation_errors"], dtype=float)
+                lc_norm = mcolors.Normalize(vmin=0, vmax=50.0, clip=True)
+                lc_cmap = plt.get_cmap("RdYlGn_r")
+
+            for _i in range(loop_closure_data.num_loop_closures):
+                _name_a, _name_b = loop_closure_data.names[_i]
+                if _name_a not in pos_cache or _name_b not in pos_cache:
+                    continue
+                _ts_a = float(loop_closure_data.timestamps_a[_i])
+                _ts_b = float(loop_closure_data.timestamps_b[_i])
+                _ts_arr_a, _x_a, _y_a = pos_cache[_name_a]
+                _ts_arr_b, _x_b, _y_b = pos_cache[_name_b]
+                _xa = float(np.interp(_ts_a, _ts_arr_a, _x_a))
+                _ya = float(np.interp(_ts_a, _ts_arr_a, _y_a))
+                _xb = float(np.interp(_ts_b, _ts_arr_b, _x_b))
+                _yb = float(np.interp(_ts_b, _ts_arr_b, _y_b))
+                _color = lc_cmap(lc_norm(trans_errs[_i])) if lc_errors is not None else (1.0, 1.0, 1.0, 0.6)
+                axs.plot([_xa, _xb], [_ya, _yb], color=_color, linewidth=lc_line_width, zorder=2)
+
+            if lc_errors is not None:
+                _sm = plt.cm.ScalarMappable(norm=lc_norm, cmap=lc_cmap)
+                _sm.set_array([])
+                fig.colorbar(_sm, ax=axs, label="LC Translation Error (m)", shrink=0.8)
 
         # Plot the trajectories
         for i in range(num_data_objs):
@@ -1147,9 +1212,12 @@ class PathData(SequentialData):
         # Make deep copies of trajectories
         merged_PathData_copies: list[PathData] = [copy.deepcopy(merged_PathData) for _ in range(len(original_PathDatas))]
 
-        # Reduce trajectories to the specific time that covers each robot
+        # Reduce trajectories to the specific time that covers each robot, then restore original timestamps
         for i, pd in enumerate(merged_PathData_copies):
             pd.crop_data(Decimal(start_times[i]), Decimal(end_times[i]))
+            if i > 0:
+                offset = Decimal(start_times[i]) - original_PathDatas[i].timestamps[0]
+                pd.timestamps = pd.timestamps - offset
         return merged_PathData_copies
 
     @staticmethod

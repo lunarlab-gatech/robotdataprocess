@@ -1331,6 +1331,77 @@ class TestLoopClosureDataMerge(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestPrintDuplicateInfo(unittest.TestCase):
+    """Test print_duplicate_info method."""
+
+    def _make_lc(self, names, timestamps_a, timestamps_b):
+        n = len(names)
+        return LoopClosureData(
+            timestamps_a=np.array([Decimal(str(t)) for t in timestamps_a], dtype=object),
+            timestamps_b=np.array([Decimal(str(t)) for t in timestamps_b], dtype=object),
+            names=names,
+            translations=np.zeros((n, 3), dtype=object),
+            orientations=np.zeros((n, 4), dtype=object),
+        )
+
+    def test_no_duplicates(self):
+        lc = self._make_lc([("A", "B"), ("A", "C")], [0, 1], [10, 11])
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info("run")
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertIn("2 total loop closures", out)
+        self.assertIn("0 duplicates", out)
+        self.assertIn("2 if deduplicated", out)
+        self.assertIn("run:", out)
+
+    def test_with_duplicates(self):
+        # Entry 0 and entry 1 are the same canonical LC
+        lc = self._make_lc([("A", "B"), ("A", "B"), ("A", "C")], [0, 0, 1], [10, 10, 11])
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info()
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertIn("3 total loop closures", out)
+        self.assertIn("1 duplicates", out)
+        self.assertIn("2 if deduplicated", out)
+
+    def test_swapped_pair_counted_as_duplicate(self):
+        # (A, B, 0, 10) and (B, A, 10, 0) are canonical-equal
+        lc = self._make_lc([("A", "B"), ("B", "A")], [0, 10], [10, 0])
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info()
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertIn("2 total loop closures", out)
+        self.assertIn("1 duplicates", out)
+        self.assertIn("1 if deduplicated", out)
+
+    def test_no_label(self):
+        lc = self._make_lc([("A", "B")], [0], [10])
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info()
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertFalse(out.startswith(":"))
+
+
 class TestLoopClosureDataVisualization(unittest.TestCase):
     """Test visualization methods don't crash."""
 

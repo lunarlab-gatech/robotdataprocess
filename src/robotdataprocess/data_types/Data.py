@@ -59,3 +59,11 @@ class Data:
     @typechecked
     def __init__(self, frame_id: str):
         self.frame_id = frame_id
+
+    def __eq__(self, other) -> bool:
+        if type(self) is not type(other):
+            return NotImplemented
+        if self.frame_id != other.frame_id:
+            print(f"  [__eq__] frame_id: {self.frame_id!r} != {other.frame_id!r}")
+            return False
+        return True

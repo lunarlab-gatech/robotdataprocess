@@ -65,6 +65,48 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_equal(odom_data.child_frame_id, 'robot')
         np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
 
+    def _make_path_data(self):
+        return PathData(
+            frame_id="world",
+            timestamps=np.array([1.0, 2.0, 3.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU,
+        )
+
+    def test_eq(self):
+        p1 = self._make_path_data()
+        p2 = deepcopy(p1)
+        self.assertEqual(p1, p2)
+
+        # frame_id differs
+        p = deepcopy(p1); p.frame_id = "other"
+        self.assertNotEqual(p1, p)
+
+        # timestamps differ
+        p = deepcopy(p1); p.timestamps[0] = Decimal("9.0")
+        self.assertNotEqual(p1, p)
+
+        # positions differ
+        p = deepcopy(p1); p.positions[0, 0] = Decimal("99.0")
+        self.assertNotEqual(p1, p)
+
+        # orientations differ
+        p = deepcopy(p1); p.orientations[0, 0] = Decimal("0.5")
+        self.assertNotEqual(p1, p)
+
+        # frame differs
+        p = deepcopy(p1); p.frame = CoordinateFrame.NED
+        self.assertNotEqual(p1, p)
+
+        # different type (OdometryData vs PathData) is not equal
+        odom = OdometryData(
+            frame_id=p1.frame_id, child_frame_id="base_link",
+            timestamps=p1.timestamps, positions=p1.positions,
+            orientations=p1.orientations, frame=p1.frame,
+        )
+        self.assertNotEqual(p1, odom)
+
     def test_make_start_and_end_times_match(self):
         # Create two PathData objects with non-matching start and end times
         path1 = PathData(
@@ -734,6 +776,31 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(separated[0].orientations, path1.orientations)
         np.testing.assert_array_equal(separated[1].positions, path2.positions)
         np.testing.assert_array_equal(separated[1].orientations, path2.orientations)
+
+    def test_seperate_PathData_restores_timestamps(self):
+        """ Test that seperate_PathData restores the original timestamps of each trajectory.
+        Regression test: concatenate_PathData shifts timestamps of all but the first trajectory
+        to be contiguous, and seperate_PathData must undo that shift. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([1.1, 2.1, 4.1], dtype=object),
+            positions=np.array([[3.0, 4.0, 6.8], [4.0, 4.0, 6.8], [5.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]], dtype=object),
+            frame=CoordinateFrame.ENU)
+
+        concatenated = PathData.concatenate_PathData([path1, path2])
+        separated = PathData.seperate_PathData([path1, path2], concatenated)
+
+        # path1 timestamps should be unchanged
+        np.testing.assert_array_equal(separated[0].timestamps, path1.timestamps)
+        # path2 timestamps must be restored to original — NOT the shifted values from concatenation
+        np.testing.assert_array_equal(separated[1].timestamps, path2.timestamps)
 
 
     # =========================================================================

@@ -321,6 +321,29 @@ class LoopClosureData(Data):
             self.detected_inliers = self.detected_inliers[mask]
         self.num_loop_closures = len(self.timestamps_a)
 
+    def print_duplicate_info(self, label: str = "") -> None:
+        """
+        Print the number of duplicate loop closures in this instance. Two loop
+        closures are considered duplicates if they share the same name pair and
+        timestamp pair, treating swapped pairs as identical — i.e.
+        ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same LC.
+
+        Args:
+            label: Optional prefix printed before the stats (e.g. the dataset
+                or run name) to distinguish output when called multiple times.
+        """
+        def _canonical(name_pair: tuple[str, str], ts_a: Decimal, ts_b: Decimal):
+            na, nb = name_pair
+            return (na, nb, ts_a, ts_b) if (na, ts_a) <= (nb, ts_b) else (nb, na, ts_b, ts_a)
+
+        keys = [_canonical(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
+                for i in range(self.num_loop_closures)]
+        counts = Counter(keys)
+        num_dupes = sum(c - 1 for c in counts.values() if c > 1)
+        num_unique = self.num_loop_closures - num_dupes
+        prefix = f"{label}: " if label else ""
+        print(f"{prefix}{self.num_loop_closures} total loop closures, {num_dupes} duplicates ({num_unique} if deduplicated)")
+
     # =========================================================================
     # ============================ Error Methods ==============================
     # =========================================================================
@@ -523,11 +546,19 @@ class LoopClosureData(Data):
         show_plots: bool = True,
         max_translation_frac: float = 1.0,
         max_rotation_frac: float = 1.0,
+        include_rate_plots: bool = True,
     ):
         """
         Plot loop closure success as a function of error threshold.
-        Produces six plots: translation success rate, rotation success rate,
-        translation count, rotation count, combined success rate, and combined count.
+
+        When ``include_rate_plots`` is True (default), produces a figure with
+        six subplots (3 rows × 2 columns): translation success rate, rotation
+        success rate, translation count, rotation count, combined success rate,
+        and combined count.
+
+        When ``include_rate_plots`` is False, produces a figure with three
+        subplots (1 row × 3 columns) showing only the count plots: translation
+        count, rotation count, and combined count.
 
         Args:
             errors: List of error dicts, each containing ``"translation_errors"``
@@ -539,10 +570,11 @@ class LoopClosureData(Data):
                 use as the upper threshold bound.
             max_rotation_frac: Fraction of the maximum rotation error to
                 use as the upper threshold bound.
+            include_rate_plots: If False, omit the success-rate (%) subplots and
+                show only the loop closure count subplots.
 
         Returns:
-            Tuple of six matplotlib Figure objects (translation %, rotation %,
-            translation count, rotation count, combined %, combined count).
+            A single matplotlib Figure.
 
         Raises:
             ValueError: If list lengths do not match or fraction values are out of range.
@@ -557,22 +589,16 @@ class LoopClosureData(Data):
         if not (0 < max_rotation_frac <= 1.0):
             raise ValueError("max_rotation_frac must be in (0, 1]")
 
-        sns.set_theme(
-            style="whitegrid",
-            context="talk",
-            palette="tab10",
-        )
+        sns.set_theme(style="whitegrid", context="talk", palette="tab10")
 
-        # Original four plots
-        fig1, ax1 = plt.subplots(figsize=(10, 6))  # translation %
-        fig2, ax2 = plt.subplots(figsize=(10, 6))  # rotation %
-        fig3, ax3 = plt.subplots(figsize=(10, 6))  # translation count
-        fig4, ax4 = plt.subplots(figsize=(10, 6))  # rotation count
-
-        # Combined plots
-        fig5, ax5 = plt.subplots(figsize=(10, 6))  # combined %
-        fig6, ax6 = plt.subplots(figsize=(10, 6))  # combined count
-
+        if include_rate_plots:
+            fig, axes = plt.subplots(3, 2, figsize=(20, 18))
+            ax1, ax2 = axes[0]
+            ax3, ax4 = axes[1]
+            ax5, ax6 = axes[2]
+        else:
+            fig, (ax3, ax4, ax6) = plt.subplots(1, 3, figsize=(30, 9))
+            ax1 = ax2 = ax5 = None
         palette = sns.color_palette("tab10", len(errors))
 
         # Global maxima
@@ -593,60 +619,46 @@ class LoopClosureData(Data):
             trans_counts = np.array([np.sum(trans_err <= t) for t in trans_thresholds])
             rot_counts = np.array([np.sum(rot_err <= t) for t in rot_thresholds])
 
-            trans_success = trans_counts / n * 100
-            rot_success = rot_counts / n * 100
+            if include_rate_plots:
+                trans_success = trans_counts / n * 100
+                rot_success = rot_counts / n * 100
+                ax1.plot(trans_thresholds, trans_success, linewidth=2.5, color=color, label=label)
+                ax2.plot(rot_thresholds, rot_success, linewidth=2.5, color=color, label=label)
 
-            # Original percentage plots
-            ax1.plot(trans_thresholds, trans_success, linewidth=2.5, color=color, label=label)
-            ax2.plot(rot_thresholds, rot_success, linewidth=2.5, color=color, label=label)
-
-            # Original count plots
             ax3.plot(trans_thresholds, trans_counts, linewidth=2.5, color=color, label=label)
             ax4.plot(rot_thresholds, rot_counts, linewidth=2.5, color=color, label=label)
 
-            # ---- Combined threshold calculations ----
-            # 2D grid: every combination of translation and rotation thresholds
-            combined_success = np.zeros((num_thresholds, num_thresholds))  # counts
-            for i, t_thresh in enumerate(trans_thresholds):
-                for j, r_thresh in enumerate(rot_thresholds):
-                    combined_success[i, j] = np.sum((trans_err <= t_thresh) & (rot_err <= r_thresh))
+            # Combined plots: 1 m translation = 5 deg rotation
+            # Evaluate directly at (t, 5t) rather than re-indexing the grid.
+            diag_trans = trans_thresholds
+            diag_rot = 5.0 * diag_trans
+            diag_count = np.array([np.sum((trans_err <= t) & (rot_err <= r))
+                                   for t, r in zip(diag_trans, diag_rot)], dtype=float)
 
-            # Percentage
-            combined_percent = combined_success / n * 100
-
-            # For plotting, we will collapse the 2D grid to a line by showing diagonal
-            # i.e., translation and rotation thresholds increasing together
-            diag_idx = np.arange(min(num_thresholds, num_thresholds))
-            diag_trans = trans_thresholds[diag_idx]
-            diag_rot = rot_thresholds[diag_idx]
-            diag_percent = combined_percent[diag_idx, diag_idx]
-            diag_count = combined_success[diag_idx, diag_idx]
-
-            # Combined plots
-            ax5.plot(diag_trans, diag_percent, linewidth=2.5, color=color, label=label)
+            if include_rate_plots:
+                diag_percent = diag_count / n * 100
+                ax5.plot(diag_trans, diag_percent, linewidth=2.5, color=color, label=label)
             ax6.plot(diag_trans, diag_count, linewidth=2.5, color=color, label=label)
 
         # ---- Formatting ----
 
-        # Translation success %
-        ax1.set_title("Loop Closure Success Rate vs Translation Threshold")
-        ax1.set_xlabel("Translation Threshold (m)")
-        ax1.set_ylabel("Success Rate (%)")
-        ax1.set_ylim(0, 105)
-        ax1.set_xlim(0, max_trans)
-        ax1.legend(title="Run")
-        sns.despine(ax=ax1)
+        if include_rate_plots:
+            ax1.set_title("Loop Closure Success Rate vs Translation Threshold")
+            ax1.set_xlabel("Translation Threshold (m)")
+            ax1.set_ylabel("Success Rate (%)")
+            ax1.set_ylim(0, 105)
+            ax1.set_xlim(0, max_trans)
+            ax1.legend(title="Run")
+            sns.despine(ax=ax1)
 
-        # Rotation success %
-        ax2.set_title("Loop Closure Success Rate vs Rotation Threshold")
-        ax2.set_xlabel("Rotation Threshold (degrees)")
-        ax2.set_ylabel("Success Rate (%)")
-        ax2.set_ylim(0, 105)
-        ax2.set_xlim(0, max_rot)
-        ax2.legend(title="Run")
-        sns.despine(ax=ax2)
+            ax2.set_title("Loop Closure Success Rate vs Rotation Threshold")
+            ax2.set_xlabel("Rotation Threshold (degrees)")
+            ax2.set_ylabel("Success Rate (%)")
+            ax2.set_ylim(0, 105)
+            ax2.set_xlim(0, max_rot)
+            ax2.legend(title="Run")
+            sns.despine(ax=ax2)
 
-        # Translation count
         ax3.set_title("Loop Closures Under Translation Threshold")
         ax3.set_xlabel("Translation Threshold (m)")
         ax3.set_ylabel("Number of Loop Closures")
@@ -654,7 +666,6 @@ class LoopClosureData(Data):
         ax3.legend(title="Run")
         sns.despine(ax=ax3)
 
-        # Rotation count
         ax4.set_title("Loop Closures Under Rotation Threshold")
         ax4.set_xlabel("Rotation Threshold (degrees)")
         ax4.set_ylabel("Number of Loop Closures")
@@ -662,36 +673,34 @@ class LoopClosureData(Data):
         ax4.legend(title="Run")
         sns.despine(ax=ax4)
 
-        # Combined percentage
-        ax5.set_title("Loop Closure Success Rate vs Combined Thresholds")
-        ax5.set_xlabel("Translation Threshold (m)")
-        ax5.set_ylabel("Success Rate (%)")
-        ax5.set_ylim(0, 105)
-        ax5.set_xlim(0, max_trans)
-        ax5_top = ax5.twiny()
-        ax5_top.set_xlim(0, max_rot)
-        ax5_top.set_xlabel("Rotation Threshold (degrees)")
-        ax5.legend(title="Run")
-        sns.despine(ax=ax5, trim=True)
+        if include_rate_plots:
+            ax5.set_title("Loop Closure Success Rate vs Combined Thresholds (1 m = 5°)")
+            ax5.set_xlabel("Translation Threshold (m)")
+            ax5.set_ylabel("Success Rate (%)")
+            ax5.set_ylim(0, 105)
+            ax5.set_xlim(0, max_trans)
+            ax5_top = ax5.twiny()
+            ax5_top.set_xlim(0, 5.0 * max_trans)
+            ax5_top.set_xlabel("Rotation Threshold (degrees)")
+            ax5.legend(title="Run")
+            sns.despine(ax=ax5, trim=True)
 
-        # Combined count
-        ax6.set_title("Loop Closures Under Combined Thresholds")
+        ax6.set_title("Loop Closures Under Combined Thresholds (1 m = 5°)")
         ax6.set_xlabel("Translation Threshold (m)")
         ax6.set_ylabel("Number of Loop Closures")
         ax6.set_xlim(0, max_trans)
         ax6_top = ax6.twiny()
-        ax6_top.set_xlim(0, max_rot)
+        ax6_top.set_xlim(0, 5.0 * max_trans)
         ax6_top.set_xlabel("Rotation Threshold (degrees)")
         ax6.legend(title="Run")
         sns.despine(ax=ax6, trim=True)
 
-        for fig in (fig1, fig2, fig3, fig4, fig5, fig6):
-            fig.tight_layout()
+        fig.tight_layout()
 
         if show_plots:
             plt.show()
 
-        return fig1, fig2, fig3, fig4, fig5, fig6
+        return fig
     
     @staticmethod
     def visualize_error_scatter(
