@@ -194,7 +194,13 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
         np.testing.assert_array_equal(channels_expected, lidar_data.get_point_cloud_at_index(0)[1])
 
-    # NOTE: Only testing ROSBAGS right now
+    def test_get_ros_msg_type_rospy(self):
+        """get_ros_msg_type returns the PointCloud2 class for ROSPY."""
+        import sensor_msgs.msg
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        self.assertIs(lidar_data.get_ros_msg_type(ROSMsgLibType.ROSPY), sensor_msgs.msg.PointCloud2)
+
     def test_get_ros_msg_type(self):
         """ Ensure we get the correct ROS message type. """
 
