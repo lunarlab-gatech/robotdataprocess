@@ -1025,5 +1025,268 @@ class TestPathData(unittest.TestCase):
             self.assertAlmostEqual(float(first_row[7]), 1.0)   # qw
 
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestPathDataFromG2O(unittest.TestCase):
+
+    G2O_PATH = Path(__file__).parent / "files" / "test_PathData" / "test_g2o" / "result.g2o"
+    TIME_PATH = Path(__file__).parent / "files" / "test_PathData" / "test_g2o" / "odom_all.time.txt"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_minimal_g2o(self, lines):
+        """Write a list of strings to a temp g2o file, return its path."""
+        import tempfile
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.g2o', delete=False)
+        f.write('\n'.join(lines) + '\n')
+        f.flush()
+        return Path(f.name)
+
+    def _make_minimal_time(self, entries):
+        """Write (robot_id, kf_id, ts_ns) tuples to a temp time file."""
+        import tempfile
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+        for robot_id, kf_id, ts_ns in entries:
+            f.write(f"{robot_id} {kf_id} {ts_ns} xxx\n")
+        f.flush()
+        return Path(f.name)
+
+    def _key(self, char, idx):
+        return (ord(char) << 56) | idx
+
+    # ------------------------------------------------------------------
+    # Count / shape
+    # ------------------------------------------------------------------
+
+    def test_robot_a_count(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2297)
+
+    def test_robot_b_count(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2346)
+
+    def test_positions_shape(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.positions.shape, (2297, 3))
+
+    def test_orientations_shape(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.orientations.shape, (2297, 4))
+
+    # ------------------------------------------------------------------
+    # First-entry values (robot 'a', idx=0)
+    # ------------------------------------------------------------------
+
+    def test_first_position_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.positions[0].astype(float),
+            [-0.00309295, -7.58408e-05, -0.849994],
+            rtol=1e-5,
+        )
+
+    def test_first_orientation_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.orientations[0].astype(float),
+            [-4.46122e-05, 0.00181938, 8.1167e-08, 0.999998],
+            rtol=1e-5,
+        )
+
+    def test_first_position_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.positions[0].astype(float),
+            [-20.1833, 153.133, -0.89806],
+            rtol=1e-4,
+        )
+
+    def test_first_orientation_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.orientations[0].astype(float),
+            [0.0149417, -0.00782986, -0.70758, 0.706432],
+            rtol=1e-5,
+        )
+
+    # ------------------------------------------------------------------
+    # Timestamps
+    # ------------------------------------------------------------------
+
+    def test_first_timestamp_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[0], Decimal('0.05'))
+
+    def test_first_timestamp_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[0], Decimal('0.05'))
+
+    def test_mid_timestamp_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[500], Decimal('83.4'))
+        self.assertEqual(result.timestamps[1500], Decimal('250.05'))
+
+    def test_last_timestamp_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[500], Decimal('83.4'))
+        self.assertEqual(result.timestamps[2345], Decimal('390.9'))
+
+    def test_timestamps_are_sorted(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        ts = result.timestamps.astype(float)
+        self.assertTrue(np.all(ts[1:] >= ts[:-1]))
+
+    # ------------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------------
+
+    def test_frame_id_assigned(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'odom', CoordinateFrame.FLU)
+        self.assertEqual(result.frame_id, 'odom')
+
+    def test_coordinate_frame_assigned(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.NED)
+        self.assertEqual(result.frame, CoordinateFrame.NED)
+
+    def test_returns_pathdata_instance(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertIsInstance(result, PathData)
+
+    # ------------------------------------------------------------------
+    # Sorted by keyframe index (out-of-order g2o)
+    # ------------------------------------------------------------------
+
+    def test_sorted_by_keyframe_index(self):
+        # Write vertices in reverse index order; result should still be idx-ascending.
+        key0 = self._key('a', 0)
+        key1 = self._key('a', 1)
+        key2 = self._key('a', 2)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key2} 3.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (0, 1, 2_000_000_000),
+            (0, 2, 3_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        x_vals = result.positions[:, 0].astype(float)
+        np.testing.assert_array_equal(x_vals, [1.0, 2.0, 3.0])
+
+    # ------------------------------------------------------------------
+    # names_override
+    # ------------------------------------------------------------------
+
+    def test_names_override_maps_char_to_name(self):
+        key0 = self._key('a', 0)
+        key1 = self._key('b', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (1, 0, 2_000_000_000),
+        ])
+        override = {'a': 'aerial-07', 'b': 'ground-03'}
+        result = PathData.from_g2o(g2o, time, 'ground-03', 'world', CoordinateFrame.FLU, names_override=override)
+        self.assertEqual(len(result.timestamps), 1)
+        self.assertAlmostEqual(float(result.positions[0][0]), 2.0)
+
+    def test_names_override_none_uses_char_directly(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 5.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([(0, 0, 500_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU, names_override=None)
+        self.assertEqual(len(result.timestamps), 1)
+
+    def test_names_override_char_not_in_dict_kept_as_is(self):
+        # 'b' not in override dict — should still match robot='b'
+        key0 = self._key('a', 0)
+        key1 = self._key('b', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (1, 0, 2_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'b', 'world', CoordinateFrame.FLU, names_override={'a': 'aerial'})
+        self.assertEqual(len(result.timestamps), 1)
+        self.assertAlmostEqual(float(result.positions[0][0]), 2.0)
+
+    # ------------------------------------------------------------------
+    # Non-vertex lines ignored
+    # ------------------------------------------------------------------
+
+    def test_edge_lines_skipped(self):
+        key0 = self._key('a', 0)
+        key1 = self._key('a', 1)
+        # EDGE line uses same key format but must be ignored
+        edge_key = self._key('a', 99)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"EDGE_SE3:QUAT {edge_key} {edge_key} 0.0 0.0 0.0 0.0 0.0 0.0 1.0 1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (0, 1, 2_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2)
+
+    def test_comment_lines_skipped(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            "# This is a comment",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([(0, 0, 1_000_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 1)
+
+    def test_blank_lines_skipped(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            "",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            "",
+        ])
+        time = self._make_minimal_time([(0, 0, 1_000_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 1)
+
+    # ------------------------------------------------------------------
+    # Error: unknown robot
+    # ------------------------------------------------------------------
+
+    def test_raises_for_unknown_robot(self):
+        with self.assertRaises(ValueError):
+            PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'z', 'world', CoordinateFrame.FLU)
+
+    def test_raises_error_message_contains_robot_name(self):
+        with self.assertRaises(ValueError, msg="error message should mention the robot name"):
+            try:
+                PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'z', 'world', CoordinateFrame.FLU)
+            except ValueError as e:
+                self.assertIn('z', str(e))
+                raise
+
+    def test_raises_for_unknown_robot_with_names_override(self):
+        with self.assertRaises(ValueError):
+            PathData.from_g2o(
+                self.G2O_PATH, self.TIME_PATH, 'no-such-robot', 'world', CoordinateFrame.FLU,
+                names_override={'a': 'aerial', 'b': 'ground'},
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

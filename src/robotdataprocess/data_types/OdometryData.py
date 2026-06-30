@@ -263,6 +263,32 @@ class OdometryData(PathData):
                             header_included=False,
                             column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
     
+    @classmethod
+    def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
+                 robot: str, frame_id: str, child_frame_id: str, frame: CoordinateFrame,
+                 names_override: Union[dict, None] = None) -> OdometryData:
+        """
+        Creates an OdometryData instance from a g2o file containing VERTEX_SE3:QUAT entries.
+
+        Delegates to :meth:`PathData.from_g2o` for parsing; see that method for full
+        documentation of the g2o and timestamp file formats.
+
+        Args:
+            g2o_path: Path to the .g2o file.
+            time_path: Path to the timestamp file.
+            robot: Name of the robot whose poses to extract.
+            frame_id: The frame ID to assign to the returned OdometryData.
+            child_frame_id: The child frame ID to assign to the returned OdometryData.
+            frame: The coordinate frame convention of this data.
+            names_override: Optional dict remapping decoded character keys to robot names.
+
+        Returns:
+            OdometryData instance containing only the poses for the requested robot,
+            sorted by keyframe index.
+        """
+        path_data = super().from_g2o(g2o_path, time_path, robot, frame_id, frame, names_override)
+        return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
+
     # =========================================================================
     # =========================== Conversion to ROS ===========================
     # =========================================================================

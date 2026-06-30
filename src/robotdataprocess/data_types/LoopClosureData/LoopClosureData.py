@@ -717,6 +717,7 @@ class LoopClosureData(Data):
         title: str = None,
         color_by_values: List[np.ndarray] = None,
         color_by_label: str = None,
+        ax: plt.Axes = None,
     ):
         """
         Scatter plot of loop closure errors (log-log scale): each point is one
@@ -744,18 +745,31 @@ class LoopClosureData(Data):
                 entry in ``errors``). When provided, points are colored by their value
                 using a sequential colormap instead of by label.
             color_by_label: Label for the colorbar shown when ``color_by_values`` is set.
+            ax: Optional existing ``Axes`` to draw into. When provided the scatter is
+                rendered directly into that axes (which must belong to an already-created
+                figure); ``show_plots``, ``save_path``, ``tight_layout``, and
+                ``plt.close`` are all skipped — the caller is responsible for saving and
+                closing the figure. When ``None`` (default), a new 10×10 inch figure is
+                created and the usual show/save/close logic applies unchanged.
 
         Returns:
-            matplotlib Figure object.
+            Tuple of (matplotlib Figure, list of stats dicts). Each stats dict contains
+            ``"label"``, ``"success_rate"``, ``"num_successful_loop_closures"``, and
+            ``"num_loop_closures"`` for one entry in ``errors``. When ``ax`` is provided
+            the returned Figure is the caller-owned figure that ``ax`` belongs to.
 
         Raises:
             ValueError: If list lengths do not match, fraction values are out of range,
-                or both ``inlier_masks`` and ``group_indices`` are provided.
+                both ``inlier_masks`` and ``group_indices`` are provided, or ``ax`` is
+                provided alongside ``show_plots`` or ``save_path``.
             RuntimeError: If both ``show_plots`` and ``save_path`` are set.
         """
 
         if inlier_masks is not None and group_indices is not None:
             raise ValueError("inlier_masks and group_indices are mutually exclusive — pick one")
+
+        if ax is not None and (show_plots or save_path is not None):
+            raise ValueError("ax is mutually exclusive with show_plots and save_path — the caller owns the figure")
 
         if len(labels) != len(errors):
             raise ValueError("labels must have the same length as errors")
@@ -806,7 +820,11 @@ class LoopClosureData(Data):
 
         sns.set_theme(style="whitegrid", context="talk", palette="tab10")
         sns.set_context("poster", font_scale=1.0)
-        fig, ax = plt.subplots(figsize=(10, 10))
+        _owns_figure = ax is None
+        if _owns_figure:
+            fig, ax = plt.subplots(figsize=(10, 10))
+        else:
+            fig = ax.get_figure()
 
         if using_group_indices:
             group_palette = sns.color_palette("bright", len(seen_groups))
@@ -994,14 +1012,14 @@ class LoopClosureData(Data):
         else:
             ax.legend(title="Run", handles=legend_handles, frameon=True)
         sns.despine(ax=ax)
-        fig.tight_layout()
-
-        if show_plots and save_path is not None:
-            raise RuntimeError("Can't enable both show_plots and save_path!")
-        elif show_plots:
-            plt.show()
-        elif save_path is not None:
-            plt.savefig(save_path)
-        plt.close()
+        if _owns_figure:
+            fig.tight_layout()
+            if show_plots and save_path is not None:
+                raise RuntimeError("Can't enable both show_plots and save_path!")
+            elif show_plots:
+                plt.show()
+            elif save_path is not None:
+                plt.savefig(save_path)
+            plt.close()
 
         return fig, stats_list

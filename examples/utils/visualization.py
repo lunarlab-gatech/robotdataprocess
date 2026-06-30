@@ -31,7 +31,10 @@ def _col_rank_groups(rank_df: pd.DataFrame, col: str) -> List[set]:
 
 def _render_table(ax, df: pd.DataFrame, title: str,
                   rank_dfs: Optional[List[pd.DataFrame]] = None,
-                  cell_is_red: Callable[[str], bool] = _is_zero):
+                  cell_is_red: Callable[[str], bool] = _is_zero,
+                  tbl_bbox: Optional[List[float]] = None,
+                  font_size: Optional[int] = None,
+                  data_font_size: Optional[int] = None):
     """Render one styled table onto ax.
 
     rank_dfs: list of DataFrames with numeric values for per-column highlighting.
@@ -49,11 +52,15 @@ def _render_table(ax, df: pd.DataFrame, title: str,
     n_rows, n_cols = len(cell_text), len(col_labels)
 
     tbl = ax.table(cellText=cell_text, colLabels=col_labels,
-                   bbox=[0, 0, 1, 1], cellLoc='center')
+                   bbox=tbl_bbox if tbl_bbox is not None else [0, 0, 1, 1],
+                   cellLoc='center')
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(FONT_SIZE)
+    tbl.set_fontsize(font_size if font_size is not None else FONT_SIZE)
     tbl.auto_set_column_width(col=list(range(n_cols)))
-    tbl.scale(1.05, 0.8)
+    if data_font_size is not None:
+        for i in range(1, n_rows + 1):
+            for j in range(1, n_cols):
+                tbl[i, j].get_text().set_fontsize(data_font_size)
 
     # Halve the first (method name) column width
     for row_i in range(n_rows + 1):
@@ -148,47 +155,31 @@ def _render_table(ax, df: pd.DataFrame, title: str,
     return underline_cells, split_cells, col_divider_cells
 
 
-def save_styled_tables(
-    dfs: List[Tuple[str, pd.DataFrame, Optional[List[pd.DataFrame]]]],
-    save_path: str,
-    row_height: float = 2.4,
-    h_pad: float = 1.2,
-    cell_is_red: Callable[[str], bool] = _is_zero,
-) -> None:
-    """Render a list of styled tables and save them to a PDF.
+def _apply_post_render(fig, underline_cells: list, split_cells: list,
+                       col_divider_cells: list) -> None:
+    """Apply post-render decorations (split-cell text, column dividers, underlines).
+
+    Must be called after all tables have been rendered and the figure layout is
+    final (e.g. after ``tight_layout``). Performs two ``canvas.draw()`` passes:
+    the first to obtain renderer positions, the second to draw underlines on
+    split-cell parts.
 
     Args:
-        dfs: List of (title, display_df, rank_dfs) tuples. rank_dfs may be None
-            (no highlighting), a single-element list (whole-cell bold/underline),
-            or a two-element list (split 'X/Y' cell mode).
-        save_path: Output file path (PDF or PNG).
-        row_height: Figure height per table in inches.
-        h_pad: Vertical padding between subplots passed to tight_layout.
-        cell_is_red: callable(val_str) -> bool; matching cells are shown in red
-            and excluded from bold/underline. Defaults to _is_zero (red when == 0).
+        fig: The matplotlib figure containing all rendered tables.
+        underline_cells: List of ``(tbl, row_idx, col_idx)`` tuples for
+            whole-cell italic+underline entries (returned by ``_render_table``).
+        split_cells: List of ``(tbl, row_idx, col_idx, parts)`` tuples for
+            X/Y cells that need per-part styling (returned by ``_render_table``).
+        col_divider_cells: List of ``(tbl, bottom_row_idx, col_idx)`` tuples
+            marking where white vertical column dividers should be drawn
+            (returned by ``_render_table``).
     """
-    fig, axes = plt.subplots(len(dfs), 1, figsize=(12, row_height * len(dfs)))
-    if len(dfs) == 1:
-        axes = [axes]
-
-    all_underline_cells = []
-    all_split_cells = []
-    all_col_dividers = []
-    for ax, (title, df, rank_dfs) in zip(axes, dfs):
-        ul, sp, cd = _render_table(ax, df, title, rank_dfs, cell_is_red)
-        all_underline_cells += ul
-        all_split_cells += sp
-        all_col_dividers += cd
-
-    fig.tight_layout(h_pad=h_pad)
-
-    # First pass: place split text and draw underlines for whole-cell entries
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
 
     split_underline_texts = []
 
-    for tbl, ri, ci, parts in all_split_cells:
+    for tbl, ri, ci, parts in split_cells:
         cell = tbl[ri, ci]
         bb = cell.get_window_extent(renderer=renderer)
 
@@ -213,8 +204,7 @@ def save_styled_tables(
                 split_underline_texts.append(txt)
             x_cursor += widths[k]
 
-    # Draw thin white vertical column dividers
-    for tbl, ri, ci in all_col_dividers:
+    for tbl, ri, ci in col_divider_cells:
         cell = tbl[ri, ci]
         bb = cell.get_window_extent(renderer=renderer)
         fig_x, _ = fig.transFigure.inverted().transform((bb.x0, 0))
@@ -228,7 +218,7 @@ def save_styled_tables(
             linewidth=1.0, clip_on=False
         ))
 
-    for tbl, ri, ci in all_underline_cells:
+    for tbl, ri, ci in underline_cells:
         txt = tbl[ri, ci].get_text()
         bb = txt.get_window_extent(renderer=renderer)
         fig_bb = bb.transformed(fig.transFigure.inverted())
@@ -239,7 +229,6 @@ def save_styled_tables(
             linewidth=0.8, clip_on=False
         ))
 
-    # Second pass: draw underlines for split-text parts that need them
     if split_underline_texts:
         fig.canvas.draw()
         for txt in split_underline_texts:
@@ -252,6 +241,69 @@ def save_styled_tables(
                 linewidth=0.8, clip_on=False
             ))
 
+
+def render_tables_onto_axes(
+    fig,
+    table_specs: List[Tuple],
+    cell_is_red: Callable[[str], bool] = _is_zero,
+) -> None:
+    """Render styled tables into existing axes and apply post-render decorations.
+
+    The figure layout must be finalized (e.g. via ``tight_layout`` or fixed
+    ``GridSpec`` margins) before calling this, as post-render drawing uses
+    renderer-level bounding boxes.
+
+    Args:
+        fig: The matplotlib figure that owns all provided axes.
+        table_specs: List of ``(ax, title, df, rank_dfs)`` tuples.
+            Optional 5th element overrides ``cell_is_red`` for that table.
+            Optional 6th element is a ``[x0, y0, width, height]`` bbox (axes
+            coordinates) passed to ``ax.table``; controls how much of the axes
+            the table fills.  Default is ``[0, 0, 1, 1]`` (full axes).
+        cell_is_red: callable(val_str) -> bool; red cells skip bold/underline.
+            Defaults to ``_is_zero``.
+    """
+    all_ul, all_sp, all_cd = [], [], []
+    for spec in table_specs:
+        ax, title, df, rank_dfs = spec[:4]
+        tbl_cell_is_red  = spec[4] if len(spec) > 4 and spec[4] is not None else cell_is_red
+        tbl_bbox         = spec[5] if len(spec) > 5 else None
+        tbl_font_size    = spec[6] if len(spec) > 6 else None
+        tbl_data_font    = spec[7] if len(spec) > 7 else None
+        ul, sp, cd = _render_table(ax, df, title, rank_dfs, tbl_cell_is_red, tbl_bbox,
+                                   tbl_font_size, tbl_data_font)
+        all_ul += ul
+        all_sp += sp
+        all_cd += cd
+    _apply_post_render(fig, all_ul, all_sp, all_cd)
+
+
+def save_styled_tables(
+    dfs: List[Tuple[str, pd.DataFrame, Optional[List[pd.DataFrame]]]],
+    save_path: str,
+    row_height: float = 2.4,
+    h_pad: float = 1.2,
+    cell_is_red: Callable[[str], bool] = _is_zero,
+) -> None:
+    """Render a list of styled tables and save them to a PDF.
+
+    Args:
+        dfs: List of (title, display_df, rank_dfs) tuples. rank_dfs may be None
+            (no highlighting), a single-element list (whole-cell bold/underline),
+            or a two-element list (split 'X/Y' cell mode).
+        save_path: Output file path (PDF or PNG).
+        row_height: Figure height per table in inches.
+        h_pad: Vertical padding between subplots passed to tight_layout.
+        cell_is_red: callable(val_str) -> bool; matching cells are shown in red
+            and excluded from bold/underline. Defaults to _is_zero (red when == 0).
+    """
+    fig, axes = plt.subplots(len(dfs), 1, figsize=(12, row_height * len(dfs)))
+    if len(dfs) == 1:
+        axes = [axes]
+    fig.tight_layout(h_pad=h_pad)
+    render_tables_onto_axes(fig, [(ax, title, df, rank_dfs)
+                                  for ax, (title, df, rank_dfs) in zip(axes, dfs)],
+                            cell_is_red)
     fig.savefig(save_path, bbox_inches='tight')
     plt.close(fig)
     print(f"\nTables saved to {save_path}")

@@ -25,7 +25,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, Tuple, List, Optional
+from typing import Dict, Union, Tuple, List, Optional
 import tqdm
 
 @typechecked
@@ -545,6 +545,96 @@ class PathData(SequentialData):
         return cls.from_txt(file_path, frame_id, frame,
                             header_included=False,
                             column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
+
+    @classmethod
+    def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
+                 robot: str, frame_id: str, frame: CoordinateFrame,
+                 names_override: Union[dict, None] = None) -> PathData:
+        """
+        Creates a PathData instance from a g2o file containing VERTEX_SE3:QUAT entries.
+
+        Only VERTEX_SE3:QUAT entries are read; EDGE_SE3:QUAT entries are ignored.
+        GTSAM symbol keys are decoded as ``character = chr(key >> 56)`` and
+        ``index = key & ((1 << 56) - 1)``. If ``names_override`` is provided,
+        character keys are remapped before matching against ``robot``.
+
+        The g2o quaternion order is (qx, qy, qz, qw), which matches the xyzw
+        convention used by this class.
+
+        Args:
+            g2o_path: Path to the .g2o file.
+            time_path: Path to a timestamp file. Each line contains
+                ``robot_id keyframe_id timestamp_ns [ignored...]``, where
+                ``robot_id`` is ``ord(char) - ord('a')``.
+            robot: Name of the robot whose poses to extract. Matched against the
+                decoded character key (e.g. ``'a'``) or, if ``names_override`` is
+                provided, against the remapped name.
+            frame_id: The frame ID to assign to the returned PathData.
+            frame: The coordinate frame convention of this data.
+            names_override: Optional dict mapping decoded character keys to
+                desired robot names (e.g. ``{'a': 'aerial-07', 'b': 'ground-03'}``).
+                Characters not present in the dict are kept as-is.
+
+        Returns:
+            PathData instance containing only the poses for the requested robot,
+            sorted by keyframe index.
+        """
+
+        # Create lookup mapping robot id and keyframe id to timestamp
+        time_lookup: Dict[Tuple[int, int], Decimal] = {}
+        with open(str(time_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                parts = line.split()
+                robot_id = int(parts[0])
+                keyframe_id = int(parts[1])
+                timestamp_ns = Decimal(parts[2])
+                time_lookup[(robot_id, keyframe_id)] = timestamp_ns / Decimal("1000000000")
+
+
+        vertices = []
+        with open(str(g2o_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if not line.startswith("VERTEX_SE3:QUAT"):
+                    continue
+
+                parts = line.split()
+                key = int(parts[1])
+                char = chr(key >> 56)
+                idx = key & ((1 << 56) - 1)
+
+                name = names_override.get(char, char) if names_override is not None else char
+                if name != robot:
+                    continue
+
+                x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
+                qx, qy, qz, qw = float(parts[5]), float(parts[6]), float(parts[7]), float(parts[8])
+                vertices.append((idx, char, [x, y, z], [qx, qy, qz, qw]))
+
+        vertices.sort(key=lambda v: v[0])
+        if not vertices:
+            raise ValueError(f"No data found for robot '{robot}' in {g2o_path}.")
+
+        timestamps = []
+        positions = []
+        orientations = []
+        for idx, char, pos, ori in vertices:
+            robot_id = ord(char) - ord('a')
+            timestamps.append(time_lookup[(robot_id, idx)])
+            positions.append(pos)
+            orientations.append(ori)
+
+        return PathData(
+            frame_id=frame_id,
+            timestamps=np.array(timestamps, dtype=object),
+            positions=np.array(positions, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+            frame=frame,
+        )
 
     # =========================================================================
     # ============================ Visualization ==============================
