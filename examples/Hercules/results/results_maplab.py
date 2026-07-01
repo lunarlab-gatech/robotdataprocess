@@ -39,7 +39,7 @@ def main():
 
         # Apply coordinate transformations to individual estimated trajectories
         for est_data in est_data_lst:
-            est_data._ori_apply_rotation(R_NED_Q.inv())
+            est_data._ori_apply_rotation_left_side(R_NED_Q.inv())
             est_data._ori_change_of_basis(R_NED_Q)
             est_data.frame = CoordinateFrame.FLU
 

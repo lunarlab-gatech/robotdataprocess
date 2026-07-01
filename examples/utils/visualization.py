@@ -293,14 +293,17 @@ def save_styled_tables(
             or a two-element list (split 'X/Y' cell mode).
         save_path: Output file path (PDF or PNG).
         row_height: Figure height per table in inches.
-        h_pad: Vertical padding between subplots passed to tight_layout.
+        h_pad: Vertical padding between subplots passed to tight_layout. The outer
+            figure pad is fixed at 0.1 font-size units to minimise top/bottom margins.
         cell_is_red: callable(val_str) -> bool; matching cells are shown in red
             and excluded from bold/underline. Defaults to _is_zero (red when == 0).
     """
     fig, axes = plt.subplots(len(dfs), 1, figsize=(12, row_height * len(dfs)))
     if len(dfs) == 1:
         axes = [axes]
-    fig.tight_layout(h_pad=h_pad)
+    for ax in axes:
+        ax.axis('off')
+    fig.tight_layout(pad=0.0, h_pad=h_pad)
     render_tables_onto_axes(fig, [(ax, title, df, rank_dfs)
                                   for ax, (title, df, rank_dfs) in zip(axes, dfs)],
                             cell_is_red)

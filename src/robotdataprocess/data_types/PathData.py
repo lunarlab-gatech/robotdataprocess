@@ -207,7 +207,7 @@ class PathData(SequentialData):
             elif transform_type == TransformType.ROTATION:
                 R_frame_Q = R.from_matrix(R_frame)
                 self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
-                self._ori_apply_rotation(R_frame_Q)
+                self._ori_apply_rotation_left_side(R_frame_Q)
 
             self.frame = CoordinateFrame.FLU
             self._invalidate_cache()
@@ -267,10 +267,18 @@ class PathData(SequentialData):
 
         self._invalidate_cache()
 
-    def _ori_apply_rotation(self, R_i: R):
+    def _ori_apply_rotation_left_side(self, R_i: R):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
+
+        self._invalidate_cache()
+
+    def _ori_apply_rotation_right_side(self, R_i: R):
+        """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
+        for i in range(self.len()):
+            self.orientations[i] = (R.from_quat(self.orientations[i]) * R_i).as_quat()
         self.orientations = col_to_dec_arr(self.orientations)
 
         self._invalidate_cache()

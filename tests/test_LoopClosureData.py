@@ -1413,13 +1413,8 @@ class TestLoopClosureDataVisualization(unittest.TestCase):
 
     def test_visualize_success_rate(self):
         errors = self._make_errors()
-        fig1, fig2, fig3, fig4, fig5, fig6 = LoopClosureData.visualize_success_rate([errors], labels=["A"], show_plots=False)
-        self.assertIsNotNone(fig1)
-        self.assertIsNotNone(fig2)
-        self.assertIsNotNone(fig3)
-        self.assertIsNotNone(fig4)
-        self.assertIsNotNone(fig5)
-        self.assertIsNotNone(fig6)
+        fig = LoopClosureData.visualize_success_rate([errors], labels=["A"], show_plots=False)
+        self.assertIsNotNone(fig)
         import matplotlib.pyplot as plt
         plt.close('all')
 

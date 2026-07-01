@@ -39,7 +39,7 @@ def main():
     print(R_result.as_euler('xyz', degrees=True))
 
     # Rotate the axes to be pointed in the same directions as our GT
-    maplab._ori_apply_rotation(R_result)
+    maplab._ori_apply_rotation_left_side(R_result)
 
     # Visualizes the positions and orientations
     maplab.visualize_3D([vicon], ['Maplab', 'VICON'])

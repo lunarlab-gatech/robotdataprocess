@@ -22,7 +22,7 @@ def main():
                             [0, -1,  0],
                             [0,  0, -1]])
         R_NED_Q = R.from_matrix(R_NED)
-        est_data._ori_apply_rotation(R_NED_Q.inv())
+        est_data._ori_apply_rotation_left_side(R_NED_Q.inv())
         est_data._ori_change_of_basis(R_NED_Q)
 
         # Load the GT Data

@@ -8,7 +8,7 @@ def main():
     # Load the GT and estimated path data
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
     dataset_version = "V2.4.C"
-    file_name = 'odometry.csv'
+    file_name = dataset_version + '.txt'
 
     for robot_name in robot_names:
         print("\n=== Processing results for robot:", robot_name)
@@ -16,11 +16,12 @@ def main():
         dataset_folder = '/media/' + user + '/T73/Hercules_datasets/' + dataset_version
         
         # Load the data
-        est_data = OdometryData.from_csv(dataset_folder + '/results/LIO-SAM/' + robot_name + '/' + file_name, 
-                                        "world", "robot", CoordinateFrame.NED, True, None)
+        input_coordinate_frame = CoordinateFrame.NED if "Husky" in robot_name else CoordinateFrame.FLU
+        est_data = OdometryData.from_tum(dataset_folder + '/results/FAST-LIVO2/' + robot_name + '/' + file_name, 
+                                        "world", "robot", input_coordinate_frame)
         gt_data = OdometryData.from_csv(dataset_folder + "/extract/files_for_roman_baseline/" + robot_name + '/poseGT.csv', 
                                         "world", "robot", CoordinateFrame.FLU, True, None)
-        
+
         # Crop the GT data to match the estimated data time range
         if dataset_version == "V2.4.C":
             robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
@@ -40,31 +41,20 @@ def main():
         gt_data.crop_data(robot_crop_start_times[robot_names.index(robot_name)], 
                           robot_crop_end_times[robot_names.index(robot_name)])
             
-        # Get L->I transformation
-        if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC" or dataset_version == "V2.4.C" \
-            or dataset_version == "V2.4.F":
-            if "Husky" in robot_name:
-                H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
-                                            [0.0,  1.0,  0.0,  0.0],
-                                            [0.0,  0.0,  1.0, 0.85],
-                                            [0.0,  0.0,  0.0,  1.0]])
-            elif "Drone" in robot_name:
-                H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
-                                            [0.0,  1.0,  0.0,  0.0],
-                                            [0.0,  0.0,  1.0,  0.5],
-                                            [0.0,  0.0,  0.0,  1.0]])
-        else:
-            raise NotImplementedError(f"H_L_to_I not defined for dataset_version {dataset_version}")
-        
-        # LIO-SAM output is W->L. However, our GT is W->I. Thus, we need to convert it (W->I = W->L @ L->I)
-        est_data.apply_transformation_right_side(H_L_to_I_in_NED)
-
         # Convert frame to FLU
         est_data.to_coordinate_frame(CoordinateFrame.FLU)
+        if "Drone" in robot_name: 
+            # Drone are in FLU frame but the local coordinate frame is NED
+            # Thus, this sets local coordinate frame to FLU as well.
+            R_NED_TO_FLU = np.array([[1,  0,  0],
+                                     [0, -1,  0],
+                                     [0,  0, -1]])
+            est_data._ori_apply_rotation_right_side(R.from_matrix(R_NED_TO_FLU))
+        est_data.visualize_3D([], ["est"])
 
         # Calculate RMS ATE, among other metrics
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
-                                                                            visualize=True, axes_interval=25)
+                                                                            visualize=False, axes_interval=2000)
         print("\nMetrics for file: ", file_name)
         print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
         print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'], "\n")

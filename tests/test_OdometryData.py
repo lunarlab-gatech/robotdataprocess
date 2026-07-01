@@ -249,8 +249,8 @@ class TestOdometryData(unittest.TestCase):
         # Ensure the rotation functions properly
         odom_data_rotated = deepcopy(odom_data)
         rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
-        odom_data_rotated._ori_apply_rotation(rotation)
-        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
+        odom_data_rotated._ori_apply_rotation_left_side(rotation)
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10].astype(np.float128), np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
 
     def test_apply_transformation(self):
         # Load the Odometry data

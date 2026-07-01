@@ -574,8 +574,8 @@ def main():
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
     # Define the dataset and methods to evaluate
-    run_names = ["ROMAN", "ROMAN_NM", "MG_TS"]
-    dataset_name = "V2.4.C"
+    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM", "MG_TS"]
+    dataset_name = "V2.3.AC"
 
     # Calculate RMS ATE
     tasks = [(dataset_name, run_name, list(pair), True)
@@ -601,7 +601,8 @@ def main():
         "ROMAN_Deduplication": "ROMAN w/o duplicate LC",
         "ROMAN_NM":   "NM + ROMAN",
         "ROMAN_NM_POA_Triplet": "NM + ROMAN + Triplet POA",
-        "MG_TS": "NM + MG (Above but with Global MG)",
+        "MG_TS": "NM + MG",
+        "MG_TS_noGM": "NM + MG (no Global Map)",
         "MG_TS_Duplication": "NM + MG (Above but with Dup. LC)",
         "MG_TS_<Old_Version>": "NM + MG (Two Stage - Reworked 4)",
         "MG_TS_2-4":  "NM + MG (Two Stage - 2/4 req)",
