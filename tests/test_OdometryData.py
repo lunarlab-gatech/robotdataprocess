@@ -252,6 +252,90 @@ class TestOdometryData(unittest.TestCase):
         odom_data_rotated._ori_apply_rotation_left_side(rotation)
         np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10].astype(np.float128), np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
 
+    def test_ori_apply_rotation_right_side(self):
+        # Load the Odometry data
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+
+        # Ensure the rotation functions properly and matches R.from_quat(q) * R_i
+        odom_data_rotated = deepcopy(odom_data)
+        rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
+        odom_data_rotated._ori_apply_rotation_right_side(rotation)
+        expected = (R.from_quat(odom_data.orientations[10].astype(np.float128)) * rotation).as_quat()
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10].astype(np.float128), expected, 8)
+
+    def test_ori_apply_rotation_right_side_multiple_orientations(self):
+        # Use several distinct, non-trivial orientations to make sure each row is transformed independently
+        orientations = np.array([
+            [0.0, 0.0, 0.0, 1.0],
+            [0.7071068, 0.0, 0.0, 0.7071068],
+            [0.0, 0.7071068, 0.0, 0.7071068],
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1, 2, 3], np.zeros((4, 3)), orientations, CoordinateFrame.FLU)
+
+        rotation = R.from_euler('xyz', [15, -30, 60], degrees=True)
+        odom_data._ori_apply_rotation_right_side(rotation)
+
+        for i in range(len(orientations)):
+            expected = (R.from_quat(orientations[i]) * rotation).as_quat()
+            np.testing.assert_array_almost_equal(odom_data.orientations[i].astype(np.float128), expected, 6)
+
+    def test_ori_apply_rotation_right_side_identity_is_noop(self):
+        # Rotating by the identity should leave every orientation unchanged
+        orientations = np.array([
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+            [-0.5, 0.5, -0.5, 0.5],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1], np.zeros((2, 3)), orientations, CoordinateFrame.FLU)
+
+        odom_data._ori_apply_rotation_right_side(R.identity())
+
+        np.testing.assert_array_almost_equal(odom_data.orientations.astype(np.float128), orientations, 6)
+
+    def test_ori_apply_rotation_right_side_order_matters(self):
+        # Right-side and left-side application should differ for non-commuting rotations
+        orientation = np.array([[0.2705981, 0.2705981, 0.6532815, 0.6532815]])
+        rotation = R.from_euler('xyz', [10, 20, 30], degrees=True)
+
+        odom_right = OdometryData("temp", "child", [0], np.zeros((1, 3)), orientation.copy(), CoordinateFrame.FLU)
+        odom_right._ori_apply_rotation_right_side(rotation)
+
+        odom_left = OdometryData("temp", "child", [0], np.zeros((1, 3)), orientation.copy(), CoordinateFrame.FLU)
+        odom_left._ori_apply_rotation_left_side(rotation)
+
+        with self.assertRaises(AssertionError):
+            np.testing.assert_array_almost_equal(
+                odom_right.orientations[0].astype(np.float128), odom_left.orientations[0].astype(np.float128), 6)
+
+        expected_right = (R.from_quat(orientation[0]) * rotation).as_quat()
+        np.testing.assert_array_almost_equal(odom_right.orientations[0].astype(np.float128), expected_right, 8)
+
+    def test_ori_apply_rotation_right_side_preserves_unit_norm(self):
+        orientations = np.array([
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+            [0.0, 0.0, 0.0, 1.0],
+            [-0.5, 0.5, -0.5, 0.5],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1, 2], np.zeros((3, 3)), orientations, CoordinateFrame.FLU)
+
+        rotation = R.from_euler('xyz', [42, -17, 8], degrees=True)
+        odom_data._ori_apply_rotation_right_side(rotation)
+
+        norms = np.linalg.norm(odom_data.orientations.astype(np.float128), axis=1)
+        np.testing.assert_array_almost_equal(norms, np.ones(3), 8)
+
+    def test_ori_apply_rotation_right_side_leaves_positions_and_timestamps_unchanged(self):
+        timestamps = [Decimal("0.5"), Decimal("1.5")]
+        positions = np.array([[1.0, 2.0, 3.0], [-4.0, 5.0, -6.0]])
+        orientations = np.array([[0.0, 0.0, 0.0, 1.0], [0.7071068, 0.0, 0.0, 0.7071068]])
+        odom_data = OdometryData("temp", "child", timestamps, positions, orientations, CoordinateFrame.FLU)
+
+        odom_data._ori_apply_rotation_right_side(R.from_euler('xyz', [5, 10, 15], degrees=True))
+
+        np.testing.assert_array_equal(odom_data.positions.astype(float), positions)
+        np.testing.assert_array_equal([float(ts) for ts in odom_data.timestamps], [0.5, 1.5])
+
     def test_apply_transformation(self):
         # Load the Odometry data
         odom_data = OdometryData("temp", "child", [0], np.array([[1, 2, 3]]), np.array([[-0.7071068, 0, 0, 0.7071068]]), CoordinateFrame.FLU)
