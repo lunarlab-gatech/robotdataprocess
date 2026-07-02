@@ -50,7 +50,6 @@ def main():
                                      [0, -1,  0],
                                      [0,  0, -1]])
             est_data._ori_apply_rotation_right_side(R.from_matrix(R_NED_TO_FLU))
-        est_data.visualize_3D([], ["est"])
 
         # Calculate RMS ATE, among other metrics
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
