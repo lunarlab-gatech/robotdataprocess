@@ -718,6 +718,8 @@ class LoopClosureData(Data):
         color_by_values: List[np.ndarray] = None,
         color_by_label: str = None,
         ax: plt.Axes = None,
+        marker_size_x: float = 75,
+        marker_size_star: float = 300,
     ):
         """
         Scatter plot of loop closure errors (log-log scale): each point is one
@@ -751,6 +753,10 @@ class LoopClosureData(Data):
                 ``plt.close`` are all skipped — the caller is responsible for saving and
                 closing the figure. When ``None`` (default), a new 10×10 inch figure is
                 created and the usual show/save/close logic applies unchanged.
+            marker_size_x: Marker size (``s`` in ``scatter``) for the "all loop closures"
+                X markers. The legend marker scales proportionally.
+            marker_size_star: Marker size (``s`` in ``scatter``) for the inlier star
+                markers. The legend marker scales proportionally.
 
         Returns:
             Tuple of (matplotlib Figure, list of stats dicts). Each stats dict contains
@@ -906,14 +912,14 @@ class LoopClosureData(Data):
             # Outliers
             ax.scatter(
                 trans_err[outlier_mask], rot_err[outlier_mask],
-                alpha=0.8, s=200, color=scatter_color_out,
+                alpha=0.8, s=marker_size_x, color=scatter_color_out,
                 marker='x', edgecolors='none', clip_on=False, zorder=5,
             )
             # Inliers (different marker)
             if np.any(inlier_vis_mask):
                 ax.scatter(
                     trans_err[inlier_vis_mask], rot_err[inlier_vis_mask],
-                    alpha=0.8, s=800, color=scatter_color_in,
+                    alpha=0.8, s=marker_size_star, color=scatter_color_in,
                     marker='*', edgecolors='none', clip_on=False, zorder=5,
                 )
 

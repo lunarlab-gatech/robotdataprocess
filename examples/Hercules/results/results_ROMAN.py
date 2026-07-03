@@ -1,11 +1,13 @@
 import getpass
 import itertools
+import math
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from multiprocessing import Pool
 import numpy as np
 import sys
 from pathlib import Path
+import fitz
 import pandas as pd
 from robotdataprocess import LoopClosureData, OdometryData, PathData
 from typing import Dict, List, Tuple
@@ -267,7 +269,7 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
         ("Merged RMS ATE (m)", make_df(table_data, table_data_lc_inlier), [make_rank_df(table_data)]),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.05,
+    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
                        cell_is_red=lambda s: s == "---" or float(s) > 20)
 
 
@@ -549,6 +551,56 @@ def _generate_lc_side_by_side_figure(
     plt.close(fig)
 
 
+def _generate_traj_lc_comb_figure(
+    col: str,
+    run_names: List[str],
+    traj_lc_dir: Path,
+    save_dir: Path,
+) -> None:
+    """Combine the per-method traj_lc PDFs for one robot pair into a grid slide.
+
+    Loads the existing ``traj_lc_<col>_<method>.pdf`` for each entry in
+    ``run_names`` (no re-rendering) and places each page, as vector content,
+    into one cell of a PowerPoint-widescreen-sized (13.333x7.5 in) PDF page.
+    The grid shape is chosen to fit ``len(run_names)`` as close to square as
+    possible (e.g. 4 methods -> 2x2, 5-6 methods -> 2x3). Each source page is
+    scaled to fit its cell while preserving aspect ratio and centered within it.
+
+    Args:
+        col: Short pair label used in the filenames (e.g. ``"H1D1"``).
+        run_names: Ordered list of run identifiers; index order maps
+            left-to-right, top-to-bottom across the grid.
+        traj_lc_dir: Directory containing the source ``traj_lc_<col>_<method>.pdf``
+            files.
+        save_dir: Directory in which to save ``traj_lc_comb_<col>.pdf``.
+    """
+    slide_width, slide_height = 960.0, 540.0  # 13.333x7.5 in @ 72 pt/in
+    ncols = math.ceil(math.sqrt(len(run_names)))
+    nrows = math.ceil(len(run_names) / ncols)
+    cell_width, cell_height = slide_width / ncols, slide_height / nrows
+
+    slide_doc = fitz.open()
+    slide_page = slide_doc.new_page(width=slide_width, height=slide_height)
+
+    for i, run_name in enumerate(run_names):
+        src_doc = fitz.open(str(traj_lc_dir / f'traj_lc_{col}_{run_name}.pdf'))
+        src_rect = src_doc[0].rect
+
+        row, grid_col = divmod(i, ncols)
+        scale = min(cell_width / src_rect.width, cell_height / src_rect.height)
+        target_width, target_height = src_rect.width * scale, src_rect.height * scale
+        x0 = grid_col * cell_width + (cell_width - target_width) / 2
+        y0 = row * cell_height + (cell_height - target_height) / 2
+        target_rect = fitz.Rect(x0, y0, x0 + target_width, y0 + target_height)
+
+        slide_page.show_pdf_page(target_rect, src_doc, 0)
+        src_doc.close()
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    slide_doc.save(str(save_dir / f'traj_lc_comb_{col}.pdf'))
+    slide_doc.close()
+
+
 def main():
     """
     Generate all evaluation figures and tables for the HERCULES dataset.
@@ -567,6 +619,7 @@ def main():
       - ``lc_success_rate/``   — per-pair LC success rate plots
       - ``lc_with_context/``   — per-pair composite slide figures
       - ``lc_side_by_side/``   — per-pair all-LC vs inlier-LC side-by-side scatter slides
+      - ``traj_lc_comb/``      — per-pair 2x2 combination of the per-method traj_lc slides
     """
     
     # Get all robot pairs to evaluation
@@ -574,8 +627,8 @@ def main():
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
     # Define the dataset and methods to evaluate
-    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM", "MG_TS"]
-    dataset_name = "V2.3.AC"
+    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM", "MG_TS", "MG_TS_LVLM_VER_2"]
+    dataset_name = "V2.4.C"
 
     # Calculate RMS ATE
     tasks = [(dataset_name, run_name, list(pair), True)
@@ -617,10 +670,13 @@ def main():
     lc_sr_dir = base_dir / 'lc_success_rate'
     lc_with_context_dir = base_dir / 'lc_with_context'
     lc_side_by_side_dir = base_dir / 'lc_side_by_side'
+    traj_lc_dir = base_dir / 'traj_lc'
+    traj_lc_comb_dir = base_dir / 'traj_lc_comb'
     lc_dir.mkdir(parents=True, exist_ok=True)
     lc_sr_dir.mkdir(parents=True, exist_ok=True)
     lc_with_context_dir.mkdir(parents=True, exist_ok=True)
     lc_side_by_side_dir.mkdir(parents=True, exist_ok=True)
+    traj_lc_comb_dir.mkdir(parents=True, exist_ok=True)
 
     # Create tables to hold LC results
     table_data_lc: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
@@ -663,6 +719,7 @@ def main():
                                     stats, table_data, run_names, lc_with_context_dir)
         _generate_lc_side_by_side_figure(pair, col, errors_list, labels_list, group_indices,
                                          run_names, lc_side_by_side_dir)
+        _generate_traj_lc_comb_figure(col, run_names, traj_lc_dir, traj_lc_comb_dir)
 
     _save_ate_tables(run_names, cols, RUN_DISPLAY_NAMES, table_data, first_stage_table_data,
                      table_data_lc, table_data_lc_inlier, base_dir / 'ate_table.pdf')

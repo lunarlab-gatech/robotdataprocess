@@ -23,6 +23,8 @@ dependencies = ["coverage",
                 "numpy; python_version >= '3.12'",
 
                 "opencv-python",
+                "open3d",
+                "pymupdf",
                 "rosbags",
                 "scipy",
                 "snakeviz",
