@@ -6,6 +6,7 @@ from scipy.spatial.transform import Slerp
 from ..Data import Data
 from collections import Counter
 from decimal import Decimal
+import itertools
 import json
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
@@ -306,12 +307,7 @@ class LoopClosureData(Data):
         self.timestamps_a = np.array([ts.quantize(quantize_val) for ts in self.timestamps_a])
         self.timestamps_b = np.array([ts.quantize(quantize_val) for ts in self.timestamps_b])
 
-    def prune_intra_robot_loop_closures(self):
-        """
-        Removes loop closures where both names in the pair are the same,
-        i.e. intra-robot loop closures. Modifies the instance in place.
-        """
-        mask = np.array([name_a != name_b for name_a, name_b in self.names])
+    def _prune_by_mask(self, mask: np.ndarray) -> None:
         self.timestamps_a = self.timestamps_a[mask]
         self.timestamps_b = self.timestamps_b[mask]
         self.names = [name for name, keep in zip(self.names, mask) if keep]
@@ -321,28 +317,94 @@ class LoopClosureData(Data):
             self.detected_inliers = self.detected_inliers[mask]
         self.num_loop_closures = len(self.timestamps_a)
 
+    def prune_intra_robot_loop_closures(self):
+        """
+        Removes loop closures where both names in the pair are the same,
+        i.e. intra-robot loop closures. Modifies the instance in place.
+        """
+        mask = np.array([name_a != name_b for name_a, name_b in self.names])
+        self._prune_by_mask(mask)
+
+    def prune_inter_robot_loop_closures(self):
+        """
+        Removes loop closures where the two names in the pair differ,
+        i.e. inter-robot loop closures. Modifies the instance in place.
+        """
+        mask = np.array([name_a == name_b for name_a, name_b in self.names])
+        self._prune_by_mask(mask)
+
+    @staticmethod
+    def _canonical_lc_key(name_pair: tuple[str, str], ts_a: Decimal, ts_b: Decimal):
+        na, nb = name_pair
+        return (na, nb, ts_a, ts_b) if (na, ts_a) <= (nb, ts_b) else (nb, na, ts_b, ts_a)
+
+    def _lc_transform_in_canonical_order(self, i: int, key: tuple) -> Tuple[np.ndarray, R]:
+        t = dec_arr_to_float_arr(self.translations[i])
+        rot = R.from_quat(dec_arr_to_float_arr(self.orientations[i]))
+        if self.names[i][0] == key[0] and self.timestamps_a[i] == key[2]:
+            return t, rot
+        # This entry is the swapped half of the pair — invert so it's expressed
+        # in the same direction as the canonical (non-swapped) entries.
+        rot_inv = rot.inv()
+        return rot_inv.apply(-t), rot_inv
+
     def print_duplicate_info(self, label: str = "") -> None:
         """
         Print the number of duplicate loop closures in this instance. Two loop
         closures are considered duplicates if they share the same name pair and
         timestamp pair, treating swapped pairs as identical — i.e.
-        ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same LC.
+        ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same LC. Also
+        prints the average pairwise translation and rotation difference between
+        the transformations of duplicate loop closures (swapped duplicates are
+        inverted first so they're compared in the same direction).
 
         Args:
             label: Optional prefix printed before the stats (e.g. the dataset
                 or run name) to distinguish output when called multiple times.
         """
-        def _canonical(name_pair: tuple[str, str], ts_a: Decimal, ts_b: Decimal):
-            na, nb = name_pair
-            return (na, nb, ts_a, ts_b) if (na, ts_a) <= (nb, ts_b) else (nb, na, ts_b, ts_a)
-
-        keys = [_canonical(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
+        keys = [self._canonical_lc_key(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
                 for i in range(self.num_loop_closures)]
         counts = Counter(keys)
         num_dupes = sum(c - 1 for c in counts.values() if c > 1)
         num_unique = self.num_loop_closures - num_dupes
+
+        groups: dict = {}
+        for i, key in enumerate(keys):
+            groups.setdefault(key, []).append(i)
+
+        translation_diffs = []
+        rotation_diffs = []
+        for key, idxs in groups.items():
+            if len(idxs) < 2:
+                continue
+            transforms = [self._lc_transform_in_canonical_order(i, key) for i in idxs]
+            for (t1, rot1), (t2, rot2) in itertools.combinations(transforms, 2):
+                translation_diffs.append(np.linalg.norm(t1 - t2))
+                rotation_diffs.append(np.degrees((rot1.inv() * rot2).magnitude()))
+
         prefix = f"{label}: " if label else ""
-        print(f"{prefix}{self.num_loop_closures} total loop closures, {num_dupes} duplicates ({num_unique} if deduplicated)")
+        msg = f"{prefix}{self.num_loop_closures} total loop closures, {num_dupes} duplicates ({num_unique} if deduplicated)"
+        if translation_diffs:
+            msg += (f", avg duplicate transform diff: {np.mean(translation_diffs):.4f} m, "
+                    f"{np.mean(rotation_diffs):.4f} deg")
+        print(msg)
+
+    def prune_duplicates(self):
+        """
+        Removes duplicate loop closures, keeping only the first occurrence of
+        each. Two loop closures are considered duplicates if they share the
+        same name pair and timestamp pair, treating swapped pairs as identical
+        — i.e. ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same
+        LC. Modifies the instance in place.
+        """
+        seen = set()
+        mask = np.zeros(self.num_loop_closures, dtype=bool)
+        for i in range(self.num_loop_closures):
+            key = self._canonical_lc_key(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
+            if key not in seen:
+                seen.add(key)
+                mask[i] = True
+        self._prune_by_mask(mask)
 
     # =========================================================================
     # ============================ Error Methods ==============================

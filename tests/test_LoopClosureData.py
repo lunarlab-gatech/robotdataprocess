@@ -1164,6 +1164,77 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
         self.assertEqual(len(lc.translations), 0)
 
 
+class TestPruneInterRobotLoopClosures(unittest.TestCase):
+    """Test prune_inter_robot_loop_closures method."""
+
+    def _make_lc(self, names, detected_inliers=None):
+        n = len(names)
+        return LoopClosureData(
+            timestamps_a=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
+            timestamps_b=np.array([Decimal(str(i + 10)) for i in range(n)], dtype=object),
+            names=names,
+            translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
+            orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
+            detected_inliers=detected_inliers,
+        )
+
+    def test_removes_inter_robot(self):
+        """Inter-robot loop closures (different name pair) are removed."""
+        lc = self._make_lc([("A", "B"), ("A", "A"), ("B", "C"), ("B", "B")])
+        lc.prune_inter_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "A"), ("B", "B")])
+        # entries 1 and 3 survive: translations [1,0,0] and [3,0,0], orientations [2,0,0,0] and [4,0,0,0]
+        np.testing.assert_almost_equal(float(lc.translations[0][0]), 1.0)
+        np.testing.assert_almost_equal(float(lc.translations[1][0]), 3.0)
+        np.testing.assert_almost_equal(float(lc.orientations[0][0]), 2.0)
+        np.testing.assert_almost_equal(float(lc.orientations[1][0]), 4.0)
+
+    def test_updates_all_fields(self):
+        """timestamps, translations, and orientations are pruned consistently."""
+        lc = self._make_lc([("A", "A"), ("A", "B"), ("C", "C")])
+        lc.prune_inter_robot_loop_closures()
+
+        # Entries 0 and 2 survive
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.timestamps_a[0], Decimal("0"))
+        self.assertEqual(lc.timestamps_b[0], Decimal("10"))
+        self.assertEqual(lc.timestamps_a[1], Decimal("2"))
+        self.assertEqual(lc.timestamps_b[1], Decimal("12"))
+        np.testing.assert_almost_equal(float(lc.translations[0][0]), 0.0)
+        np.testing.assert_almost_equal(float(lc.translations[1][0]), 2.0)
+
+    def test_prunes_detected_inliers_when_set(self):
+        """detected_inliers array is pruned in sync with the other fields."""
+        lc = self._make_lc(
+            [("A", "B"), ("A", "A"), ("B", "C")],
+            detected_inliers=[True, True, False],
+        )
+        lc.prune_inter_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 1)
+        np.testing.assert_array_equal(lc.detected_inliers, [True])
+
+    def test_no_inter_robot_is_noop(self):
+        """When there are no inter-robot loop closures, nothing changes."""
+        lc = self._make_lc([("A", "A"), ("B", "B")])
+        lc.prune_inter_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "A"), ("B", "B")])
+
+    def test_all_inter_robot_gives_empty(self):
+        """When all loop closures are inter-robot, the result is empty."""
+        lc = self._make_lc([("A", "B"), ("B", "C")])
+        lc.prune_inter_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 0)
+        self.assertEqual(lc.names, [])
+        self.assertEqual(len(lc.timestamps_a), 0)
+        self.assertEqual(len(lc.translations), 0)
+
+
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataMerge(unittest.TestCase):
     """Test LoopClosureData.merge static method."""
@@ -1341,7 +1412,7 @@ class TestPrintDuplicateInfo(unittest.TestCase):
             timestamps_b=np.array([Decimal(str(t)) for t in timestamps_b], dtype=object),
             names=names,
             translations=np.zeros((n, 3), dtype=object),
-            orientations=np.zeros((n, 4), dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]] * n, dtype=object),
         )
 
     def test_no_duplicates(self):
@@ -1373,6 +1444,38 @@ class TestPrintDuplicateInfo(unittest.TestCase):
         self.assertIn("3 total loop closures", out)
         self.assertIn("1 duplicates", out)
         self.assertIn("2 if deduplicated", out)
+        self.assertIn("avg duplicate transform diff: 0.0000 m, 0.0000 deg", out)
+
+    def test_avg_duplicate_transform_diff_nonzero(self):
+        # Entries 0 and 1 are the same canonical LC but have different translations
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("0"), Decimal("0")], dtype=object),
+            timestamps_b=np.array([Decimal("10"), Decimal("10")], dtype=object),
+            names=[("A", "B"), ("A", "B")],
+            translations=np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+        )
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info()
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertIn("avg duplicate transform diff: 5.0000 m, 0.0000 deg", out)
+
+    def test_avg_duplicate_transform_diff_omitted_without_duplicates(self):
+        lc = self._make_lc([("A", "B"), ("A", "C")], [0, 1], [10, 11])
+        import io, sys
+        buf = io.StringIO()
+        sys.stdout = buf
+        try:
+            lc.print_duplicate_info()
+        finally:
+            sys.stdout = sys.__stdout__
+        out = buf.getvalue()
+        self.assertNotIn("avg duplicate transform diff", out)
 
     def test_swapped_pair_counted_as_duplicate(self):
         # (A, B, 0, 10) and (B, A, 10, 0) are canonical-equal
@@ -1388,6 +1491,8 @@ class TestPrintDuplicateInfo(unittest.TestCase):
         self.assertIn("2 total loop closures", out)
         self.assertIn("1 duplicates", out)
         self.assertIn("1 if deduplicated", out)
+        # Both entries represent the same identity transform once un-swapped, so diff is zero
+        self.assertIn("avg duplicate transform diff: 0.0000 m, 0.0000 deg", out)
 
     def test_no_label(self):
         lc = self._make_lc([("A", "B")], [0], [10])
@@ -1400,6 +1505,66 @@ class TestPrintDuplicateInfo(unittest.TestCase):
             sys.stdout = sys.__stdout__
         out = buf.getvalue()
         self.assertFalse(out.startswith(":"))
+
+
+class TestPruneDuplicates(unittest.TestCase):
+    """Test prune_duplicates method."""
+
+    def _make_lc(self, names, timestamps_a, timestamps_b, detected_inliers=None):
+        n = len(names)
+        return LoopClosureData(
+            timestamps_a=np.array([Decimal(str(t)) for t in timestamps_a], dtype=object),
+            timestamps_b=np.array([Decimal(str(t)) for t in timestamps_b], dtype=object),
+            names=names,
+            translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
+            orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
+            detected_inliers=detected_inliers,
+        )
+
+    def test_no_duplicates_is_noop(self):
+        lc = self._make_lc([("A", "B"), ("A", "C")], [0, 1], [10, 11])
+        lc.prune_duplicates()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "B"), ("A", "C")])
+
+    def test_removes_duplicates_keeps_first(self):
+        # Entry 0 and entry 1 are the same canonical LC; entry 1 should be dropped.
+        lc = self._make_lc([("A", "B"), ("A", "B"), ("A", "C")], [0, 0, 1], [10, 10, 11])
+        lc.prune_duplicates()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        self.assertEqual(lc.names, [("A", "B"), ("A", "C")])
+        # First occurrence (index 0) survives, not the duplicate (index 1)
+        np.testing.assert_almost_equal(float(lc.translations[0][0]), 0.0)
+        np.testing.assert_almost_equal(float(lc.orientations[0][0]), 1.0)
+
+    def test_swapped_pair_treated_as_duplicate(self):
+        # (A, B, 0, 10) and (B, A, 10, 0) are canonical-equal
+        lc = self._make_lc([("A", "B"), ("B", "A")], [0, 10], [10, 0])
+        lc.prune_duplicates()
+
+        self.assertEqual(lc.num_loop_closures, 1)
+        self.assertEqual(lc.names, [("A", "B")])
+
+    def test_prunes_detected_inliers_when_set(self):
+        lc = self._make_lc(
+            [("A", "B"), ("A", "B"), ("A", "C")], [0, 0, 1], [10, 10, 11],
+            detected_inliers=[True, False, True],
+        )
+        lc.prune_duplicates()
+
+        self.assertEqual(lc.num_loop_closures, 2)
+        np.testing.assert_array_equal(lc.detected_inliers, [True, True])
+
+    def test_matches_print_duplicate_info_unique_count(self):
+        lc = self._make_lc(
+            [("A", "B"), ("A", "B"), ("A", "C"), ("B", "A")], [0, 0, 1, 10], [10, 10, 11, 0]
+        )
+        lc.prune_duplicates()
+
+        # ("A", "B", 0, 10) appears 3 times (once swapped as ("B", "A", 10, 0)); ("A", "C", 1, 11) once
+        self.assertEqual(lc.num_loop_closures, 2)
 
 
 class TestLoopClosureDataVisualization(unittest.TestCase):

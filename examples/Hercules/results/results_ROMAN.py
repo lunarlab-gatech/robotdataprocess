@@ -1,3 +1,4 @@
+from enum import Enum
 import getpass
 import itertools
 import math
@@ -24,7 +25,21 @@ def _print_metrics(metrics_dictionary: Dict) -> None:
     print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
     print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
 
-def load_LC_data_ROMAN(dataset_name: str, run_name: str, robot_names: List, only_inter_lc: bool = False,
+class LCFilterMode(Enum):
+    """
+    Which subset of loop closures to load for a ROMAN run.
+
+    Attributes:
+        ALL: Load both inter-robot and intra-robot loop closures.
+        ONLY_INTER_LC: Load only inter-robot (cross-robot) loop closures.
+        ONLY_INTRA_LC: Load only intra-robot (single-robot) loop closures.
+    """
+
+    ALL = 0
+    ONLY_INTER_LC = 1
+    ONLY_INTRA_LC = 2
+
+def load_LC_data_ROMAN(dataset_name: str, run_name: str, robot_names: List, lc_filter: LCFilterMode = LCFilterMode.ALL,
                        names_override: Dict = None):
     """
     Load LC data for a ROMAN run.
@@ -41,7 +56,12 @@ def load_LC_data_ROMAN(dataset_name: str, run_name: str, robot_names: List, only
     run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + run_name + '/' + \
                       (robot_names[0] + '_' + robot_names[1]))
 
-    pair_fn = itertools.combinations if only_inter_lc else itertools.combinations_with_replacement
+    if lc_filter == LCFilterMode.ONLY_INTER_LC:
+        pair_fn = itertools.combinations
+    elif lc_filter == LCFilterMode.ONLY_INTRA_LC:
+        pair_fn = lambda names, num: [(name, name) for name in names]
+    else:
+        pair_fn = itertools.combinations_with_replacement
 
     effective_override = names_override if names_override is not None else \
         {chr(97 + i): name for i, name in enumerate(robot_names)}
@@ -52,8 +72,10 @@ def load_LC_data_ROMAN(dataset_name: str, run_name: str, robot_names: List, only
         run_folder / 'offline_rpgo' / 'dense' / 'odom_and_lc.g2o',
         run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt',
         names_override=effective_override)
-    if only_inter_lc:
+    if lc_filter == LCFilterMode.ONLY_INTER_LC:
         merged_lc.prune_intra_robot_loop_closures()
+    elif lc_filter == LCFilterMode.ONLY_INTRA_LC:
+        merged_lc.prune_inter_robot_loop_closures()
 
     # Load the per-pair inlier g2o files (these are pair-specific)
     lc_inlier_data_list = []
@@ -70,7 +92,50 @@ def load_LC_data_ROMAN(dataset_name: str, run_name: str, robot_names: List, only
         lc_inlier_data_list.append(lc_data_inlier)
 
     merged_lc_inlier = LoopClosureData.merge(lc_inlier_data_list)
+
+    # Get information on duplicates and then prune them
+    merged_lc.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} ALL")
+    merged_lc_inlier.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} Kimera-RPGO Inlier")
+
+    merged_lc.prune_duplicates()
+    merged_lc_inlier.prune_duplicates()
+
     return merged_lc, merged_lc_inlier
+
+def load_timing_data_ROMAN(dataset_name: str, method: str, robot_names: List) -> Dict[str, float]:
+    """
+    Load the runtime (s) breakdown for a ROMAN run on a robot pair.
+
+    Reads the per-pair alignment runtimes (``align/runtime.txt``, one
+    ``"key: value"`` line per intra-/inter-robot combination) and the offline
+    RPGO optimization runtime (``offline_rpgo/runtime.txt``, a single value on
+    its last non-empty line), kept separate so callers can report or combine
+    them as needed.
+
+    Returns:
+        Dict with keys ``"align"`` (sum of the alignment runtimes) and
+        ``"offline_rpgo"``, or ``None`` if either runtime file is missing or
+        empty.
+    """
+    user = getpass.getuser()
+    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + \
+                      (robot_names[0] + '_' + robot_names[1]))
+
+    align_runtime_path = run_folder / 'align' / 'runtime.txt'
+    rpgo_runtime_path = run_folder / 'offline_rpgo' / 'runtime.txt'
+    if not align_runtime_path.exists() or not rpgo_runtime_path.exists():
+        return None
+
+    align_lines = [line.strip() for line in align_runtime_path.read_text().splitlines() if line.strip()]
+    rpgo_lines = [line.strip() for line in rpgo_runtime_path.read_text().splitlines() if line.strip()]
+    if not align_lines or not rpgo_lines:
+        return None
+
+    align_total = sum(float(line.split(':')[-1]) for line in align_lines)
+    rpgo_total = float(rpgo_lines[-1])
+
+    return {"align": align_total, "offline_rpgo": rpgo_total}
+
 
 def calculate_merged_ate(dataset_name: str, method: str, robot_names: List, visualize: bool = False,
                          do_individual_calcs: bool = False) -> Tuple:
@@ -137,7 +202,7 @@ def calculate_merged_ate(dataset_name: str, method: str, robot_names: List, visu
     # Calculate RMS ATE, among other metrics
     print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
     metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
-    _print_metrics(metrics_dictionary)
+    #_print_metrics(metrics_dictionary)
 
     if visualize:
         # Seperate the aligned trajectories into their single-robot forms
@@ -173,21 +238,12 @@ def calculate_merged_ate(dataset_name: str, method: str, robot_names: List, visu
             "UAV2": "#1B0ED5",
         }
 
-        # Load LC data with display names so names match nameList
-        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate([robot0_name, robot1_name])}
-        _, lc_data_inlier = load_LC_data_ROMAN(dataset_name, method, [robot0_name, robot1_name],
-                                               only_inter_lc=True, names_override=names_override_display)
-        gt_dict_display = {name_map[robot0_name]: gt_data_robot0, name_map[robot1_name]: gt_data_robot1}
-        lc_errors_viz = lc_data_inlier.calculate_errors(gt_dict_display)
-
         pair_label = _pair_label(robot0_name, robot1_name)
         base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures') / dataset_name
         traj_dir = base_dir / 'traj'
-        traj_lc_dir = base_dir / 'traj_lc'
         traj_dir.mkdir(parents=True, exist_ok=True)
-        traj_lc_dir.mkdir(parents=True, exist_ok=True)
 
-        # Plot the results in 2D (Configuration for Figure 10)
+        # Plot the results in 2D (Configuration for Figure 10) — LC-independent, saved once
         dataList =  [est_data_align_robot0, gt_data_align_robot0,  est_data_align_robot1,  gt_data_align_robot1]
         isGTList =  [                False,                 True,                  False,                  True]
         nameList =  [name_map[robot0_name], name_map[robot0_name], name_map[robot1_name], name_map[robot1_name]]
@@ -196,15 +252,24 @@ def calculate_merged_ate(dataset_name: str, method: str, robot_names: List, visu
                            background_image_path=image_path, background_image_x_edge=x_edge,
                            save_path=str(traj_dir / f'traj_{pair_label}_{method}.pdf'))
 
-        # Plot estimated trajectories with LC overlay (no background, no GT)
+        # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode
+        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate([robot0_name, robot1_name])}
+        gt_dict_display = {name_map[robot0_name]: gt_data_robot0, name_map[robot1_name]: gt_data_robot1}
         est_dataList =  [est_data_align_robot0,       est_data_align_robot1]
         est_isGTList =  [               False,                        False]
         est_nameList =  [name_map[robot0_name], name_map[robot1_name]]
         est_colorList = [robot_name_to_color[name] for name in est_nameList]
-        PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
-                           loop_closure_data=lc_data_inlier, lc_errors=lc_errors_viz, lc_line_width=2.0, lc_errors_vmax=2.0,
-                           title=f"{method} LC overlaid on trajectory",
-                           save_path=str(traj_lc_dir / f'traj_lc_{pair_label}_{method}.pdf'))
+        for lc_filter in LCFilterMode:
+            _, lc_data_inlier = load_LC_data_ROMAN(dataset_name, method, [robot0_name, robot1_name],
+                                                   lc_filter=lc_filter, names_override=names_override_display)
+            lc_errors_viz = lc_data_inlier.calculate_errors(gt_dict_display)
+
+            traj_lc_dir = base_dir / lc_filter.name / 'traj_lc'
+            traj_lc_dir.mkdir(parents=True, exist_ok=True)
+            PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
+                               loop_closure_data=lc_data_inlier, lc_errors=lc_errors_viz, lc_line_width=2.0, lc_errors_vmax=2.0,
+                               title=f"{method} LC overlaid on trajectory",
+                               save_path=str(traj_lc_dir / f'traj_lc_{pair_label}_{method}.pdf'))
 
         # Configuration for Figure 2
         # PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=4.0, show_grid=False,
@@ -271,6 +336,58 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     save_path.parent.mkdir(parents=True, exist_ok=True)
     save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
                        cell_is_red=lambda s: s == "---" or float(s) > 20)
+
+
+def _save_timing_table(run_names: List[str], cols: List[str],
+                       run_display_names: Dict[str, str],
+                       timing_table_data: Dict[str, Dict[str, Dict]],
+                       save_path: Path) -> None:
+    """
+    Build and save the runtime summary PDF table.
+
+    Produces one table per run and robot pair for each of the alignment
+    runtime, the offline RPGO runtime, and their per-pair total.
+
+    Args:
+        run_names: Ordered list of run identifiers.
+        cols: Ordered list of robot-pair column labels.
+        run_display_names: Maps each run identifier to its display name in the table.
+        timing_table_data: Runtime breakdown dicts (as returned by
+            :func:`load_timing_data_ROMAN`) keyed by run then column
+            (``None`` for pairs with unavailable runtime files).
+        save_path: Destination PDF path.
+    """
+    def get_val(run: str, col: str, key: str):
+        entry = timing_table_data[run].get(col)
+        if key == "total":
+            return None if entry is None else entry["align"] + entry["offline_rpgo"]
+        return None if entry is None else entry[key]
+
+    def make_df(key: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {
+                col: ("---" if get_val(run, col, key) is None else f"{get_val(run, col, key):.1f}")
+                for col in cols}
+             for run in run_names}
+        ).T
+
+    def make_rank_df(key: str) -> pd.DataFrame:
+        # Negate so that lower runtime → higher rank value → sorted first
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {
+                col: -(get_val(run, col, key) if get_val(run, col, key) is not None else float('inf'))
+                for col in cols}
+             for run in run_names}
+        ).T
+
+    dfs = [
+        ("Alignment Runtime (s)", make_df("align"), [make_rank_df("align")]),
+        ("Offline RPGO Runtime (s)", make_df("offline_rpgo"), [make_rank_df("offline_rpgo")]),
+        ("Total Runtime (s)", make_df("total"), [make_rank_df("total")]),
+    ]
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
+                       cell_is_red=lambda s: s == "---")
 
 
 def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
@@ -607,27 +724,33 @@ def main():
 
     For each robot pair across all run names:
       - Computes merged RMS ATE (pre- and post-optimize) in parallel.
-      - Loads loop closure data, saves per-pair LC error scatter plots (lc/)
-        and success-rate plots (lc_success_rate/).
+      - For each ``LCFilterMode``, loads loop closure data under that filter,
+        saves per-pair LC error scatter plots (lc/) and success-rate plots
+        (lc_success_rate/).
       - Saves a context figure combining the LC scatter with per-run stats and
         ATE for each pair (lc_with_context/).
 
     Outputs saved under ``figures/<dataset_name>/``:
-      - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables
+      - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables (LC-independent)
+      - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
+      - ``traj/``              — per-pair estimated vs. GT trajectory plots (LC-independent)
+
+    Outputs saved under ``figures/<dataset_name>/<LCFilterMode.name>/``, once per LC filter mode:
       - ``lc_tables.pdf``      — LC success rate and count summary tables
       - ``lc/<pair>.pdf``      — per-pair LC error scatter plots
       - ``lc_success_rate/``   — per-pair LC success rate plots
       - ``lc_with_context/``   — per-pair composite slide figures
       - ``lc_side_by_side/``   — per-pair all-LC vs inlier-LC side-by-side scatter slides
+      - ``traj_lc/``           — per-pair estimated trajectory with LC overlay
       - ``traj_lc_comb/``      — per-pair 2x2 combination of the per-method traj_lc slides
     """
-    
+
     # Get all robot pairs to evaluation
     all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
     # Define the dataset and methods to evaluate
-    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM", "MG_TS", "MG_TS_LVLM_VER_2"]
+    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM_CV", "MG_TS_noGM_VG", "MG_TS_GM_CV", "MG_TS_GM_VG"]
     dataset_name = "V2.4.C"
 
     # Calculate RMS ATE
@@ -664,67 +787,89 @@ def main():
         "MG_SS_3_POA":"NM + MG (SS3) + POA"
     }
 
-    # Create all necessary directories
     base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures') / dataset_name
-    lc_dir = base_dir / 'lc'
-    lc_sr_dir = base_dir / 'lc_success_rate'
-    lc_with_context_dir = base_dir / 'lc_with_context'
-    lc_side_by_side_dir = base_dir / 'lc_side_by_side'
-    traj_lc_dir = base_dir / 'traj_lc'
-    traj_lc_comb_dir = base_dir / 'traj_lc_comb'
-    lc_dir.mkdir(parents=True, exist_ok=True)
-    lc_sr_dir.mkdir(parents=True, exist_ok=True)
-    lc_with_context_dir.mkdir(parents=True, exist_ok=True)
-    lc_side_by_side_dir.mkdir(parents=True, exist_ok=True)
-    traj_lc_comb_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create tables to hold LC results
-    table_data_lc: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
-    table_data_lc_inlier: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
+    # Load runtime data and save the timing table
+    timing_table_data: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
+    for run_name in run_names:
+        for pair in robot_pairs:
+            col = _pair_label(*pair)
+            timing_table_data[run_name][col] = load_timing_data_ROMAN(dataset_name, run_name, list(pair))
+    _save_timing_table(run_names, cols, RUN_DISPLAY_NAMES, timing_table_data, base_dir / 'timing_table.pdf')
 
-    # For each pair...
-    for pair in robot_pairs:
-        # Load GT Data
-        col = _pair_label(*pair)
-        gt_list = load_gt_data_ROMAN(dataset_name, list(pair))
-        gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
+    # Generate the LC-dependent outputs once per LC filter mode, each under its own subfolder
+    table_data_lc_by_mode: Dict[LCFilterMode, Dict[str, Dict[str, Dict]]] = {}
+    table_data_lc_inlier_by_mode: Dict[LCFilterMode, Dict[str, Dict[str, Dict]]] = {}
 
-        # Calculate LC errors and visualize
-        errors_list: List[Dict] = []
-        labels_list: List[str] = []
-        group_indices: List[int] = []
-        for i, run_name in enumerate(run_names):
-            merged_lc, merged_lc_inlier = load_LC_data_ROMAN(dataset_name, run_name, list(pair), only_inter_lc=True)
-            errors_list.extend([merged_lc.calculate_errors(gt_dict), merged_lc_inlier.calculate_errors(gt_dict)])
-            labels_list.extend([run_name, run_name + " [Inliers]"])
-            group_indices.extend([i, i])
+    for lc_filter in LCFilterMode:
+        mode_dir = base_dir / lc_filter.name
+        lc_dir = mode_dir / 'lc'
+        lc_sr_dir = mode_dir / 'lc_success_rate'
+        lc_with_context_dir = mode_dir / 'lc_with_context'
+        lc_side_by_side_dir = mode_dir / 'lc_side_by_side'
+        traj_lc_dir = mode_dir / 'traj_lc'
+        traj_lc_comb_dir = mode_dir / 'traj_lc_comb'
+        lc_dir.mkdir(parents=True, exist_ok=True)
+        lc_sr_dir.mkdir(parents=True, exist_ok=True)
+        lc_with_context_dir.mkdir(parents=True, exist_ok=True)
+        lc_side_by_side_dir.mkdir(parents=True, exist_ok=True)
+        traj_lc_comb_dir.mkdir(parents=True, exist_ok=True)
 
-        _, stats = LoopClosureData.visualize_error_scatter(
-            errors_list, labels_list, group_indices=group_indices,
-            max_rotation_frac=1.0, max_translation_frac=1.0,
-            trans_err_in_target=1.0, rot_err_in_target=5.0,
-            show_plots=False, save_path=str(lc_dir / f'lc_{col}.pdf'))
+        # Create tables to hold LC results
+        table_data_lc: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
+        table_data_lc_inlier: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
 
-        fig_sr = LoopClosureData.visualize_success_rate(
-            errors_list[::2], labels_list[::2], show_plots=False,
-            max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
-        fig_sr.savefig(str(lc_sr_dir / f'lc_{col}_success_rate.pdf'))
-        plt.close(fig_sr)
+        # For each pair...
+        for pair in robot_pairs:
+            # Load GT Data
+            col = _pair_label(*pair)
+            gt_list = load_gt_data_ROMAN(dataset_name, list(pair))
+            gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
 
-        for i, run_name in enumerate(run_names):
-            table_data_lc[run_name][col] = stats[2 * i]
-            table_data_lc_inlier[run_name][col] = stats[2 * i + 1]
+            # Calculate LC errors and visualize
+            errors_list: List[Dict] = []
+            labels_list: List[str] = []
+            group_indices: List[int] = []
+            for i, run_name in enumerate(run_names):
+                merged_lc, merged_lc_inlier = load_LC_data_ROMAN(dataset_name, run_name, list(pair), lc_filter=lc_filter)
+                errors_list.extend([merged_lc.calculate_errors(gt_dict), merged_lc_inlier.calculate_errors(gt_dict)])
+                labels_list.extend([run_name, run_name + " [Inliers]"])
+                group_indices.extend([i, i])
 
-        _generate_lc_context_figure(pair, col, errors_list, labels_list, group_indices,
-                                    stats, table_data, run_names, lc_with_context_dir)
-        _generate_lc_side_by_side_figure(pair, col, errors_list, labels_list, group_indices,
-                                         run_names, lc_side_by_side_dir)
-        _generate_traj_lc_comb_figure(col, run_names, traj_lc_dir, traj_lc_comb_dir)
+            _, stats = LoopClosureData.visualize_error_scatter(
+                errors_list, labels_list, group_indices=group_indices,
+                max_rotation_frac=1.0, max_translation_frac=1.0,
+                trans_err_in_target=1.0, rot_err_in_target=5.0,
+                show_plots=False, save_path=str(lc_dir / f'lc_{col}.pdf'))
 
+            fig_sr = LoopClosureData.visualize_success_rate(
+                errors_list[::2], labels_list[::2], show_plots=False,
+                max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
+            fig_sr.savefig(str(lc_sr_dir / f'lc_{col}_success_rate.pdf'))
+            plt.close(fig_sr)
+
+            for i, run_name in enumerate(run_names):
+                table_data_lc[run_name][col] = stats[2 * i]
+                table_data_lc_inlier[run_name][col] = stats[2 * i + 1]
+
+            _generate_lc_context_figure(pair, col, errors_list, labels_list, group_indices,
+                                        stats, table_data, run_names, lc_with_context_dir)
+            _generate_lc_side_by_side_figure(pair, col, errors_list, labels_list, group_indices,
+                                             run_names, lc_side_by_side_dir)
+            _generate_traj_lc_comb_figure(col, run_names, traj_lc_dir, traj_lc_comb_dir)
+
+        _save_lc_tables(run_names, RUN_DISPLAY_NAMES, table_data_lc, table_data_lc_inlier,
+                        mode_dir / 'lc_tables.pdf')
+
+        table_data_lc_by_mode[lc_filter] = table_data_lc
+        table_data_lc_inlier_by_mode[lc_filter] = table_data_lc_inlier
+
+    # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
+    # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
+    # connect the pair's pose graph — intra-robot closures don't merge the two robots' trajectories.
     _save_ate_tables(run_names, cols, RUN_DISPLAY_NAMES, table_data, first_stage_table_data,
-                     table_data_lc, table_data_lc_inlier, base_dir / 'ate_table.pdf')
-    _save_lc_tables(run_names, RUN_DISPLAY_NAMES, table_data_lc, table_data_lc_inlier,
-                    base_dir / 'lc_tables.pdf')
+                     table_data_lc_by_mode[LCFilterMode.ONLY_INTER_LC], table_data_lc_inlier_by_mode[LCFilterMode.ONLY_INTER_LC],
+                     base_dir / 'ate_table.pdf')
 
 
 if __name__ == "__main__":
