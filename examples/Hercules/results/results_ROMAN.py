@@ -4,6 +4,7 @@ import itertools
 import math
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from multiprocessing import Pool
 import numpy as np
 import sys
@@ -135,6 +136,65 @@ def load_timing_data_ROMAN(dataset_name: str, method: str, robot_names: List) ->
     rpgo_total = float(rpgo_lines[-1])
 
     return {"align": align_total, "offline_rpgo": rpgo_total}
+
+
+def load_mg_match_stats_ROMAN(dataset_name: str, method: str, robot_names: List) -> Dict:
+    """
+    Count MG two-stage matcher calls by stage for a robot pair.
+
+    Reads ``align/<robot_a>_<robot_b>/align.mg_match.txt`` for each of the (up
+    to three) intra-/inter-robot combinations under this pair's align folder,
+    and tallies how many calls reached stage 0, 1, or 2. Also collects, across
+    all stage-1/2 calls, the values of ``n_stage1_matches`` and, across all
+    stage-2 calls, ``n_stage2_child_clipper``,
+    ``n_stage2_unmatched_children_to_parents_clipper``,
+    ``n_stage2_unmatched_children_to_children_clipper``, and
+    ``stage2_point_error``. Fields absent from a given line (older log
+    formats don't include all fields) are skipped for that line rather than
+    raising. Files that don't exist (e.g. non-MG methods) are skipped.
+
+    Returns:
+        Dict with ``"stage_counts"`` (stage -> occurrence count) and one
+        list of values per collected field name above (``stage2_point_error``
+        as floats, possibly ``nan``; the rest as ints), or ``None`` if no
+        ``align.mg_match.txt`` files were found for this pair.
+    """
+    user = getpass.getuser()
+    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + \
+                      (robot_names[0] + '_' + robot_names[1]))
+
+    stage1_fields = ["n_stage1_matches"]
+    stage2_fields = [
+        "n_stage2_child_clipper",
+        "n_stage2_unmatched_children_to_parents_clipper",
+        "n_stage2_unmatched_children_to_children_clipper",
+    ]
+    field_types = {field: int for field in stage1_fields + stage2_fields}
+    field_types["stage2_point_error"] = float
+    stage2_fields = stage2_fields + ["stage2_point_error"]
+
+    stage_counts = {0: 0, 1: 0, 2: 0}
+    field_values = {field: [] for field in stage1_fields + stage2_fields}
+    found_any = False
+    for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
+        mg_match_path = run_folder / 'align' / f'{name_a}_{name_b}' / 'align.mg_match.txt'
+        if not mg_match_path.exists():
+            continue
+        found_any = True
+        for line in mg_match_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            tokens = line.split()
+            stage = int(tokens[1])
+            stage_counts[stage] += 1
+            fields = stage1_fields if stage == 1 else stage1_fields + stage2_fields if stage == 2 else []
+            for field in fields:
+                key = field + ':'
+                if key in tokens:
+                    field_values[field].append(field_types[field](tokens[tokens.index(key) + 1]))
+
+    return {"stage_counts": stage_counts, **field_values} if found_any else None
 
 
 def calculate_merged_ate(dataset_name: str, method: str, robot_names: List, visualize: bool = False,
@@ -316,7 +376,7 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
                 if val is None or lc_filter[run].get(col, {}).get('num_loop_closures', -1) == 0:
                     row[col] = "---"
                 else:
-                    row[col] = f"{val:.2f}"
+                    row[col] = f"{val:.3f}"
             rows[run_display_names.get(run, run)] = row
         return pd.DataFrame(rows).T
 
@@ -444,6 +504,154 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
     save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+
+
+def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names: Dict[str, str],
+                                         cols: List[str], table_data_mg_match: Dict[str, Dict[str, Dict]],
+                                         field: str, title: str, discrete: bool = True):
+    """Build a grid-of-histograms figure for one MG match stat field.
+
+    Lays out one small histogram per (method, robot pair) cell, rows=methods,
+    cols=robot pairs, so per-call value distributions can be inspected
+    directly instead of collapsing them to a mean/std. For discrete fields,
+    bins are width-1 and anchored on half-integers (``-0.5, 0.5, 1.5, ...``);
+    for continuous fields, 10 evenly spaced bins span the field's global
+    range. NaNs (e.g. unset ``stage2_point_error``) are dropped.
+    """
+    def clean(values):
+        return [v for v in values if not pd.isna(v)]
+
+    active_run_names = [run for run in run_names
+                        if any(table_data_mg_match[run].get(col) is not None for col in cols)]
+
+    fig, axes = plt.subplots(len(active_run_names), len(cols), squeeze=False,
+                             figsize=(3.0 * len(cols), 2.2 * len(active_run_names)))
+    cmap = plt.cm.viridis
+
+    all_values = [v for run in active_run_names for col in cols
+                  for v in clean((table_data_mg_match[run].get(col) or {}).get(field) or [])]
+    if not all_values:
+        bin_edges = None
+    elif discrete:
+        bin_edges = np.arange(min(all_values) - 0.5, max(all_values) + 1.5, 1)
+    else:
+        vmin, vmax = min(all_values), max(all_values)
+        bin_edges = np.linspace(vmin, vmax, 11) if vmin != vmax else np.array([vmin - 0.5, vmin + 0.5])
+    bin_width = (bin_edges[1] - bin_edges[0]) if bin_edges is not None else None
+
+    max_count = 0
+    if bin_edges is not None:
+        for run in active_run_names:
+            for col in cols:
+                stats = table_data_mg_match[run].get(col)
+                values = clean(stats[field]) if stats is not None else []
+                if values:
+                    max_count = max(max_count, np.histogram(values, bins=bin_edges)[0].max())
+
+    for i, run in enumerate(active_run_names):
+        for j, col in enumerate(cols):
+            ax = axes[i][j]
+            stats = table_data_mg_match[run].get(col)
+            values = clean(stats[field]) if stats is not None else []
+            if values:
+                counts, edges = np.histogram(values, bins=bin_edges)
+                bar_colors = cmap(np.linspace(0.15, 0.85, len(counts)))
+                ax.bar((edges[:-1] + edges[1:]) / 2, counts, width=bin_width,
+                      color=bar_colors, edgecolor='white', linewidth=0.3)
+                ax.set_xlim(bin_edges[0], bin_edges[-1])
+                ax.set_ylim(0, max_count * 1.05)
+                ax.tick_params(axis='both', labelsize=6)
+            else:
+                ax.text(0.5, 0.5, "---", ha='center', va='center', transform=ax.transAxes)
+                ax.set_xticks([])
+                ax.set_yticks([])
+            if i == 0:
+                ax.set_title(col, fontsize=9)
+            if j == 0:
+                ax.set_ylabel(run_display_names.get(run, run), fontsize=9, rotation=0, ha='right', va='center')
+
+    fig.suptitle(title, fontsize=14, fontweight='bold', color=HEADER_COLOR)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str], cols: List[str],
+                         table_data_mg_match: Dict[str, Dict[str, Dict]],
+                         save_path: Path) -> None:
+    """
+    Build and save the MG two-stage matcher stats summary PDF.
+
+    Page 1 holds two styled tables — raw ``stage1-stage2`` call counts, and
+    each stage's percentage of that pair's total calls (including stage 0).
+    Subsequent pages hold a grid of mini histograms (rows=methods,
+    cols=robot pairs) for each of ``n_stage1_matches``,
+    ``n_stage2_child_clipper``, ``n_stage2_unmatched_children_to_parents_clipper``,
+    ``n_stage2_unmatched_children_to_children_clipper``, and
+    ``stage2_point_error``, so the full per-call distribution is visible
+    instead of a collapsed mean/std. Runs with no ``align.mg_match.txt``
+    files are omitted from the histogram grids entirely; runs/pairs with no
+    data for the two summary tables are shown as ``"---"``.
+
+    Args:
+        run_names: Ordered list of run identifiers.
+        run_display_names: Maps each run identifier to its display name in the table.
+        cols: Ordered list of robot-pair column labels.
+        table_data_mg_match: Stats dicts (as returned by
+            :func:`load_mg_match_stats_ROMAN`) keyed by run then column
+            (``None`` for pairs with no MG match files).
+        save_path: Destination PDF path.
+    """
+    def make_counts_df() -> pd.DataFrame:
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {
+                col: ("---" if stats is None else f"{stats['stage_counts'][1]}-{stats['stage_counts'][2]}")
+                for col, stats in table_data_mg_match[run].items()}
+             for run in run_names}
+        ).T
+
+    def make_percent_df() -> pd.DataFrame:
+        def fmt(stats):
+            if stats is None:
+                return "---"
+            counts = stats['stage_counts']
+            total = counts[0] + counts[1] + counts[2]
+            if total == 0:
+                return "---"
+            return "-".join(f"{100 * counts[s] / total:.1f}%" for s in (1, 2))
+
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {col: fmt(stats) for col, stats in table_data_mg_match[run].items()}
+             for run in run_names}
+        ).T
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with PdfPages(str(save_path)) as pp:
+        fig, axes = plt.subplots(2, 1, figsize=(12, 2.4 * 2))
+        for ax in axes:
+            ax.axis('off')
+        fig.tight_layout(pad=0.0, h_pad=0.5)
+        render_tables_onto_axes(fig, [
+            (axes[0], "MG Match Stage Counts (1-2)", make_counts_df(), None),
+            (axes[1], "MG Match Stage Percentages (1-2)", make_percent_df(), None),
+        ], cell_is_red=lambda s: s == "---")
+        pp.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
+
+        histogram_fields = [
+            ("n_stage1_matches", "n_stage1_matches", True),
+            ("n_stage2_child_clipper", "Stage 2 Matched C-C (M)", True),
+            ("n_stage2_unmatched_children_to_parents_clipper", "Stage 2 Matched C-P (UM)", True),
+            ("n_stage2_unmatched_children_to_children_clipper", "Stage 2 Matched C-C (UM)", True),
+            ("stage2_point_error", "Stage 2 Point Error", False),
+        ]
+        for field, title, discrete in histogram_fields:
+            hist_fig = _make_mg_match_histogram_grid_figure(run_names, run_display_names, cols,
+                                                            table_data_mg_match, field, title, discrete)
+            pp.savefig(hist_fig, bbox_inches='tight')
+            plt.close(hist_fig)
+
+    print(f"\nTables saved to {save_path}")
 
 
 def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
@@ -733,6 +941,7 @@ def main():
     Outputs saved under ``figures/<dataset_name>/``:
       - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables (LC-independent)
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
+      - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
       - ``traj/``              — per-pair estimated vs. GT trajectory plots (LC-independent)
 
     Outputs saved under ``figures/<dataset_name>/<LCFilterMode.name>/``, once per LC filter mode:
@@ -750,7 +959,7 @@ def main():
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
     # Define the dataset and methods to evaluate
-    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM_CV", "MG_TS_noGM_VG", "MG_TS_GM_CV", "MG_TS_GM_VG"]
+    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM_CV", "MG_TS_C_2_P", "MG_TS_C_2_C", "MG_TS_C_2_P_AND_C"]
     dataset_name = "V2.4.C"
 
     # Calculate RMS ATE
@@ -796,6 +1005,14 @@ def main():
             col = _pair_label(*pair)
             timing_table_data[run_name][col] = load_timing_data_ROMAN(dataset_name, run_name, list(pair))
     _save_timing_table(run_names, cols, RUN_DISPLAY_NAMES, timing_table_data, base_dir / 'timing_table.pdf')
+
+    # Load MG two-stage matcher stage counts and save the summary table
+    table_data_mg_match: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
+    for run_name in run_names:
+        for pair in robot_pairs:
+            col = _pair_label(*pair)
+            table_data_mg_match[run_name][col] = load_mg_match_stats_ROMAN(dataset_name, run_name, list(pair))
+    _save_mg_match_table(run_names, RUN_DISPLAY_NAMES, cols, table_data_mg_match, base_dir / 'mg_match_table.pdf')
 
     # Generate the LC-dependent outputs once per LC filter mode, each under its own subfolder
     table_data_lc_by_mode: Dict[LCFilterMode, Dict[str, Dict[str, Dict]]] = {}
