@@ -138,6 +138,30 @@ def load_timing_data_ROMAN(dataset_name: str, method: str, robot_names: List) ->
     return {"align": align_total, "offline_rpgo": rpgo_total}
 
 
+def load_data_size_ROMAN(dataset_name: str, method: str, robot_names: List) -> float:
+    """
+    Load the estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
+    for a ROMAN run on a robot pair.
+
+    Reads ``align/<robot0>_<robot1>/align.data_size.txt``, a single
+    ``"Total submap data size (bytes): <value>"`` line.
+
+    Returns:
+        The data size in decimal MB (not MiB), or ``None`` if the file is missing.
+    """
+    user = getpass.getuser()
+    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + \
+                      (robot_names[0] + '_' + robot_names[1]))
+
+    data_size_path = run_folder / 'align' / (robot_names[0] + '_' + robot_names[1]) / 'align.data_size.txt'
+    if not data_size_path.exists():
+        return None
+
+    line = data_size_path.read_text().strip()
+    data_size_bytes = float(line.split(':')[-1])
+    return data_size_bytes / 1_000_000
+
+
 def load_mg_match_stats_ROMAN(dataset_name: str, method: str, robot_names: List) -> Dict:
     """
     Count MG two-stage matcher calls by stage for a robot pair.
@@ -445,6 +469,44 @@ def _save_timing_table(run_names: List[str], cols: List[str],
         ("Offline RPGO Runtime (s)", make_df("offline_rpgo"), [make_rank_df("offline_rpgo")]),
         ("Total Runtime (s)", make_df("total"), [make_rank_df("total")]),
     ]
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
+                       cell_is_red=lambda s: s == "---")
+
+
+def _save_data_size_table(run_names: List[str], cols: List[str],
+                          run_display_names: Dict[str, str],
+                          data_size_table_data: Dict[str, Dict[str, float]],
+                          save_path: Path) -> None:
+    """
+    Build and save the estimated communication data size summary PDF table.
+
+    Args:
+        run_names: Ordered list of run identifiers.
+        cols: Ordered list of robot-pair column labels.
+        run_display_names: Maps each run identifier to its display name in the table.
+        data_size_table_data: Data size (MB) keyed by run then column
+            (``None`` for pairs with unavailable data size files).
+        save_path: Destination PDF path.
+    """
+    def make_df() -> pd.DataFrame:
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {
+                col: ("---" if data_size_table_data[run].get(col) is None else f"{data_size_table_data[run][col]:.2f}")
+                for col in cols}
+             for run in run_names}
+        ).T
+
+    def make_rank_df() -> pd.DataFrame:
+        # Negate so that lower data size → higher rank value → sorted first
+        return pd.DataFrame(
+            {run_display_names.get(run, run): {
+                col: -(data_size_table_data[run][col] if data_size_table_data[run].get(col) is not None else float('inf'))
+                for col in cols}
+             for run in run_names}
+        ).T
+
+    dfs = [("Estimated Communication Data Size (MB)", make_df(), [make_rank_df()])]
     save_path.parent.mkdir(parents=True, exist_ok=True)
     save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
                        cell_is_red=lambda s: s == "---")
@@ -941,6 +1003,7 @@ def main():
     Outputs saved under ``figures/<dataset_name>/``:
       - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables (LC-independent)
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
+      - ``data_size_table.pdf`` — estimated communication data size (MB) summary table
       - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
       - ``traj/``              — per-pair estimated vs. GT trajectory plots (LC-independent)
 
@@ -959,8 +1022,8 @@ def main():
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
     # Define the dataset and methods to evaluate
-    run_names = ["ROMAN", "ROMAN_NM", "MG_TS_noGM_CV", "MG_TS_C_2_P", "MG_TS_C_2_C", "MG_TS_C_2_P_AND_C"]
-    dataset_name = "V2.4.C"
+    run_names = ["ROMAN", "ROMAN_NM", "MG"]
+    dataset_name = "V2.3.AC"
 
     # Calculate RMS ATE
     tasks = [(dataset_name, run_name, list(pair), True)
@@ -986,6 +1049,7 @@ def main():
         "ROMAN_Deduplication": "ROMAN w/o duplicate LC",
         "ROMAN_NM":   "NM + ROMAN",
         "ROMAN_NM_POA_Triplet": "NM + ROMAN + Triplet POA",
+        "MG": "MeronomyGraph",
         "MG_TS": "NM + MG",
         "MG_TS_noGM": "NM + MG (no Global Map)",
         "MG_TS_Duplication": "NM + MG (Above but with Dup. LC)",
@@ -1005,6 +1069,14 @@ def main():
             col = _pair_label(*pair)
             timing_table_data[run_name][col] = load_timing_data_ROMAN(dataset_name, run_name, list(pair))
     _save_timing_table(run_names, cols, RUN_DISPLAY_NAMES, timing_table_data, base_dir / 'timing_table.pdf')
+
+    # Load estimated communication data size and save the summary table
+    data_size_table_data: Dict[str, Dict[str, float]] = {run: {} for run in run_names}
+    for run_name in run_names:
+        for pair in robot_pairs:
+            col = _pair_label(*pair)
+            data_size_table_data[run_name][col] = load_data_size_ROMAN(dataset_name, run_name, list(pair))
+    _save_data_size_table(run_names, cols, RUN_DISPLAY_NAMES, data_size_table_data, base_dir / 'data_size_table.pdf')
 
     # Load MG two-stage matcher stage counts and save the summary table
     table_data_mg_match: Dict[str, Dict[str, Dict]] = {run: {} for run in run_names}
