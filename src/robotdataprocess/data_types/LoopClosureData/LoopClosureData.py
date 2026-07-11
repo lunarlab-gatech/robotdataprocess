@@ -905,14 +905,18 @@ class LoopClosureData(Data):
         all_rot = np.concatenate([np.asarray(e["rotation_errors"]) for e in errors])
 
         # Apply max fraction
-        all_trans = all_trans[all_trans <= np.max(all_trans) * max_translation_frac]
-        all_rot = all_rot[all_rot <= np.max(all_rot) * max_rotation_frac]
+        if all_trans.size > 0:
+            all_trans = all_trans[all_trans <= np.max(all_trans) * max_translation_frac]
+        if all_rot.size > 0:
+            all_rot = all_rot[all_rot <= np.max(all_rot) * max_rotation_frac]
 
-        # Determine axis limits with a small margin (e.g., 5%)
-        x_min = np.min(all_trans) * 0.95
-        x_max = np.max(all_trans) * 1.05
-        y_min = np.min(all_rot) * 0.95
-        y_max = np.max(all_rot) * 1.05
+        # Determine axis limits with a small margin (e.g., 5%). Entries with no loop
+        # closures at all (e.g. zero inliers) leave these arrays empty; fall back to a
+        # unit range so the (empty) plot still renders instead of crashing on np.min/max.
+        x_min = np.min(all_trans) * 0.95 if all_trans.size > 0 else 0.0
+        x_max = np.max(all_trans) * 1.05 if all_trans.size > 0 else 1.0
+        y_min = np.min(all_rot) * 0.95 if all_rot.size > 0 else 0.0
+        y_max = np.max(all_rot) * 1.05 if all_rot.size > 0 else 1.0
 
         # When coloring by values, build a shared normalizer across all entries
         if color_by_values is not None:
