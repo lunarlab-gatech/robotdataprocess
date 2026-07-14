@@ -283,9 +283,9 @@ class TestImageData(unittest.TestCase):
             np.testing.assert_array_equal(images[i], loaded_disk.images[i])
 
     def test_to_npy_unsupported_encoding(self):
-        """ Test that to_npy raises NotImplementedError for Mono8 encoding. """
-        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
-        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        """ Test that to_npy raises NotImplementedError for BGR8 encoding. """
+        imgs = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.BGR8, imgs)
         output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_npy_unsupported'
         output = output.absolute()
         with self.assertRaises(NotImplementedError):

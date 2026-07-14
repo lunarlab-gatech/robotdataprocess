@@ -192,7 +192,26 @@ class TestImageDataInMemory(unittest.TestCase):
         np.testing.assert_equal(image_data.height, npy_data.height)
         np.testing.assert_equal(image_data.width, npy_data.width)
         np.testing.assert_equal(image_data.encoding, npy_data.encoding)
-        
+
+        # === Test with Mono8 Images ===
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_image_files', 'mono8').absolute()
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'callie')
+
+        # Save to .npy file and reload
+        save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy_mono8').absolute()
+        save_path.mkdir(parents=True, exist_ok=True)
+        image_data.to_npy(save_path)
+        npy_data = ImageDataInMemory.from_npy(save_path)
+
+        # Ensure the data hasn't changed
+        np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
+        np.testing.assert_array_almost_equal(image_data.timestamps, npy_data.timestamps, 16)
+        np.testing.assert_equal(image_data.frame_id, npy_data.frame_id)
+        np.testing.assert_equal(image_data.height, npy_data.height)
+        np.testing.assert_equal(image_data.width, npy_data.width)
+        np.testing.assert_equal(image_data.encoding, npy_data.encoding)
+
     def test_crop_data(self):
         """ Ensure the correct data is cropped. """
 

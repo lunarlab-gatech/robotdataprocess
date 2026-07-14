@@ -280,8 +280,9 @@ class ImageData(SequentialData):
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Check that the encoding is supported
-        if self.encoding != ImageData.ImageEncoding.RGB8 and self.encoding != ImageData.ImageEncoding._32FC1:
-            raise NotImplementedError(f"Only RGB8 & 32FC1 images have been tested for export, not {self.encoding}")
+        if self.encoding != ImageData.ImageEncoding.RGB8 and self.encoding != ImageData.ImageEncoding._32FC1 \
+                and self.encoding != ImageData.ImageEncoding.Mono8:
+            raise NotImplementedError(f"Only RGB8, Mono8 & 32FC1 images have been tested for export, not {self.encoding}")
 
         # Get dtype and channels
         dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
