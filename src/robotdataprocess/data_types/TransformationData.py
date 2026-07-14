@@ -8,6 +8,7 @@ import json
 from ..ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, List, Tuple, Union
@@ -97,7 +98,7 @@ class TransformationData(SequentialData):
         )
 
     @classmethod
-    def from_GrAco_yaml(cls, yaml_path: str, transform_name: str) -> TransformationData:
+    def from_GrAco_yaml(cls, yaml_path: Union[Path, str], transform_name: str) -> TransformationData:
         """
         Load a transformation from a GrAco calibration YAML file.
 

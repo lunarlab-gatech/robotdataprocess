@@ -417,8 +417,8 @@ class TestTransformationData(unittest.TestCase):
         """ Test loading transformations from GrAco calibration YAML files. """
         base_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData', 'test_from_GrAco_yaml').absolute()
 
-        # --- imu-lidar.yaml: single transform T_Imu_Lidar ---
-        tf = TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_Imu_Lidar')
+        # --- imu-lidar.yaml: single transform T_Imu_Lidar (passed as a Path, not str) ---
+        tf = TransformationData.from_GrAco_yaml(base_path / 'imu-lidar.yaml', 'T_Imu_Lidar')
         self.assertEqual(tf.frame_id, "Imu")
         self.assertEqual(tf.child_frame_id, "Lidar")
         self.assertEqual(tf.frame, CoordinateFrame.ENU)
