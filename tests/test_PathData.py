@@ -256,6 +256,32 @@ class TestPathData(unittest.TestCase):
         with self.assertRaises(ValueError):
             PathData.from_evo(traj_bad_ori, "map", CoordinateFrame.FLU)
 
+    def test_from_evo_prune_duplicates_false(self):
+        from evo.core.trajectory import PoseTrajectory3D
+
+        timestamps = np.array([1.0, 2.0, 2.0, 3.0])
+        positions  = np.array([[0.1, 0.2, 0.3],
+                                [1.1, 2.2, 3.3],
+                                [1.2, 2.3, 3.4],   # mismatched duplicate of index 1
+                                [4.4, 5.5, 6.6]])
+        orientations_wxyz = np.array([[1.0,  0.0,  0.0,  0.0],
+                                      [0.5,  0.5,  0.5,  0.5],
+                                      [0.5,  0.5,  0.5,  0.4],   # mismatched duplicate of index 1
+                                      [0.0,  0.0,  0.0,  1.0]])
+
+        # With prune_duplicates=False, mismatched duplicate timestamps must NOT
+        # raise, and all rows must be kept as-is.
+        traj = PoseTrajectory3D(positions_xyz=positions, orientations_quat_wxyz=orientations_wxyz, timestamps=timestamps)
+        result = PathData.from_evo(traj, "map", CoordinateFrame.FLU, prune_duplicates=False)
+        self.assertEqual(result.len(), 4)
+        np.testing.assert_array_equal(result.timestamps, timestamps)
+
+        # from_evo() then to_evo() must reproduce the original PoseTrajectory3D exactly.
+        traj_round_trip = result.to_evo()
+        np.testing.assert_array_equal(traj_round_trip.timestamps, traj.timestamps)
+        np.testing.assert_array_equal(traj_round_trip.positions_xyz, traj.positions_xyz)
+        np.testing.assert_array_equal(traj_round_trip.orientations_quat_wxyz, traj.orientations_quat_wxyz)
+
     def test_concatenate_PathData(self):
 
         # Create two PathData objects

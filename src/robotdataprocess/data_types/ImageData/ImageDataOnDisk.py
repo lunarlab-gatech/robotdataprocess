@@ -373,6 +373,20 @@ class ImageDataOnDisk(ImageData):
         original image, the elevation angle is ``theta = -arctan((v - cy) / fy)``,
         so the row that maps to a given angle is ``v = cy - fy * tan(theta)``.
 
+        No LiDAR-to-camera extrinsic transform is used, so this assumes the
+        LiDAR and camera occupy the same position in 3D space (coincident
+        centers) with zero relative roll and pitch, i.e. the LiDAR's
+        horizontal plane (its 0° elevation reference) coincides with the
+        camera's optical plane (the plane spanned by the camera's x-axis and
+        forward/z-axis). In practice the two sensors are never truly
+        colocated, but this crop is a good approximation as long as the
+        physical offset between them is small relative to the distance to
+        the scene (e.g. a few cm apart, observing a scene meters away). Any
+        real mounting offset in roll, pitch, or position will make the crop
+        systematically off, more so at short range. This function also only
+        crops rows (vertical FOV); it does not perform any horizontal/azimuth
+        cropping.
+
         Args:
             lidar_v_fov: ``(min_deg, max_deg)`` tuple giving the LiDAR's
                 vertical angular range in degrees. Positive is above

@@ -9,6 +9,7 @@ from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+from evo.core.units import Unit
 import math
 from ..math_utils import interpolate_poses
 import matplotlib.colors as mcolors
@@ -363,7 +364,8 @@ class PathData(SequentialData):
         return cls(frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
-    def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame) -> PathData:
+    def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame,
+                 prune_duplicates: bool = True) -> PathData:
         """
         Creates a PathData object from an evo PoseTrajectory3D object.
 
@@ -371,6 +373,15 @@ class PathData(SequentialData):
             pose_trajectory_3d: An evo PoseTrajectory3D with positions, orientations, and timestamps.
             frame_id: The frame ID to assign.
             frame: The coordinate frame of this data.
+            prune_duplicates: If True (default), rows with a duplicate timestamp
+                (which can arise after sync.associate_trajectories) are removed,
+                after verifying the duplicate's position and orientation match the
+                preceding row (raises ValueError if they don't). If False, all rows
+                are kept as-is and no duplicate check is performed -- in this case,
+                calling from_evo() and then to_evo() reproduces the original
+                PoseTrajectory3D exactly, which matters when the row count must
+                stay in lockstep with another trajectory (e.g. in
+                calculate_traj_errors).
 
         Returns:
             PathData: Instance of this class.
@@ -378,20 +389,22 @@ class PathData(SequentialData):
 
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
-
-        # Remove duplicate timestamps (can arise after sync.associate_trajectories)
         timestamps = pose_trajectory_3d.timestamps
-        duplicate_mask = np.concatenate(([False], np.diff(timestamps) == 0))
-        if np.any(duplicate_mask):
-            dup_indices = np.where(duplicate_mask)[0]
-            for i in dup_indices:
-                if not (np.allclose(pose_trajectory_3d.positions_xyz[i], pose_trajectory_3d.positions_xyz[i - 1], atol=1e-9, rtol=0) and
-                        np.allclose(orientations_xyzw[i], orientations_xyzw[i - 1], atol=1e-9, rtol=0)):
-                    raise ValueError(f"Duplicate timestamp {timestamps[i]} at index {i} has mismatched position or orientation.")
-        unique_mask = ~duplicate_mask
-        timestamps = timestamps[unique_mask]
-        positions = pose_trajectory_3d.positions_xyz[unique_mask]
-        orientations_xyzw = orientations_xyzw[unique_mask]
+        positions = pose_trajectory_3d.positions_xyz
+
+        if prune_duplicates:
+            # Remove duplicate timestamps (can arise after sync.associate_trajectories)
+            duplicate_mask = np.concatenate(([False], np.diff(timestamps) == 0))
+            if np.any(duplicate_mask):
+                dup_indices = np.where(duplicate_mask)[0]
+                for i in dup_indices:
+                    if not (np.allclose(positions[i], positions[i - 1], atol=1e-9, rtol=0) and
+                            np.allclose(orientations_xyzw[i], orientations_xyzw[i - 1], atol=1e-9, rtol=0)):
+                        raise ValueError(f"Duplicate timestamp {timestamps[i]} at index {i} has mismatched position or orientation.")
+            unique_mask = ~duplicate_mask
+            timestamps = timestamps[unique_mask]
+            positions = positions[unique_mask]
+            orientations_xyzw = orientations_xyzw[unique_mask]
 
         return cls(frame_id=frame_id,
                    timestamps=timestamps,
@@ -1256,8 +1269,6 @@ class PathData(SequentialData):
             ValueError: If the list is empty or has only one element.
         """
 
-        print("Warning! This code has not been unit tested yet!")
-
         if len(path_data_objs) == 0:
             raise ValueError("path_data_objs list is empty!")
         if len(path_data_objs) == 1:
@@ -1325,29 +1336,89 @@ class PathData(SequentialData):
                 offset = Decimal(start_times[i]) - original_PathDatas[i].timestamps[0]
                 pd.timestamps = pd.timestamps - offset
         return merged_PathData_copies
-
+    
     @staticmethod
-    def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
-            axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000) -> Tuple[dict, PathData, PathData]:
+    def align(gt_path: PathData, est_path: PathData, max_diff: float) -> Tuple[PathData, PathData]:
         """
-        Utilizing the evo library, calculates a variety of trajectory error metrics
-        and returns them in a dictionary. Also returns aligned PathData objects.
+        Time-syncs gt_path and est_path (via evo's associate_trajectories) and
+        aligns the synced est trajectory onto the synced gt trajectory.
 
-        Parameters:
-            max_diff: maximum absolute time difference allowed between associated timestamps
-            visualize: If true, will show a 3D plot of the aligned trajectories.
-            axes_length: Same as in visualize() method.
-            axes_interval: Same as in visualize() method.
+        Args:
+            gt_path: Ground truth trajectory.
+            est_path: Estimated trajectory to align onto gt_path.
+            max_diff: Maximum absolute time difference allowed between
+                associated timestamps.
+
+        Returns:
+            Tuple[PathData, PathData]: ``(est_path_align, gt_path_synced)``.
+            ``est_path_align`` is the estimated trajectory, trimmed to the
+            timestamps matched against gt_path and rigidly aligned (rotation
+            + translation, no scale correction) onto ``gt_path_synced``.
+            ``gt_path_synced`` is the ground truth trajectory trimmed to
+            those same matched timestamps. These two outputs are a matched
+            pair and must be passed together to ``calculate_traj_errors``.
+            Duplicate timestamps (which can arise from ``associate_trajectories``)
+            are kept as-is in both outputs, rather than pruned, so that
+            ``est_path_align`` and ``gt_path_synced`` always have the same
+            number of rows.
         """
 
+        # Convert from PathData object to PoseTrajectory3D (evo)
         gt_traj: PoseTrajectory3D = gt_path.to_evo()
         est_traj: PoseTrajectory3D = est_path.to_evo()
 
+        # Match timestamps
         gt_traj, est_traj = sync.associate_trajectories(gt_traj, est_traj, max_diff)
 
-
+        # Generate a new est_traj that is aligned with the gt_traj
         est_traj_align: PoseTrajectory3D = copy.deepcopy(est_traj)
         est_traj_align.align(gt_traj, correct_scale=False, correct_only_scale=False) 
+
+        # Convert the aligned trajectory data back to PathData objects. Duplicate
+        # timestamps are kept as-is (prune_duplicates=False) so that est_path_align
+        # and gt_path_synced stay in lockstep -- pruning independently on each side
+        # can silently or loudly desync their row counts (see calculate_traj_errors).
+        est_path_align = PathData.from_evo(est_traj_align, est_path.frame_id, est_path.frame, prune_duplicates=False)
+        gt_path_synced = PathData.from_evo(gt_traj, gt_path.frame_id, gt_path.frame, prune_duplicates=False)
+        return est_path_align, gt_path_synced
+
+    @staticmethod
+    def calculate_traj_errors(gt_path_synced: PathData, est_path_align: PathData,
+                              rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> dict:
+        """
+        Calculates a variety of trajectory error metrics (APE and RPE, via
+        the evo library) between a ground truth and an aligned estimated
+        trajectory.
+
+        Requires: gt_path_synced and est_path_align must be the two outputs
+        of ``align()`` (in the order ``est_path_align, gt_path_synced =
+        align(...)``), not arbitrary PathData objects. They must already be
+        time-synced (same length, matched timestamps) and rigidly aligned to
+        each other -- this function does not perform any syncing or
+        alignment itself, it only computes error metrics between the poses
+        at corresponding indices.
+
+        Args:
+            gt_path_synced: Ground truth trajectory, synced to est_path_align
+                by ``align()``.
+            est_path_align: Estimated trajectory, aligned onto
+                gt_path_synced by ``align()``.
+            rpe_delta: Step size between the pose pairs used for RPE (Relative
+                Pose Error). Does not affect APE. Defaults to ``1.0``.
+            rpe_delta_unit: Unit of ``rpe_delta`` (e.g. ``Unit.frames`` for
+                consecutive poses, ``Unit.meters`` for a fixed travelled
+                distance, ``Unit.seconds`` for a fixed time interval).
+                Defaults to ``Unit.frames``.
+
+        Returns:
+            dict: Nested dictionary of error metrics, keyed by metric name
+            (``APE``, ``RPE``), then by ``PoseRelation`` name, then by
+            statistic name (e.g. ``rmse``, ``mean``, ``max``).
+        """
+
+        # Convert from PathData object to PoseTrajectory3D (evo)
+        gt_traj: PoseTrajectory3D = gt_path_synced.to_evo()
+        est_traj_align: PoseTrajectory3D = est_path_align.to_evo()
 
         path_pair: Tuple[PoseTrajectory3D, PoseTrajectory3D] = (gt_traj, est_traj_align)
 
@@ -1379,7 +1450,10 @@ class PathData(SequentialData):
                     continue
 
                 path_pair_copied = copy.deepcopy(path_pair)
-                metric_with_relation: metrics.PE = metric(pose_relation)
+                if metric is metrics.RPE:
+                    metric_with_relation: metrics.PE = metric(pose_relation, delta=rpe_delta, delta_unit=rpe_delta_unit)
+                else:
+                    metric_with_relation: metrics.PE = metric(pose_relation)
                 metric_with_relation.process_data(path_pair_copied)
 
                 for stat in all_statistic_types:
@@ -1389,14 +1463,32 @@ class PathData(SequentialData):
                 dict_metric[pose_relation.name] = dict_relation
             
             dict_all_results[metric.__name__] = dict_metric
-            
-        # Convert the aligned trajectory data back to PathData objects
-        est_traj_align_pathdata = PathData.from_evo(est_traj_align, est_path.frame_id, est_path.frame)
-        gt_traj_pathdata = PathData.from_evo(gt_traj, gt_path.frame_id, gt_path.frame)
+        return dict_all_results
 
-        # Visualize the aligned trajectories if desired
+    @staticmethod
+    def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False,
+            axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000,
+            rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> Tuple[dict, PathData, PathData]:
+        """
+        Utilizing the evo library, calculates a variety of trajectory error metrics
+        and returns them in a dictionary. Also returns aligned PathData objects.
+
+        Parameters:
+            max_diff: maximum absolute time difference allowed between associated timestamps
+            visualize: If true, will show a 3D plot of the aligned trajectories.
+            axes_length: Same as in visualize() method.
+            axes_interval: Same as in visualize() method.
+            rpe_delta: Step size between the pose pairs used for RPE. Does not
+                affect APE. Forwarded to ``calculate_traj_errors``. Defaults to ``1.0``.
+            rpe_delta_unit: Unit of ``rpe_delta`` (e.g. ``Unit.frames``,
+                ``Unit.meters``, ``Unit.seconds``). Forwarded to
+                ``calculate_traj_errors``. Defaults to ``Unit.frames``.
+        """
+
+        est_path_align, gt_path_synced = PathData.align(gt_path, est_path, max_diff)
+        dict_all_results = PathData.calculate_traj_errors(gt_path_synced, est_path_align,
+                                                           rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
         if visualize:
-            gt_traj_pathdata.visualize_3D([est_traj_align_pathdata], ['Ground Truth', 'Estimated (Aligned)'], 
+            gt_path_synced.visualize_3D([est_path_align], ['Ground Truth', 'Estimated (Aligned)'],
                               axes_interval=axes_interval, axes_length=axes_length)
-        
-        return dict_all_results, est_traj_align_pathdata, gt_traj_pathdata
+        return dict_all_results, est_path_align, gt_path_synced

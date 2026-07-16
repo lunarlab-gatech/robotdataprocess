@@ -913,9 +913,13 @@ class LoopClosureData(Data):
         # Determine axis limits with a small margin (e.g., 5%). Entries with no loop
         # closures at all (e.g. zero inliers) leave these arrays empty; fall back to a
         # unit range so the (empty) plot still renders instead of crashing on np.min/max.
-        x_min = np.min(all_trans) * 0.95 if all_trans.size > 0 else 0.0
+        # Axes are log-scaled, so mins must stay strictly positive -- clamp to a small
+        # epsilon rather than 0.0 (which would otherwise be silently ignored by
+        # set_xlim/set_ylim below, since the actual min error can also be exactly 0).
+        _log_axis_eps = 1e-6
+        x_min = max(np.min(all_trans) * 0.95, _log_axis_eps) if all_trans.size > 0 else _log_axis_eps
         x_max = np.max(all_trans) * 1.05 if all_trans.size > 0 else 1.0
-        y_min = np.min(all_rot) * 0.95 if all_rot.size > 0 else 0.0
+        y_min = max(np.min(all_rot) * 0.95, _log_axis_eps) if all_rot.size > 0 else _log_axis_eps
         y_max = np.max(all_rot) * 1.05 if all_rot.size > 0 else 1.0
 
         # When coloring by values, build a shared normalizer across all entries
@@ -979,7 +983,7 @@ class LoopClosureData(Data):
             ax.scatter(
                 trans_err[outlier_mask], rot_err[outlier_mask],
                 alpha=0.8, s=marker_size_x, color=scatter_color_out,
-                marker='x', edgecolors='none', clip_on=False, zorder=5,
+                marker='x', clip_on=False, zorder=5,
             )
             # Inliers (different marker)
             if np.any(inlier_vis_mask):
@@ -990,12 +994,12 @@ class LoopClosureData(Data):
                 )
 
             tag = "[inliers] " if is_inlier_entry[idx] else ""
-            print(f"{tag}{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target)")
-            if not using_group_indices:
-                print(f"Number of inliers for {label}: {num_inliers}")
+            #print(f"{tag}{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target)")
+            #if not using_group_indices:
+                #print(f"Number of inliers for {label}: {num_inliers}")
             if color_by_values is not None and np.any(in_box_mask):
                 cbv_in_box = np.asarray(color_by_values[idx], dtype=float)[in_box_mask]
-                print(f"Min {color_by_label or 'color_by'} in target box for {label}: {np.nanmin(cbv_in_box)}")
+                #print(f"Min {color_by_label or 'color_by'} in target box for {label}: {np.nanmin(cbv_in_box)}")
             if color_by_values is None and not is_inlier_entry[idx]:
                 legend_handles.append(Patch(facecolor=color, edgecolor='none', label=label))
 

@@ -31,7 +31,7 @@ def main():
     """
 
     all_robots = ["ground-01", "ground-06"]
-    run_names = ["ROMAN_NM", "MG"]
+    run_names = ["ROMAN", "ROMAN_O", "ROMAN_NM", "MG"]
     dataset_name = "V1.0"
 
     # Environment image / robot display config

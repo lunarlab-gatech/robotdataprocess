@@ -1,4 +1,5 @@
 from enum import Enum
+from evo.core.units import Unit
 import getpass
 import itertools
 import math
@@ -145,8 +146,8 @@ def load_LC_data_ROMAN(dataset_prefix: str, dataset_name: str, run_name: str, ro
     merged_lc_inlier = LoopClosureData.merge(lc_inlier_data_list)
 
     # Get information on duplicates and then prune them
-    merged_lc.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} ALL")
-    merged_lc_inlier.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} Kimera-RPGO Inlier")
+    #merged_lc.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} ALL")
+    #merged_lc_inlier.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} Kimera-RPGO Inlier")
 
     merged_lc.prune_duplicates()
     merged_lc_inlier.prune_duplicates()
@@ -274,7 +275,8 @@ def load_mg_match_stats_ROMAN(dataset_prefix: str, dataset_name: str, method: st
 def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, robot_names: List,
                          load_gt_data_fn,
                          figures_base_dir: Path = None, visualize: bool = False, do_individual_calcs: bool = False,
-                         viz_config: Dict = None) -> Tuple:
+                         viz_config: Dict = None,
+                         rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> Tuple:
     """
     Compute the merged RMS ATE for a robot pair after ROMAN offline RPGO.
 
@@ -301,12 +303,31 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         viz_config: Dict with keys ``"image_path"``, ``"x_edge"``, ``"robot_name_to_color"``
             (keyed by display name), and optionally ``"name_map"`` (robot name -> display name;
             defaults to identity). Required when ``visualize`` is True.
+        rpe_delta: Step size between the pose pairs used for all RPE calculations in
+            this function (first-stage, merged, and individual). Does not affect ATE.
+            Defaults to ``5.0``.
+        rpe_delta_unit: Unit of ``rpe_delta``. Defaults to ``Unit.meters``, matching
+            the fixed-distance RPE convention used by GrAco.
 
     Returns:
-        Tuple of ``(first_stage_ate, merged_ate)`` where ``first_stage_ate`` is the
-        pre-optimize RMS ATE in metres (``None`` if the pre-optimize file is
-        unavailable) and ``merged_ate`` is the final post-optimize RMS ATE in metres.
+        Tuple of ``(first_stage_ate, merged_ate, individual_ate, individual_rpe)``
+        where ``first_stage_ate`` is the pre-optimize RMS ATE in metres (``None``
+        if the pre-optimize file is unavailable), ``merged_ate`` is the final
+        post-optimize RMS ATE in metres computed on the merged (both-robot)
+        trajectory, ``individual_ate`` is a list of per-robot post-optimize RMS ATE
+        values (``['APE']['translation_part']['rmse']``), and ``individual_rpe`` is
+        a list of per-robot post-optimize RMS RPE values
+        (``['RPE']['translation_part']['rmse']``) -- both in the same order as
+        ``robot_names``, computed by separating the merged aligned trajectories
+        back into per-robot trajectories (via :meth:`PathData.seperate_PathData`)
+        and calling :meth:`PathData.calculate_traj_errors` on each robot's
+        already-aligned pair.
+
+    Raises:
+        ValueError: If ``robot_names`` does not have exactly two entries.
     """
+    if len(robot_names) != 2:
+        raise ValueError(f"robot_names must have exactly two entries, got {len(robot_names)}: {robot_names}")
     robot0_name = robot_names[0]
     robot1_name = robot_names[1]
 
@@ -319,14 +340,15 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
     if do_individual_calcs:
         # TODO: Need to make start and end times match before individual RMS ATE as well;
         # if we ever use those results in a paper.
+        #print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, method, "============")
+        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False,
+                                                                                rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+        #print_metrics(metrics_dictionary)
 
-        print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, method, "============")
-        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False)
-        print_metrics(metrics_dictionary)
-
-        print("\n=========== Individual Trajectory", robot1_name, "for dataset: ", dataset_name, method, "============")
-        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot1, est_data_robot1, max_diff=0.1, visualize=False)
-        print_metrics(metrics_dictionary)
+        #print("\n=========== Individual Trajectory", robot1_name, "for dataset: ", dataset_name, method, "============")
+        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot1, est_data_robot1, max_diff=0.1, visualize=False,
+                                                                                rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+        #print_metrics(metrics_dictionary)
 
     # Calculate first-stage (pre-optimize) ATE
     first_stage_ate = None
@@ -335,9 +357,10 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         first_stage_est_lst, first_stage_gt_lst = PathData.make_start_and_end_times_match(first_stage_est_lst, gt_data_lst)
         first_stage_est: PathData = PathData.concatenate_PathData(first_stage_est_lst)
         first_stage_gt: PathData = PathData.concatenate_PathData(first_stage_gt_lst)
-        print("\n========== First Stage for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
-        first_stage_metrics, _, _ = OdometryData.align_and_calculate_traj_errors(first_stage_gt, first_stage_est, max_diff=0.1, visualize=False)
-        print_metrics(first_stage_metrics)
+        #print("\n========== First Stage for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
+        first_stage_metrics, _, _ = OdometryData.align_and_calculate_traj_errors(first_stage_gt, first_stage_est, max_diff=0.1, visualize=False,
+                                                                                 rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+        #print_metrics(first_stage_metrics)
         first_stage_ate = first_stage_metrics['APE']['translation_part']['rmse']
     except Exception as e:
         print(f"Warning: Could not compute first-stage ATE for {dataset_name} {method}: {e}")
@@ -348,19 +371,28 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
     gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
 
     # Calculate RMS ATE, among other metrics
-    print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
+    #print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False,
+                                                                                                     rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+
+    # Seperate the aligned trajectories into their single-robot forms, and compute
+    # each robot's individual post-optimize RMS ATE from its already-aligned pair.
+    gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
+    gt_data_align_robot0 = gt_data_align_list[0]
+    gt_data_align_robot1 = gt_data_align_list[1]
+
+    est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
+    est_data_align_robot0 = est_data_align_list[0]
+    est_data_align_robot1 = est_data_align_list[1]
+
+    individual_metrics = [
+        PathData.calculate_traj_errors(gt_align, est_align, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+        for gt_align, est_align in zip(gt_data_align_list, est_data_align_list)
+    ]
+    individual_ate = [m['APE']['translation_part']['rmse'] for m in individual_metrics]
+    individual_rpe = [m['RPE']['translation_part']['rmse'] for m in individual_metrics]
 
     if visualize:
-        # Seperate the aligned trajectories into their single-robot forms
-        gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
-        gt_data_align_robot0 = gt_data_align_list[0]
-        gt_data_align_robot1 = gt_data_align_list[1]
-
-        est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
-        est_data_align_robot0 = est_data_align_list[0]
-        est_data_align_robot1 = est_data_align_list[1]
-
         image_path = viz_config["image_path"]
         x_edge = viz_config["x_edge"]
         name_map: Dict = viz_config.get("name_map") or {rn: rn for rn in robot_names}
@@ -401,7 +433,7 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
                                title=f"{method} LC overlaid on trajectory",
                                save_path=str(traj_lc_dir / f'traj_lc_{pair_lbl}_{method}.pdf'))
 
-    return first_stage_ate, metrics_dictionary['APE']['translation_part']['rmse']
+    return first_stage_ate, metrics_dictionary['APE']['translation_part']['rmse'], individual_ate, individual_rpe
 
 
 def _save_ate_tables(run_names: List[str], cols: List[str],
@@ -457,6 +489,64 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     dfs = [
         ("Merged RMS ATE (m) — Pre-Optimize", make_df(first_stage_table_data, table_data_lc), [make_rank_df(first_stage_table_data)]),
         ("Merged RMS ATE (m)", make_df(table_data, table_data_lc_inlier), [make_rank_df(table_data)]),
+    ]
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
+                       cell_is_red=lambda s: s == "---" or float(s) > 20)
+
+
+def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str]],
+                          run_display_names: Dict[str, str],
+                          split_ate_table_data: Dict[str, Dict[str, List[float]]],
+                          split_rpe_table_data: Dict[str, Dict[str, List[float]]],
+                          save_path: Path) -> None:
+    """
+    Build and save the per-robot RMS ATE/RPE split summary PDF tables.
+
+    For each robot pair, produces two adjacent columns (one per robot) holding
+    that robot's individual post-optimize RMS ATE/RPE, computed by separating
+    the merged aligned trajectory back into per-robot trajectories (see
+    :func:`calculate_merged_ate`).
+
+    Args:
+        run_names: Ordered list of run identifiers.
+        robot_pairs: Ordered list of two-robot-name tuples, matching the pair
+            order used to build ``split_ate_table_data``/``split_rpe_table_data``.
+        run_display_names: Maps each run identifier to its display name in the table.
+        split_ate_table_data: Per-robot RMS ATE (m), keyed by run then robot-pair
+            column label (e.g. ``"H1D1"``), each value a two-element list
+            ``[robot0_ate, robot1_ate]`` (``None`` if unavailable).
+        split_rpe_table_data: Per-robot RMS RPE (m), same shape as
+            ``split_ate_table_data``.
+        save_path: Destination PDF path.
+    """
+    sub_cols = [f"{pair_label(a, b)}\n{name}" for a, b in robot_pairs for name in (a, b)]
+
+    def make_df(data: Dict[str, Dict[str, List[float]]]) -> pd.DataFrame:
+        rows = {}
+        for run in run_names:
+            row = {}
+            for a, b in robot_pairs:
+                vals = data[run].get(pair_label(a, b))
+                for i, name in enumerate((a, b)):
+                    row[f"{pair_label(a, b)}\n{name}"] = "---" if vals is None else f"{vals[i]:.6f}"
+            rows[run_display_names.get(run, run)] = row
+        return pd.DataFrame(rows).T[sub_cols]
+
+    def make_rank_df(data: Dict[str, Dict[str, List[float]]]) -> pd.DataFrame:
+        rows = {}
+        for run in run_names:
+            row = {}
+            for a, b in robot_pairs:
+                vals = data[run].get(pair_label(a, b))
+                for i, name in enumerate((a, b)):
+                    row[f"{pair_label(a, b)}\n{name}"] = -(vals[i] if vals is not None else float('inf'))
+            rows[run_display_names.get(run, run)] = row
+        return pd.DataFrame(rows).T[sub_cols]
+
+    dfs = [
+        ("Individual RMS ATE (m)", make_df(split_ate_table_data), [make_rank_df(split_ate_table_data)]),
+        ("Individual RMS RPE (m) - Δ5m", make_df(split_rpe_table_data), [make_rank_df(split_rpe_table_data)]),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
     save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
@@ -753,9 +843,6 @@ def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str]
                                                             table_data_mg_match, field, title, discrete)
             pp.savefig(hist_fig, bbox_inches='tight')
             plt.close(hist_fig)
-
-    print(f"\nTables saved to {save_path}")
-
 
 def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
                                  errors_list: List[Dict], labels_list: List[str],
@@ -1054,11 +1141,13 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
         viz_config: Dict forwarded to :func:`calculate_merged_ate` (see its docstring).
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/``:
-      - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables (LC-independent)
+      - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables
+      - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, two columns per
+        robot pair
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
       - ``data_size_table.pdf`` — estimated communication data size (MB) summary table
       - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
-      - ``traj/``              — per-pair estimated vs. GT trajectory plots (LC-independent)
+      - ``traj/``              — per-pair estimated vs. GT trajectory plots
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/<LCFilterMode.name>/``, once per LC filter mode:
       - ``lc_tables.pdf``      — LC success rate and count summary tables
@@ -1101,10 +1190,14 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     # Get RMS ATE and save in tables for  visualization
     table_data: Dict[str, Dict[str, float]] = {run: {} for run in run_names}
     first_stage_table_data: Dict[str, Dict] = {run: {} for run in run_names}
-    for (_, _, run_name, pair, *_), (first_stage_ate, ate) in zip(tasks, results):
+    split_ate_table_data: Dict[str, Dict[str, List[float]]] = {run: {} for run in run_names}
+    split_rpe_table_data: Dict[str, Dict[str, List[float]]] = {run: {} for run in run_names}
+    for (_, _, run_name, pair, *_), (first_stage_ate, ate, individual_ate, individual_rpe) in zip(tasks, results):
         col = pair_label(*pair)
         table_data[run_name][col] = ate
         first_stage_table_data[run_name][col] = first_stage_ate
+        split_ate_table_data[run_name][col] = individual_ate
+        split_rpe_table_data[run_name][col] = individual_rpe
 
     # Define sequence pair column names
     cols = [pair_label(*p) for p in robot_pairs]
@@ -1208,3 +1301,7 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     _save_ate_tables(run_names, cols, run_display_names, table_data, first_stage_table_data,
                      table_data_lc_by_mode[LCFilterMode.ONLY_INTER_LC], table_data_lc_inlier_by_mode[LCFilterMode.ONLY_INTER_LC],
                      base_dir / 'ate_table.pdf')
+
+    # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
+    _save_ate_split_table(run_names, robot_pairs, run_display_names, split_ate_table_data, split_rpe_table_data,
+                          base_dir / 'ate_split_table.pdf')
