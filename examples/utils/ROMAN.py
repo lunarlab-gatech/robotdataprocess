@@ -717,6 +717,15 @@ def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names
     active_run_names = [run for run in run_names
                         if any(table_data_mg_match[run].get(col) is not None for col in cols)]
 
+    if not active_run_names:
+        fig, ax = plt.subplots(1, 1, figsize=(3.0 * len(cols), 2.2))
+        ax.text(0.5, 0.5, "No MG match data", ha='center', va='center', transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.suptitle(title, fontsize=14, fontweight='bold', color=HEADER_COLOR)
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        return fig
+
     fig, axes = plt.subplots(len(active_run_names), len(cols), squeeze=False,
                              figsize=(3.0 * len(cols), 2.2 * len(active_run_names)))
     cmap = plt.cm.viridis

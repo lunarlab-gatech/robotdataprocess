@@ -25,13 +25,14 @@ class TestCameraData(unittest.TestCase):
     FRAME_ID = "camera_optical_frame"
     D = [0.1, -0.2, 0.0, 0.0, 0.05]
 
-    def _make_camera(self, D=None) -> CameraData:
+    def _make_camera(self, D=None, timeshift_cam_imu=0.0) -> CameraData:
         return CameraData.from_user_mono(
             frame_id=self.FRAME_ID,
             width=self.WIDTH,
             height=self.HEIGHT,
             fx=self.FX, fy=self.FY,
             cx=self.CX, cy=self.CY,
+            timeshift_cam_imu=timeshift_cam_imu,
             D=D)
 
     # =========================================================================
@@ -54,6 +55,21 @@ class TestCameraData(unittest.TestCase):
         """ Unknown ROS distortion string raises NotImplementedError. """
         with self.assertRaises(NotImplementedError):
             CameraData.DistortionModel.from_ros_str("kannala_brandt")
+
+    # =========================================================================
+    # ============================ CameraModel enum ============================
+    # =========================================================================
+
+    def test_camera_model_from_kalibr_str(self):
+        """ 'pinhole' maps to CameraModel.PINHOLE. """
+        self.assertEqual(
+            CameraData.CameraModel.from_kalibr_str("pinhole"),
+            CameraData.CameraModel.PINHOLE)
+
+    def test_camera_model_from_kalibr_str_unsupported_raises(self):
+        """ Unknown kalibr camera model string raises NotImplementedError. """
+        with self.assertRaises(NotImplementedError):
+            CameraData.CameraModel.from_kalibr_str("omnidirectional")
 
     # =========================================================================
     # =========================== from_user_mono ==============================
@@ -90,12 +106,23 @@ class TestCameraData(unittest.TestCase):
         np.testing.assert_array_equal(cam.D, np.array(self.D))
 
     def test_from_user_mono_metadata(self):
-        """ frame_id, width, height, and distortion_model are stored correctly. """
+        """ frame_id, width, height, distortion_model, and camera_model are stored correctly. """
         cam = self._make_camera()
         self.assertEqual(cam.frame_id, self.FRAME_ID)
         self.assertEqual(cam.width, self.WIDTH)
         self.assertEqual(cam.height, self.HEIGHT)
         self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+        self.assertEqual(cam.camera_model, CameraData.CameraModel.PINHOLE)
+
+    def test_from_user_mono_timeshift_cam_imu_default(self):
+        """ timeshift_cam_imu defaults to 0. """
+        cam = self._make_camera()
+        self.assertEqual(cam.timeshift_cam_imu, 0.0)
+
+    def test_from_user_mono_timeshift_cam_imu_custom(self):
+        """ Custom timeshift_cam_imu is stored correctly. """
+        cam = self._make_camera(timeshift_cam_imu=0.0456)
+        self.assertEqual(cam.timeshift_cam_imu, 0.0456)
 
     # =========================================================================
     # ========================= __init__ validation ===========================
@@ -106,6 +133,8 @@ class TestCameraData(unittest.TestCase):
         with self.assertRaises(ValueError):
             CameraData(frame_id=self.FRAME_ID, width=0, height=self.HEIGHT,
                        distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       camera_model=CameraData.CameraModel.PINHOLE,
+                       timeshift_cam_imu=0.0,
                        K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
 
     def test_invalid_height_raises(self):
@@ -113,6 +142,8 @@ class TestCameraData(unittest.TestCase):
         with self.assertRaises(ValueError):
             CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=-1,
                        distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       camera_model=CameraData.CameraModel.PINHOLE,
+                       timeshift_cam_imu=0.0,
                        K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
 
     def test_K_wrong_shape_raises(self):
@@ -120,6 +151,8 @@ class TestCameraData(unittest.TestCase):
         with self.assertRaises(Exception):
             CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=self.HEIGHT,
                        distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       camera_model=CameraData.CameraModel.PINHOLE,
+                       timeshift_cam_imu=0.0,
                        K=np.eye(4), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 4)))
 
     def test_P_wrong_shape_raises(self):
@@ -127,6 +160,8 @@ class TestCameraData(unittest.TestCase):
         with self.assertRaises(Exception):
             CameraData(frame_id=self.FRAME_ID, width=self.WIDTH, height=self.HEIGHT,
                        distortion_model=CameraData.DistortionModel.RADIAL_TANGENTIAL,
+                       camera_model=CameraData.CameraModel.PINHOLE,
+                       timeshift_cam_imu=0.0,
                        K=np.eye(3), D=np.zeros(5), R=np.eye(3), P=np.zeros((3, 3)))
 
     # =========================================================================
@@ -208,10 +243,11 @@ class TestCameraData(unittest.TestCase):
         np.testing.assert_array_almost_equal(cam.P, expected_P)
 
     def test_from_kalibr_mono_cam0_frame_id_and_model(self):
-        """ frame_id is the camera name and distortion model is RADIAL_TANGENTIAL. """
+        """ frame_id is the camera name and distortion/camera models are correct. """
         cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
         self.assertEqual(cam.frame_id, 'cam0')
         self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+        self.assertEqual(cam.camera_model, CameraData.CameraModel.PINHOLE)
 
     def test_from_kalibr_mono_cam1_intrinsics(self):
         """ cam1 K matrix is assembled correctly from kalibr intrinsics. """
@@ -220,6 +256,16 @@ class TestCameraData(unittest.TestCase):
                                 [0.0,               932.525429508503,  562.7061769000949],
                                 [0.0,               0.0,               1.0             ]])
         np.testing.assert_array_almost_equal(cam.K, expected_K)
+
+    def test_from_kalibr_mono_cam0_timeshift_cam_imu_defaults_to_zero(self):
+        """ cam0 has no timeshift_cam_imu key, so it defaults to 0. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
+        self.assertEqual(cam.timeshift_cam_imu, 0.0)
+
+    def test_from_kalibr_mono_cam1_timeshift_cam_imu_loaded(self):
+        """ cam1 timeshift_cam_imu is loaded from the YAML key. """
+        cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam1')
+        self.assertEqual(cam.timeshift_cam_imu, 0.0123)
 
     def test_from_kalibr_mono_missing_camera_raises(self):
         """ Requesting a camera not in the YAML raises KeyError. """
@@ -328,13 +374,42 @@ class TestCameraData(unittest.TestCase):
             self.assertEqual(cam.width, width)
             self.assertEqual(cam.height, height)
             self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+            self.assertEqual(cam.camera_model, CameraData.CameraModel.PINHOLE)
+            self.assertEqual(cam.timeshift_cam_imu, 0.0)
             np.testing.assert_array_almost_equal(cam.K, K)
             np.testing.assert_array_almost_equal(cam.D, D)
             np.testing.assert_array_almost_equal(cam.R, R)
             np.testing.assert_array_almost_equal(cam.P, P)
 
+            cam_shifted = CameraData.from_ros1_bag(bag_path, topic, timeshift_cam_imu=0.0789)
+            self.assertEqual(cam_shifted.timeshift_cam_imu, 0.0789)
+
             with self.assertRaises(ValueError):
                 CameraData.from_ros1_bag(bag_path, '/nonexistent_topic')
+
+    # =========================================================================
+    # ========================= Multi Data Methods =============================
+    # =========================================================================
+
+    def test_align_ImageData_and_CameraData_to_imu_ts(self):
+        """ ImageData timestamps are shifted by timeshift_cam_imu, and it is then reset to 0. """
+        timestamps = [Decimal('1.0'), Decimal('2.0'), Decimal('3.0')]
+        images = np.zeros((3, self.HEIGHT, self.WIDTH), dtype=np.uint8)
+        image_data = ImageDataInMemory(
+            frame_id=self.FRAME_ID,
+            timestamps=timestamps,
+            height=self.HEIGHT,
+            width=self.WIDTH,
+            encoding=ImageData.ImageEncoding.Mono8,
+            images=images)
+
+        cam = self._make_camera(timeshift_cam_imu=0.5)
+
+        CameraData.align_ImageData_and_CameraData_to_imu_ts(image_data, cam)
+
+        expected_timestamps = np.array([Decimal('1.5'), Decimal('2.5'), Decimal('3.5')])
+        np.testing.assert_array_equal(image_data.timestamps, expected_timestamps)
+        self.assertEqual(cam.timeshift_cam_imu, 0.0)
 
 
 if __name__ == "__main__":

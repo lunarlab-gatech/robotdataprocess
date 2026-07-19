@@ -30,8 +30,8 @@ def main():
     See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
 
-    all_robots = ["ground-01", "ground-06"]
-    run_names = ["ROMAN", "ROMAN_O", "ROMAN_NM", "MG"]
+    all_robots = ["ground-06", "aerial-08"]
+    run_names = ["ROMAN_O"]
     dataset_name = "V1.0"
 
     # Environment image / robot display config

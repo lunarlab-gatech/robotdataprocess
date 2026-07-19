@@ -663,12 +663,12 @@ class LoopClosureData(Data):
             ax1 = ax2 = ax5 = None
         palette = sns.color_palette("tab10", len(errors))
 
-        # Global maxima
+        # Global maxima (fall back to a default range if there are no loop closures at all)
         all_trans = np.concatenate([np.asarray(e["translation_errors"]) for e in errors])
         all_rot = np.concatenate([np.asarray(e["rotation_errors"]) for e in errors])
 
-        max_trans = np.max(all_trans) * max_translation_frac
-        max_rot = np.max(all_rot) * max_rotation_frac
+        max_trans = np.max(all_trans) * max_translation_frac if all_trans.size else 1.0
+        max_rot = np.max(all_rot) * max_rotation_frac if all_rot.size else 1.0
 
         trans_thresholds = np.linspace(0, max_trans, num_thresholds)
         rot_thresholds = np.linspace(0, max_rot, num_thresholds)
@@ -682,8 +682,8 @@ class LoopClosureData(Data):
             rot_counts = np.array([np.sum(rot_err <= t) for t in rot_thresholds])
 
             if include_rate_plots:
-                trans_success = trans_counts / n * 100
-                rot_success = rot_counts / n * 100
+                trans_success = trans_counts / n * 100 if n else np.zeros_like(trans_counts, dtype=float)
+                rot_success = rot_counts / n * 100 if n else np.zeros_like(rot_counts, dtype=float)
                 ax1.plot(trans_thresholds, trans_success, linewidth=2.5, color=color, label=label)
                 ax2.plot(rot_thresholds, rot_success, linewidth=2.5, color=color, label=label)
 
@@ -698,7 +698,7 @@ class LoopClosureData(Data):
                                    for t, r in zip(diag_trans, diag_rot)], dtype=float)
 
             if include_rate_plots:
-                diag_percent = diag_count / n * 100
+                diag_percent = diag_count / n * 100 if n else np.zeros_like(diag_count, dtype=float)
                 ax5.plot(diag_trans, diag_percent, linewidth=2.5, color=color, label=label)
             ax6.plot(diag_trans, diag_count, linewidth=2.5, color=color, label=label)
 

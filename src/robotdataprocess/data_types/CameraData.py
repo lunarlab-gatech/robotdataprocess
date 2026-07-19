@@ -30,6 +30,9 @@ class CameraData(SequentialData):
         width: Image width in pixels.
         height: Image height in pixels.
         distortion_model: The distortion model used for this camera.
+        camera_model: The camera projection model used for this camera.
+        timeshift_cam_imu: Time offset between camera and IMU clocks, in
+            seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
         K: 3x3 camera intrinsic matrix (row-major).
         D: Distortion coefficients array (length depends on model).
         R: 3x3 rectification matrix (row-major).
@@ -113,9 +116,43 @@ class CameraData(SequentialData):
                 raise NotImplementedError(
                     f"kalibr distortion model string '{model_str}' is not supported!")
 
+    class CameraModel(Enum):
+        """
+        Enum for supported camera projection models.
+
+        Attributes:
+            PINHOLE: Standard pinhole camera model.
+        """
+
+        PINHOLE = 0
+
+        @classmethod
+        def from_kalibr_str(cls, model_str: str) -> CameraData.CameraModel:
+            """
+            Convert a kalibr camera model string to a CameraModel enum value.
+
+            Args:
+                model_str: The kalibr camera model string (e.g. ``"pinhole"``).
+
+            Returns:
+                The corresponding CameraModel enum value.
+
+            Raises:
+                NotImplementedError: If ``model_str`` is not a recognised kalibr
+                    camera model string.
+            """
+
+            if model_str.lower() == 'pinhole':
+                return cls.PINHOLE
+            else:
+                raise NotImplementedError(
+                    f"kalibr camera model string '{model_str}' is not supported!")
+
     width: int
     height: int
     distortion_model: CameraData.DistortionModel
+    camera_model: CameraData.CameraModel
+    timeshift_cam_imu: float  # t_imu = t_cam + timeshift_cam_imu
     K: NDArray  # shape (3, 3)
     D: NDArray  # shape (N,)
     R: NDArray  # shape (3, 3)
@@ -123,6 +160,8 @@ class CameraData(SequentialData):
 
     def __init__(self, frame_id: str, width: int, height: int,
                  distortion_model: CameraData.DistortionModel,
+                 camera_model: CameraData.CameraModel,
+                 timeshift_cam_imu: float,
                  K: Union[NDArray, list],
                  D: Union[NDArray, list],
                  R: Union[NDArray, list],
@@ -132,6 +171,8 @@ class CameraData(SequentialData):
         self.width = width
         self.height = height
         self.distortion_model = distortion_model
+        self.camera_model = camera_model
+        self.timeshift_cam_imu = timeshift_cam_imu
         self.K = np.array(K, dtype=np.float64).reshape(3, 3)
         self.D = np.array(D, dtype=np.float64).flatten()
         self.R = np.array(R, dtype=np.float64).reshape(3, 3)
@@ -170,6 +211,8 @@ class CameraData(SequentialData):
     def from_user_mono(cls, frame_id: str, width: int, height: int,
                        fx: float, fy: float, cx: float, cy: float,
                        distortion_model: Union[CameraData.DistortionModel, None] = None,
+                       camera_model: Union[CameraData.CameraModel, None] = None,
+                       timeshift_cam_imu: float = 0.0,
                        D: Union[NDArray, list, None] = None) -> CameraData:
         """
         Create a CameraData instance for a monocular camera from individual
@@ -188,6 +231,11 @@ class CameraData(SequentialData):
             cy: Principal point y coordinate (pixels).
             distortion_model: The distortion model. Defaults to
                 ``DistortionModel.RADIAL_TANGENTIAL``.
+            camera_model: The camera projection model. Defaults to
+                ``CameraModel.PINHOLE``.
+            timeshift_cam_imu: Time offset between camera and IMU clocks, in
+                seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
+                Defaults to 0.
             D: Distortion coefficients. Defaults to all-zeros (5 coefficients
                 for ``RADIAL_TANGENTIAL``).
 
@@ -197,6 +245,9 @@ class CameraData(SequentialData):
 
         if distortion_model is None:
             distortion_model = CameraData.DistortionModel.RADIAL_TANGENTIAL
+
+        if camera_model is None:
+            camera_model = CameraData.CameraModel.PINHOLE
 
         K = np.array([[fx, 0.0, cx],
                       [0.0, fy, cy],
@@ -211,7 +262,8 @@ class CameraData(SequentialData):
         P[:3, :3] = K
 
         return cls(frame_id=frame_id, width=width, height=height,
-                   distortion_model=distortion_model,
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
                    K=K, D=D, R=R, P=P)
 
     @classmethod
@@ -224,7 +276,12 @@ class CameraData(SequentialData):
         - ``intrinsics``: ``[fu, fv, cu, cv]``
         - ``distortion_coeffs``: distortion coefficient list
         - ``distortion_model``: e.g. ``"radial-tangential"``
+        - ``camera_model``: must be ``"pinhole"``
         - ``resolution``: ``[width, height]``
+
+        The YAML entry may optionally contain ``timeshift_cam_imu``, the time
+        offset between camera and IMU clocks, in seconds, such that
+        ``t_imu = t_cam + timeshift_cam_imu``. It defaults to 0 if not present.
 
         R is fixed to the identity matrix and P is derived from K by
         appending a zero fourth column.
@@ -238,7 +295,8 @@ class CameraData(SequentialData):
 
         Raises:
             KeyError: If ``cam_name`` is not present in the YAML.
-            NotImplementedError: If the distortion model is not supported.
+            NotImplementedError: If the distortion model or camera model is
+                not supported.
         """
 
         with open(yaml_path, 'r') as f:
@@ -254,6 +312,8 @@ class CameraData(SequentialData):
         D = np.array(cam['distortion_coeffs'], dtype=np.float64)
 
         distortion_model = CameraData.DistortionModel.from_kalibr_str(cam['distortion_model'])
+        camera_model = CameraData.CameraModel.from_kalibr_str(cam['camera_model'])
+        timeshift_cam_imu = float(cam.get('timeshift_cam_imu', 0.0))
 
         K = np.array([[fu, 0.0, cu],
                       [0.0, fv, cv],
@@ -263,22 +323,32 @@ class CameraData(SequentialData):
         P[:3, :3] = K
 
         return cls(frame_id=cam_name, width=int(width), height=int(height),
-                   distortion_model=distortion_model,
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
                    K=K, D=D, R=R, P=P)
 
     @classmethod
-    def from_ros1_bag(cls, bag_path: Union[Path, str], camera_info_topic: str) -> CameraData:
+    def from_ros1_bag(cls, bag_path: Union[Path, str], camera_info_topic: str,
+                      camera_model: Union[CameraData.CameraModel, None] = None,
+                      timeshift_cam_imu: float = 0.0) -> CameraData:
         """
         Load a CameraData instance from a ``sensor_msgs/CameraInfo`` topic in a
         ROS1 ``.bag`` file.
 
         Only the first message on ``camera_info_topic`` is read; camera
         calibration is assumed to be static across the bag.
+        ``sensor_msgs/CameraInfo`` does not carry a camera projection model or
+        a camera-IMU time offset, so both must be supplied by the caller.
 
         Args:
             bag_path: Path to the ``.bag`` file.
             camera_info_topic: Topic name of the ``sensor_msgs/CameraInfo``
                 stream.
+            camera_model: The camera projection model. Defaults to
+                ``CameraModel.PINHOLE``.
+            timeshift_cam_imu: Time offset between camera and IMU clocks, in
+                seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
+                Defaults to 0.
 
         Returns:
             CameraData: Instance populated with the calibration from the first
@@ -290,6 +360,9 @@ class CameraData(SequentialData):
             NotImplementedError: If the distortion model in the message is not
                 supported.
         """
+        if camera_model is None:
+            camera_model = CameraData.CameraModel.PINHOLE
+
         typestore = get_typestore(Stores.ROS1_NOETIC)
 
         with Reader1(Path(bag_path)) as reader:
@@ -318,7 +391,9 @@ class CameraData(SequentialData):
             P = np.array(msg.P, dtype=np.float64).reshape(3, 4)
 
         return cls(frame_id=frame_id, width=width, height=height,
-                   distortion_model=distortion_model, K=K, D=D, R=R, P=P)
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
+                   K=K, D=D, R=R, P=P)
 
     # =========================================================================
     # ============================ Visualization ==============================
@@ -594,3 +669,27 @@ class CameraData(SequentialData):
         else:
             raise NotImplementedError(
                 f"Unsupported ROSMsgLibType {lib_type} for CameraData.get_ros_msg()!")
+
+    # =========================================================================
+    # ========================= Multi Data Methods =============================
+    # =========================================================================
+
+    @staticmethod
+    def align_ImageData_and_CameraData_to_imu_ts(image_data: ImageData, camera_data: CameraData) -> None:
+        """
+        Shift an ImageData's timestamps onto the IMU clock using its paired
+        CameraData's ``timeshift_cam_imu``, such that
+        ``t_cam_new (t_imu) = t_cam + timeshift_cam_imu``.
+
+        Modifies both objects in place: ``image_data.timestamps`` is shifted
+        onto the IMU clock, and ``camera_data.timeshift_cam_imu`` is reset to
+        0, since the offset has now been resolved.
+
+        Args:
+            image_data: The ImageData whose timestamps to shift onto the IMU clock.
+            camera_data: The CameraData providing the ``timeshift_cam_imu`` offset.
+        """
+
+        shift = Decimal(str(camera_data.timeshift_cam_imu))
+        image_data.timestamps = image_data.timestamps + shift
+        camera_data.timeshift_cam_imu = 0.0

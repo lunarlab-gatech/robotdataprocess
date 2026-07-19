@@ -83,14 +83,14 @@ def main():
     dataset_num = "V1.0"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/GrAco_dataset/' + dataset_num + '/data'
-    robot_names = ["ground-01", "ground-06"]
+    robot_names = ["aerial-08"]
 
     # Run extraction for each robot
     for i in range(len(robot_names)):
         data_extraction(input_dir=input_dir, 
                         robot_name=robot_names[i],
-                        skip_depth=True,
-                        skip_rgb=False)
+                        skip_depth=False,
+                        skip_rgb=True)
         
 if __name__ == "__main__":
     main()
