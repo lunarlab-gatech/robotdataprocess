@@ -45,10 +45,14 @@ class CameraData(SequentialData):
 
         Attributes:
             RADIAL_TANGENTIAL: Radial and tangential distortion model,
-                corresponding to ``"plumb_bob"`` in ROS.
+                corresponding to ``"plumb_bob"`` in ROS and Kalibr's 
+                ``"radial-tangential"``.
+            EQUIDISTANT: Equidistant (fisheye) distortion model, 
+                corresponding to Kalibr's ``"equidistant"``.
         """
 
         RADIAL_TANGENTIAL = 0
+        EQUIDISTANT = 1
 
         @staticmethod
         def to_ros_str(model: CameraData.DistortionModel) -> str:
@@ -110,8 +114,11 @@ class CameraData(SequentialData):
                     distortion model string.
             """
 
-            if model_str.lower().replace('_', '-') == 'radial-tangential':
+            model_str_canon = model_str.lower().replace('_', '-') 
+            if model_str_canon == 'radial-tangential':
                 return cls.RADIAL_TANGENTIAL
+            elif model_str_canon == 'equidistant':
+                return cls.EQUIDISTANT
             else:
                 raise NotImplementedError(
                     f"kalibr distortion model string '{model_str}' is not supported!")
