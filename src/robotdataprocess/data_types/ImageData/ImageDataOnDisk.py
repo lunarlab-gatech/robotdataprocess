@@ -1,5 +1,6 @@
 from __future__ import annotations
 from ...conversion_utils import col_to_dec_arr
+from ..CameraData import CameraData
 from .ImageData import ImageData
 import cv2
 import copy
@@ -354,11 +355,28 @@ class ImageDataOnDisk(ImageData):
         return instance
 
     # =========================================================================
-    # ========================= Manipulation Methods ==========================
+    # ========================= Multi Data Methods ==========================
     # =========================================================================
 
+    def _ensure_matching_image_shape(self, camera_data: CameraData) -> None:
+        """
+        Raise if ``camera_data``'s ``width``/``height`` don't match this
+        ImageDataOnDisk's.
+
+        Args:
+            camera_data: The CameraData to check against this ImageDataOnDisk.
+
+        Raises:
+            ValueError: If the dimensions don't match.
+        """
+
+        if camera_data.width != self.width or camera_data.height != self.height:
+            raise ValueError(
+                f"camera_data dimensions ({camera_data.width}x{camera_data.height}) do not "
+                f"match this ImageDataOnDisk's ({self.width}x{self.height}).")
+
     def crop_images_to_LiDAR_FOV(self, lidar_v_fov: Tuple[float, float],
-                                  camera_data: Any) -> None:
+                                  camera_data: CameraData) -> None:
         """
         Crop the top and bottom of every image so that the camera's vertical
         FOV matches the given LiDAR vertical FOV.
@@ -406,10 +424,7 @@ class ImageDataOnDisk(ImageData):
             raise ValueError(
                 f"lidar_v_fov min ({lidar_v_fov[0]}) must be less than max ({lidar_v_fov[1]}).")
 
-        # Import here to avoid circular imports
-        from ..CameraData import CameraData
-        if not isinstance(camera_data, CameraData):
-            raise TypeError(f"camera_data must be a CameraData instance, got {type(camera_data)}.")
+        self._ensure_matching_image_shape(camera_data)
 
         fy = float(camera_data.K[1, 1])
         cy = float(camera_data.K[1, 2])
@@ -444,3 +459,57 @@ class ImageDataOnDisk(ImageData):
         camera_data.height = new_height
         camera_data.K[1, 2] = new_cy
         camera_data.P[1, 2] = new_cy
+
+    def undistort_imagery_mono(self, camera_data: CameraData, alpha: float = 0.0) -> None:
+        """
+        Undistort every image using ``camera_data``'s distortion coefficients,
+        then update ``camera_data``'s ``K``, ``D``, and ``P`` so that they
+        describe the now-undistorted imagery.
+
+        The undistortion is applied lazily via the transformation pipeline,
+        so no images are read from disk until accessed. Image dimensions are
+        unchanged; only pixel content is remapped.
+
+        Args:
+            camera_data: The CameraData providing the distortion model and
+                coefficients. Its ``width``/``height`` must match this
+                ImageDataOnDisk's. Its ``K``, ``D``, and ``P`` are updated to
+                describe the undistorted imagery.
+            alpha: Free scaling parameter for RADIAL_TANGENTIAL cameras,
+                forwarded to ``cv2.getOptimalNewCameraMatrix``. ``0`` crops to
+                valid pixels only (no black borders); ``1`` retains all source
+                pixels. Used as the ``balance`` parameter for EQUIDISTANT
+                cameras, with the same interpretation.
+
+        Raises:
+            ValueError: If ``camera_data``'s dimensions don't match this
+                ImageDataOnDisk's.
+            NotImplementedError: If ``camera_data.distortion_model`` is not
+                supported.
+        """
+
+        self._ensure_matching_image_shape(camera_data)
+        size_cv2: Tuple = (self.width, self.height)
+
+        if camera_data.distortion_model == CameraData.DistortionModel.RADIAL_TANGENTIAL:
+            new_K, _ = cv2.getOptimalNewCameraMatrix(camera_data.K, camera_data.D, size_cv2, alpha, size_cv2)
+            map1, map2 = cv2.initUndistortRectifyMap(
+                camera_data.K, camera_data.D, camera_data.R, new_K, size_cv2, cv2.CV_32FC1)
+        elif camera_data.distortion_model == CameraData.DistortionModel.EQUIDISTANT:
+            D_fisheye = camera_data.D.reshape(4, 1)
+            new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+                camera_data.K, D_fisheye, size_cv2, camera_data.R, balance=alpha)
+            map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+                camera_data.K, D_fisheye, camera_data.R, new_K, size_cv2, cv2.CV_32FC1)
+        else:
+            raise NotImplementedError(
+                f"undistort_imagery_mono() does not support distortion model {camera_data.distortion_model}.")
+
+        def _undistort(image: np.ndarray) -> np.ndarray:
+            return cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR)
+
+        self.images.transformations.append(_undistort)
+
+        camera_data.K = new_K
+        camera_data.D = np.zeros_like(camera_data.D)
+        camera_data.P[:3, :3] = new_K
