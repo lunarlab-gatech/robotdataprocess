@@ -302,7 +302,9 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         do_individual_calcs: If True, also print per-robot ATE before the merged calc.
         viz_config: Dict with keys ``"image_path"``, ``"x_edge"``, ``"robot_name_to_color"``
             (keyed by display name), and optionally ``"name_map"`` (robot name -> display name;
-            defaults to identity). Required when ``visualize`` is True.
+            defaults to identity) and ``"yaw_rotation_deg"`` (rotates trajectories about the
+            center of their combined bounding box before plotting against the background
+            image; defaults to 0). Required when ``visualize`` is True.
         rpe_delta: Step size between the pose pairs used for all RPE calculations in
             this function (first-stage, merged, and individual). Does not affect ATE.
             Defaults to ``5.0``.
@@ -372,7 +374,7 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
 
     # Calculate RMS ATE, among other metrics
     #print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False,
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True,
                                                                                                      rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
 
     # Seperate the aligned trajectories into their single-robot forms, and compute
@@ -398,6 +400,7 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         name_map: Dict = viz_config.get("name_map") or {rn: rn for rn in robot_names}
         robot_name_to_color: Dict = viz_config["robot_name_to_color"]
         image_extent_offsets = viz_config.get("background_image_extent_offsets")
+        yaw_rotation_deg = viz_config.get("yaw_rotation_deg", 0.0)
 
         pair_lbl = pair_label(robot0_name, robot1_name)
         base_dir = Path(figures_base_dir) / dataset_prefix / dataset_name
@@ -412,7 +415,20 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True,
                            background_image_path=image_path, background_image_x_edge=x_edge,
                            background_image_extent_offsets=image_extent_offsets,
+                           yaw_rotation_deg=yaw_rotation_deg,
                            save_path=str(traj_dir / f'traj_{pair_lbl}_{method}.pdf'))
+
+        # Plot only GT in 2D
+        dataList =  [gt_data_align_robot0,  gt_data_align_robot1]
+        isGTList =  [                True,                  True]
+        nameList =  [name_map[robot0_name], name_map[robot1_name]]
+        colorList = [robot_name_to_color[name] for name in nameList]
+        PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=False,
+                           background_image_path=image_path, background_image_x_edge=x_edge,
+                           background_image_extent_offsets=image_extent_offsets,
+                           gt_color_lightness_range_val=8,
+                           yaw_rotation_deg=yaw_rotation_deg,
+                           save_path=str(traj_dir / f'traj_{pair_lbl}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode
         names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate([robot0_name, robot1_name])}

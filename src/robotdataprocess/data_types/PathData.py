@@ -672,10 +672,11 @@ class PathData(SequentialData):
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
                      background_image_extent_offsets: Union[Tuple[float, float], None] = None,
                      loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8,
-                     title: str | None = None, lc_errors_vmax: float = 50.0):
+                     title: str | None = None, lc_errors_vmax: float = 50.0,
+                     yaw_rotation_deg: float = 0.0):
         """
         Plot all PathData objects on a 2D XY plane.
-        
+
         Args:
             dataList: All PathData objects to plot.
             isGTList: Whether or not each PathData object is GT.
@@ -697,12 +698,33 @@ class PathData(SequentialData):
             background_image_x_edge: The distance in meters from center of image to the x edge.
             background_image_extent_offets: XY locations where the image center should be located.
             ax: If passed, plot is drawn onto these axes instead of on a new figure.
+            yaw_rotation_deg: Rotates every PathData in dataList about the Z axis passing
+                through the center of their combined axis-aligned bounding box, by this many
+                degrees, before plotting (e.g. to align GT trajectories with a background
+                image that isn't exactly aligned with the GT's XY axes). Operates on copies,
+                so it has no effect on the original PathData objects. The background image
+                itself is not rotated.
         """
 
         # Check lengths of arguments
         if len(dataList) != len(isGTList) or len(dataList) != len(colorList) or len(dataList) != len(nameList):
             raise ValueError("Lengths of all Lists must be equal!")
         num_data_objs = len(dataList)
+
+        # Rotate copies of the trajectories about the center of their combined bounding box,
+        # leaving the originals untouched
+        if yaw_rotation_deg != 0.0:
+            all_positions = np.concatenate([dec_arr_to_float_arr(path.positions) for path in dataList])
+            bbox_center = (all_positions.min(axis=0) + all_positions.max(axis=0)) / 2.0
+
+            rot_mat = R.from_euler('z', yaw_rotation_deg, degrees=True).as_matrix()
+            H = np.eye(4)
+            H[:3, :3] = rot_mat
+            H[:3, 3] = bbox_center - rot_mat @ bbox_center
+
+            dataList = [copy.deepcopy(path) for path in dataList]
+            for path in dataList:
+                path.apply_transformation_left_side(H)
 
         # Check other argument requirements
         if gt_color_lightness_range_val < 0 or gt_color_lightness_range_val >= 20:
