@@ -393,22 +393,34 @@ class TestCameraData(unittest.TestCase):
 
     def test_align_ImageData_and_CameraData_to_imu_ts(self):
         """ ImageData timestamps are shifted by timeshift_cam_imu, and it is then reset to 0. """
-        timestamps = [Decimal('1.0'), Decimal('2.0'), Decimal('3.0')]
-        images = np.zeros((3, self.HEIGHT, self.WIDTH), dtype=np.uint8)
-        image_data = ImageDataInMemory(
+        timestamps_1 = [Decimal('1.0'), Decimal('2.0'), Decimal('3.0')]
+        images_1 = np.zeros((3, self.HEIGHT, self.WIDTH), dtype=np.uint8)
+        image_data_1 = ImageDataInMemory(
             frame_id=self.FRAME_ID,
-            timestamps=timestamps,
+            timestamps=timestamps_1,
             height=self.HEIGHT,
             width=self.WIDTH,
             encoding=ImageData.ImageEncoding.Mono8,
-            images=images)
+            images=images_1)
+
+        timestamps_2 = [Decimal('4.0'), Decimal('5.0')]
+        images_2 = np.zeros((2, self.HEIGHT, self.WIDTH), dtype=np.uint8)
+        image_data_2 = ImageDataInMemory(
+            frame_id=self.FRAME_ID,
+            timestamps=timestamps_2,
+            height=self.HEIGHT,
+            width=self.WIDTH,
+            encoding=ImageData.ImageEncoding.Mono8,
+            images=images_2)
 
         cam = self._make_camera(timeshift_cam_imu=0.5)
 
-        CameraData.align_ImageData_and_CameraData_to_imu_ts(image_data, cam)
+        CameraData.align_ImageData_and_CameraData_to_imu_ts([image_data_1, image_data_2], cam)
 
-        expected_timestamps = np.array([Decimal('1.5'), Decimal('2.5'), Decimal('3.5')])
-        np.testing.assert_array_equal(image_data.timestamps, expected_timestamps)
+        expected_timestamps_1 = np.array([Decimal('1.5'), Decimal('2.5'), Decimal('3.5')])
+        expected_timestamps_2 = np.array([Decimal('4.5'), Decimal('5.5')])
+        np.testing.assert_array_equal(image_data_1.timestamps, expected_timestamps_1)
+        np.testing.assert_array_equal(image_data_2.timestamps, expected_timestamps_2)
         self.assertEqual(cam.timeshift_cam_imu, 0.0)
 
 

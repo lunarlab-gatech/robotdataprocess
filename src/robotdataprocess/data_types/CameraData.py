@@ -15,7 +15,7 @@ from pathlib import Path
 from rosbags.rosbag1 import Reader as Reader1
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
-from typing import Any, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 import yaml
 from .ImageData.ImageData import ImageData
 
@@ -682,21 +682,23 @@ class CameraData(SequentialData):
     # =========================================================================
 
     @staticmethod
-    def align_ImageData_and_CameraData_to_imu_ts(image_data: ImageData, camera_data: CameraData) -> None:
+    def align_ImageData_and_CameraData_to_imu_ts(image_data: List[ImageData], camera_data: CameraData) -> None:
         """
-        Shift an ImageData's timestamps onto the IMU clock using its paired
-        CameraData's ``timeshift_cam_imu``, such that
+        Shift a list of ImageData's timestamps onto the IMU clock using their
+        shared CameraData's ``timeshift_cam_imu``, such that
         ``t_cam_new (t_imu) = t_cam + timeshift_cam_imu``.
 
-        Modifies both objects in place: ``image_data.timestamps`` is shifted
-        onto the IMU clock, and ``camera_data.timeshift_cam_imu`` is reset to
-        0, since the offset has now been resolved.
+        Modifies all objects in place: each ``ImageData.timestamps`` is
+        shifted onto the IMU clock, and ``camera_data.timeshift_cam_imu`` is
+        reset to 0, since the offset has now been resolved.
 
         Args:
-            image_data: The ImageData whose timestamps to shift onto the IMU clock.
+            image_data: The ImageData instances whose timestamps to shift
+                onto the IMU clock.
             camera_data: The CameraData providing the ``timeshift_cam_imu`` offset.
         """
 
         shift = Decimal(str(camera_data.timeshift_cam_imu))
-        image_data.timestamps = image_data.timestamps + shift
+        for data in image_data:
+            data.timestamps = data.timestamps + shift
         camera_data.timeshift_cam_imu = 0.0
