@@ -98,6 +98,53 @@ class TransformationData(SequentialData):
         )
 
     @classmethod
+    def from_kalibr(cls, yaml_path: Union[Path, str], cam_name: str, transform_name: str,
+                     frame: CoordinateFrame) -> TransformationData:
+        """
+        Load a transformation from a kalibr camera calibration YAML file.
+
+        Kalibr stores transforms under a camera block (e.g. ``cam0``) as a
+        4x4 nested list following the convention ``p_A = T_A_B @ p_B``, where
+        ``A`` and ``B`` are given by the transform name (e.g. ``T_cam_imu``
+        maps IMU-frame points into the camera frame). The token ``cam`` (or
+        ``cn``) in the transform name is replaced with ``cam_name`` to
+        recover the frame_id.
+
+        Args:
+            yaml_path: Path to the kalibr YAML file.
+            cam_name: Name of the camera block (e.g. ``'cam0'``).
+            transform_name: Name of the transform key within the camera
+                block (e.g. ``'T_cam_imu'``).
+            frame: The coordinate frame of this transformation.
+
+        Raises:
+            KeyError: If ``cam_name`` or ``transform_name`` is not found in
+                the YAML.
+            ValueError: If the transform is not a 4x4 matrix.
+        """
+
+        with open(yaml_path, "r") as f:
+            data = yaml.safe_load(f)
+
+        if cam_name not in data:
+            raise KeyError(f"Camera '{cam_name}' not found in {yaml_path}")
+        cam = data[cam_name]
+
+        if transform_name not in cam:
+            raise KeyError(f"Transform '{transform_name}' not found for camera '{cam_name}' in {yaml_path}")
+
+        matrix = np.array(cam[transform_name], dtype=float)
+        if matrix.shape != (4, 4):
+            raise ValueError(f"Expected 4x4 transformation matrix, got {matrix.shape}")
+
+        # Extract frame_id and child_frame_id from transform name (e.g. T_cam_imu -> cam0, imu)
+        parts = transform_name.split("_")[1:]
+        frame_id = cam_name if parts[0] in ("cam", "cn") else parts[0]
+        child_frame_id = "_".join(parts[1:])
+
+        return cls.from_matrix(frame_id, child_frame_id, matrix, frame)
+
+    @classmethod
     def from_GrAco_yaml(cls, yaml_path: Union[Path, str], transform_name: str) -> TransformationData:
         """
         Load a transformation from a GrAco calibration YAML file.
