@@ -350,7 +350,8 @@ class TransformationData(SequentialData):
     # =========================================================================
 
     @staticmethod
-    def visualize(transformations: List[TransformationData], axes_length: float = 1.0):
+    def visualize(transformations: List[TransformationData], axes_length: float = 1.0,
+                  save_path: Union[Path, str, None] = None):
         """
         Visualize multiple transformations in the same 3D space.
 
@@ -358,6 +359,8 @@ class TransformationData(SequentialData):
             transformations: List of TransformationData objects to plot.
                 An identity world frame is appended automatically.
             axes_length: Length of the plotted orientation axes in meters.
+            save_path: If provided, saves the figure to this path instead of
+                displaying it.
         """
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -408,9 +411,12 @@ class TransformationData(SequentialData):
         except AttributeError:
             pass  # older matplotlib
 
-        # Show the plot
+        # Show or save the plot
         plt.tight_layout()
-        plt.show()
+        if save_path is not None:
+            plt.savefig(save_path)
+        else:
+            plt.show()
 
     # =========================================================================
     # =========================== Conversion to ROS ===========================
