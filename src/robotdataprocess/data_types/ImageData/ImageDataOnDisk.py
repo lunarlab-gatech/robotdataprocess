@@ -553,6 +553,11 @@ class ImageDataOnDisk(ImageData):
         disk until accessed. Image dimensions are unchanged; only pixel
         content is remapped.
 
+        Assumes ``image_data_left`` and ``image_data_right`` are already
+        matched entry-for-entry (same length, each index corresponding to
+        the same capture instant). Call ``ImageDataOnDisk.crop_to_matched``
+        on the pair beforehand if their timestamps aren't already aligned.
+
         Args:
             image_data_left: The left camera's imagery.
             image_data_right: The right camera's imagery.
@@ -569,8 +574,8 @@ class ImageDataOnDisk(ImageData):
                 corresponding ImageDataOnDisk's, if
                 ``camera_data_left.timeshift_cam_imu`` doesn't match
                 ``camera_data_right.timeshift_cam_imu``, or if
-                ``image_data_left`` and ``image_data_right`` don't have
-                identical timestamps.
+                ``image_data_left`` and ``image_data_right`` don't have the
+                same number of entries.
             NotImplementedError: If either camera's ``distortion_model`` is
                 not supported.
         """
@@ -582,9 +587,11 @@ class ImageDataOnDisk(ImageData):
                 f"camera_data_right.timeshift_cam_imu ({camera_data_right.timeshift_cam_imu}). "
                 "Call CameraData.align_ImageData_and_CameraData_to_imu_ts() on both cameras first.")
 
-        if not np.array_equal(image_data_left.timestamps, image_data_right.timestamps):
+        if image_data_left.len() != image_data_right.len():
             raise ValueError(
-                "image_data_left and image_data_right must have identical timestamps.")
+                f"image_data_left has {image_data_left.len()} entries but "
+                f"image_data_right has {image_data_right.len()}. "
+                "Call ImageDataOnDisk.crop_to_matched() on the pair first.")
 
         for image_data, camera_data in ((image_data_left, camera_data_left),
                                         (image_data_right, camera_data_right)):
