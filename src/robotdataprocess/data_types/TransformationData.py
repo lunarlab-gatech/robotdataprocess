@@ -366,8 +366,9 @@ class TransformationData(SequentialData):
 
         # Extract data and plot
         points = []
-        transformations.append(TransformationData.from_matrix("World", "World", np.eye(4), CoordinateFrame.FLU))
-        for trans in transformations:
+        world_frame = TransformationData.from_matrix("World", "World", np.eye(4), CoordinateFrame.FLU)
+        for trans in transformations + [world_frame]:
+            is_world = trans is world_frame
             pos = trans.translation
             rot = R.from_quat(trans.orientation)
 
@@ -376,10 +377,12 @@ class TransformationData(SequentialData):
             y_axis = rot.apply([0, 1, 0])
             z_axis = rot.apply([0, 0, 1])
 
-            # Plot axes
-            ax.quiver(*pos, *x_axis, length=axes_length, color='r', normalize=True, linewidth=0.8)
-            ax.quiver(*pos, *y_axis, length=axes_length, color='g', normalize=True, linewidth=0.8)
-            ax.quiver(*pos, *z_axis, length=axes_length, color='b', normalize=True, linewidth=0.8)
+            # Plot axes (world frame drawn darker and slightly shorter to stand out less)
+            length = axes_length * 0.75 if is_world else axes_length
+            x_color, y_color, z_color = ('darkred', 'darkgreen', 'darkblue') if is_world else ('r', 'g', 'b')
+            ax.quiver(*pos, *x_axis, length=length, color=x_color, normalize=True, linewidth=0.8)
+            ax.quiver(*pos, *y_axis, length=length, color=y_color, normalize=True, linewidth=0.8)
+            ax.quiver(*pos, *z_axis, length=length, color=z_color, normalize=True, linewidth=0.8)
 
             # Collect endpoints for bounds
             points.append(pos)
