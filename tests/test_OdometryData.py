@@ -227,7 +227,9 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_almost_equal(odom_data.orientations[13801].astype(np.float128), [-0.0013123360311483368, -0.0005744812796045746, 0.3999401764357198, 0.9165401262454177], 8)
         np.testing.assert_equal(odom_data.frame_id, '/Husky1')
         np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
-        np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
+        # shift_to_start_at_identity re-anchors the trajectory to the vehicle's own
+        # starting pose, so it no longer aligns with FLU/NED/ENU world axes.
+        np.testing.assert_equal(odom_data.frame, CoordinateFrame.NONE)
 
     def test_crop_data(self):
         # Load the Odometry data

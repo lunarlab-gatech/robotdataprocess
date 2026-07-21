@@ -277,7 +277,7 @@ class TestCameraData(unittest.TestCase):
     def test_from_kalibr_str_unsupported_raises(self):
         """ from_kalibr_str raises NotImplementedError for unknown models. """
         with self.assertRaises(NotImplementedError):
-            CameraData.DistortionModel.from_kalibr_str('equidistant')
+            CameraData.DistortionModel.from_kalibr_str('kannala_brandt')
 
     # =========================================================================
     # ============================ visualize_FOV ==============================
