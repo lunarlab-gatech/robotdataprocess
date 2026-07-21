@@ -256,8 +256,7 @@ class TransformationData(SequentialData):
             return TransformationData(self.frame_id, self.child_frame_id, self.translation.copy(), self.orientation.copy(), self.frame)
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
-            # The frame change rotation: 180 degrees around X
-            R_frame = R.from_euler('x', 180, degrees=True)
+            R_frame = R.from_matrix(CoordinateFrame.get_rotation(self.frame, target_frame))
 
             if transform_type == TransformType.ROTATION:
                 # Apply as a rotation: R_frame * t, R_frame * q

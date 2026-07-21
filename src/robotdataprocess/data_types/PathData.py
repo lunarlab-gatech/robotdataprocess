@@ -48,15 +48,15 @@ class PathData(SequentialData):
     orientations: np.ndarray # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
-    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, List], 
-                 positions: Union[np.ndarray, List], orientations: Union[np.ndarray, List], 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, List],
+                 positions: Union[np.ndarray, List], orientations: Union[np.ndarray, List],
                  frame: CoordinateFrame):
         super().__init__(frame_id, timestamps)
         self.positions = col_to_dec_arr(positions)
         self.orientations = col_to_dec_arr(orientations)
         self.frame = frame
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: PathData) -> bool:
         parent_result = super().__eq__(other)
         if parent_result is not True:
             return parent_result
@@ -143,6 +143,9 @@ class PathData(SequentialData):
         self.positions = col_to_dec_arr(self.positions)
         self.orientations = col_to_dec_arr(self.orientations)
 
+        # Set Coordinate Frame to None since this operation may have changed it
+        self.frame = CoordinateFrame.NONE
+
         self._invalidate_cache()
 
     def interpolate_to_hz(self, target_hz: float):
@@ -198,10 +201,7 @@ class PathData(SequentialData):
             return
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
-            # The frame change rotation: 180 degrees around X
-            R_frame = np.array([[1,  0,  0],
-                                [0, -1,  0],
-                                [0,  0, -1]])
+            R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
 
             if transform_type == TransformType.CHANGE_OF_BASIS:
                 self._convert_frame(R_frame)
@@ -215,6 +215,22 @@ class PathData(SequentialData):
 
         else:
             raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
+        
+    def redefine_local_axes(self, curr_local_frame: CoordinateFrame, target_local_frame: CoordinateFrame):
+        """
+        Redefines the convention used to express the robot's local (body)
+        axes. Only affects orientations -- positions and the world-frame
+        convention (self.frame) are left untouched.
+
+        Args:
+            curr_local_frame: The current local axes convention.
+            target_local_frame: The desired local axes convention.
+        """
+        R_frame = R.from_matrix(CoordinateFrame.get_rotation(target_local_frame, curr_local_frame))
+        self._ori_apply_rotation_right_side(R_frame)
+
+        self._invalidate_cache()
+
 
     def apply_transformation_left_side(self, H: np.ndarray):
         """

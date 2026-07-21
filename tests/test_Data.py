@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+from scipy.spatial.transform import Rotation as R
 from robotdataprocess.data_types.Data import CoordinateFrame, ROSMsgLibType
 from robotdataprocess.data_types.SequentialData import SequentialData
 
@@ -18,7 +19,38 @@ class TestCoordinateFrame(unittest.TestCase):
         self.assertEqual(CoordinateFrame.FLU.value, 0)
         self.assertEqual(CoordinateFrame.NED.value, 1)
         self.assertEqual(CoordinateFrame.ENU.value, 2)
-        self.assertEqual(CoordinateFrame.NONE.value, 3)
+        self.assertEqual(CoordinateFrame.FUR.value, 3)
+        self.assertEqual(CoordinateFrame.UFL.value, 4)
+        self.assertEqual(CoordinateFrame.NONE.value, 5)
+
+    def test_get_rotation_ned_to_flu_matches_path_data(self):
+        """ Test get_rotation(NED, FLU) matches the hardcoded matrix in PathData.to_coordinate_frame. """
+        R_frame = np.array([[1,  0,  0],
+                             [0, -1,  0],
+                             [0,  0, -1]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.NED, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_ned_to_flu_matches_scipy_euler(self):
+        """ Test get_rotation(NED, FLU) matches R.from_euler('x', 180, degrees=True), as used in TransformationData.to_coordinate_frame. """
+        R_frame = R.from_euler('x', 180, degrees=True).as_matrix()
+
+        np.testing.assert_array_almost_equal(CoordinateFrame.get_rotation(CoordinateFrame.NED, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_enu_to_flu_matches_lidar_data(self):
+        """ Test get_rotation(ENU, FLU) matches the hardcoded matrix in LiDARData.to_FLU_frame. """
+        R_frame = np.array([[ 0,  1,  0],
+                             [-1,  0,  0],
+                             [ 0,  0,  1]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.ENU, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_none_raises(self):
+        """ Test get_rotation raises ValueError when either frame is NONE. """
+        with self.assertRaises(ValueError):
+            CoordinateFrame.get_rotation(CoordinateFrame.NONE, CoordinateFrame.FLU)
+        with self.assertRaises(ValueError):
+            CoordinateFrame.get_rotation(CoordinateFrame.FLU, CoordinateFrame.NONE)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

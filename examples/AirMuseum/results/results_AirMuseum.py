@@ -15,13 +15,23 @@ def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryDat
     Returns:
         List of OdometryData in the same order as robot_names, in ENU frame.
     """
+
+    name_to_frame_map: dict = {
+        "drone": CoordinateFrame.FLU,
+        "robotA": CoordinateFrame.UFL,
+        "robotB": CoordinateFrame.UFL,
+        "robotC": CoordinateFrame.FUR
+    }
+    
     user = getpass.getuser()
-    return [
-        OdometryData.from_txt(
-            '/media/' + user + '/T73/AirMuseum_dataset/' + dataset_name + '/data/' + rn + '/body_stamped_groundtruth.txt',
-            'world', 'robot', CoordinateFrame.NONE, True, [0, 1, 2, 3, 7, 4, 5, 6])
-        for rn in robot_names
-    ]
+    gt_data: List[OdometryData] = []
+    for rn in robot_names:
+        data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_name + '/data/'
+                              + rn + '/body_stamped_groundtruth.txt', 'world', 'robot',
+                              CoordinateFrame.FLU, True, [0, 1, 2, 3, 7, 4, 5, 6])
+        data.redefine_local_axes(name_to_frame_map[rn], CoordinateFrame.FLU)
+        gt_data.append(data)
+    return gt_data
 
 def main():
     """

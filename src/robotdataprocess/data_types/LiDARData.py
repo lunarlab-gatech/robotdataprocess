@@ -344,9 +344,7 @@ class LiDARData(SequentialData):
             return
 
         elif self.frame == CoordinateFrame.NED:
-            R_NED_to_FLU = np.array([[1,  0,  0],
-                                      [0, -1,  0],
-                                      [0,  0, -1]], dtype=np.float32)
+            R_NED_to_FLU = CoordinateFrame.get_rotation(self.frame, CoordinateFrame.FLU).astype(np.float32)
 
             def ned_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
                 pts = (R_NED_to_FLU @ pts.T).T
@@ -356,10 +354,7 @@ class LiDARData(SequentialData):
             self.frame = CoordinateFrame.FLU
 
         elif self.frame == CoordinateFrame.ENU:
-            # ENU: X=East, Y=North, Z=Up  →  FLU: X=Forward(North), Y=Left(-East), Z=Up
-            R_ENU_to_FLU = np.array([[ 0,  1,  0],
-                                      [-1,  0,  0],
-                                      [ 0,  0,  1]], dtype=np.float32)
+            R_ENU_to_FLU = CoordinateFrame.get_rotation(self.frame, CoordinateFrame.FLU).astype(np.float32)
 
             def enu_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
                 pts = (R_ENU_to_FLU @ pts.T).T
