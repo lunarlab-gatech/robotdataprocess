@@ -425,6 +425,13 @@ class TestCameraData(unittest.TestCase):
         np.testing.assert_array_equal(image_data_2.timestamps, expected_timestamps_2)
         self.assertEqual(cam.timeshift_cam_imu, 0.0)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        cam1 = self._make_camera()
+        cam2 = self._make_camera()
+        with self.assertRaises(NotImplementedError):
+            CameraData.crop_to_matched(cam1, cam2, Decimal("0.01"))
+
 
 if __name__ == "__main__":
     unittest.main()

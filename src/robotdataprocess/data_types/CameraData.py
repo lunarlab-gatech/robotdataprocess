@@ -885,3 +885,20 @@ class CameraData(SequentialData):
         for data in image_data:
             data.timestamps = data.timestamps + shift
         camera_data.timeshift_cam_imu = 0.0
+
+    @staticmethod
+    def crop_to_matched(data1: CameraData, data2: CameraData, tolerance: Decimal) -> None:
+        """
+        Crop two CameraData objects in place so only mutually-matched
+        entries remain.
+
+        Args:
+            data1: The first CameraData object, cropped in place.
+            data2: The second CameraData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

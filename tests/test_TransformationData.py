@@ -579,6 +579,13 @@ class TestTransformationData(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             tf.get_ros_msg(ROSMsgLibType.NONE, 0)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        tf1 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        tf2 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            TransformationData.crop_to_matched(tf1, tf2, Decimal('0.01'))
+
 
 if __name__ == "__main__":
     unittest.main()

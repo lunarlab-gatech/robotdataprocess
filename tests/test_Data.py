@@ -139,6 +139,46 @@ class TestSequentialData(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             data.crop_data(Decimal("0.1"), Decimal("0.2"))
 
+    def test_crop_to_matched_basic(self):
+        """ Test crop_to_matched keeps only mutually-close pairs, in place. """
+        data1 = SequentialData("frame1", [Decimal("0.1"), Decimal("0.2"), Decimal("0.3"), Decimal("0.4")])
+        data2 = SequentialData("frame2", [Decimal("0.15"), Decimal("0.25"), Decimal("0.35"), Decimal("10.0")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.06"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("0.1"), Decimal("0.2"), Decimal("0.3")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("0.15"), Decimal("0.25"), Decimal("0.35")])
+
+    def test_crop_to_matched_tolerance_boundary(self):
+        """ Test a diff exactly equal to tolerance is kept, but any larger diff is dropped. """
+        data1 = SequentialData("frame1", [Decimal("1.0"), Decimal("2.0")])
+        data2 = SequentialData("frame2", [Decimal("1.05"), Decimal("2.06")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.05"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("1.0")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("1.05")])
+
+    def test_crop_to_matched_enforces_one_to_one(self):
+        """ Test a single entry only consumes one match, even if multiple candidates are in tolerance. """
+        data1 = SequentialData("frame1", [Decimal("1.0")])
+        data2 = SequentialData("frame2", [Decimal("1.01"), Decimal("1.02")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.05"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("1.0")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("1.01")])
+
+    def test_crop_to_matched_no_overlap(self):
+        """ Test completely disjoint timestamps result in both objects being emptied. """
+        data1 = SequentialData("frame1", [Decimal("0.1"), Decimal("0.2")])
+        data2 = SequentialData("frame2", [Decimal("100.1"), Decimal("100.2")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.01"))
+
+        self.assertEqual(data1.len(), 0)
+        self.assertEqual(data2.len(), 0)
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestDataHertzAnalysis(unittest.TestCase):

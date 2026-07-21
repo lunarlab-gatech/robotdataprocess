@@ -6,7 +6,7 @@ from decimal import Decimal
 import matplotlib.pyplot as plt
 import numpy as np
 from typeguard import typechecked
-from typing import List
+from typing import List, Tuple
 
 class SequentialData(Data):
     """
@@ -207,3 +207,93 @@ class SequentialData(Data):
             )
 
         return hertz_diffs, hertz_values
+
+    # =========================================================================
+    # ===================== Multi SequentialData Methods =======================
+    # =========================================================================
+
+    @staticmethod
+    def _compute_matched_indices(timestamps1: np.ndarray, timestamps2: np.ndarray,
+                                 tolerance: Decimal) -> Tuple[List[int], List[int]]:
+        """
+        Find index pairs ``(i, j)`` such that
+        ``abs(timestamps1[i] - timestamps2[j]) <= tolerance``, with each
+        timestamp matched to at most one timestamp in the other array
+        (one-to-one).
+
+        Assumes both arrays are sorted. Matching uses a greedy two-pointer
+        sweep: at each step, if the current pair of timestamps is within
+        ``tolerance`` they are matched and both pointers advance; otherwise,
+        whichever pointer is at the earlier timestamp advances alone.
+
+        Args:
+            timestamps1: The first array of (sorted) timestamps.
+            timestamps2: The second array of (sorted) timestamps.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Returns:
+            Tuple of ``(matched_indices1, matched_indices2)``, parallel lists
+            of matched indices into ``timestamps1`` and ``timestamps2``.
+        """
+
+        i, j = 0, 0
+        matched_i: List[int] = []
+        matched_j: List[int] = []
+        while i < len(timestamps1) and j < len(timestamps2):
+            diff = timestamps1[i] - timestamps2[j]
+            if abs(diff) <= tolerance:
+                matched_i.append(i)
+                matched_j.append(j)
+                i += 1
+                j += 1
+            elif diff < 0:
+                i += 1
+            else:
+                j += 1
+
+        return matched_i, matched_j
+
+    @staticmethod
+    def crop_to_matched(data1: SequentialData, data2: SequentialData,
+                       tolerance: Decimal) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Crop two SequentialData objects in place so only mutually-matched
+        entries remain: for each kept pair of indices ``(i, j)``,
+        ``abs(data1.timestamps[i] - data2.timestamps[j]) <= tolerance``, and
+        each timestamp is matched to at most one timestamp in the other
+        object (one-to-one).
+
+        Assumes both objects' timestamps are sorted (as ``__init__`` already
+        expects). See ``_compute_matched_indices`` for the matching algorithm.
+
+        Subclasses with additional per-timestamp arrays (e.g. images, poses,
+        points) should call this method to crop ``timestamps``, then apply
+        the returned masks to their own arrays.
+
+        Args:
+            data1: The first SequentialData object, cropped in place.
+            data2: The second SequentialData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Returns:
+            Tuple of ``(mask1, mask2)``: boolean masks, relative to each
+            object's original (pre-crop) timestamps, indicating which
+            entries were kept.
+        """
+
+        matched_i, matched_j = SequentialData._compute_matched_indices(
+            data1.timestamps, data2.timestamps, tolerance)
+
+        mask1 = np.zeros(len(data1.timestamps), dtype=bool)
+        mask1[matched_i] = True
+        mask2 = np.zeros(len(data2.timestamps), dtype=bool)
+        mask2[matched_j] = True
+
+        data1.timestamps = data1.timestamps[mask1]
+        data2.timestamps = data2.timestamps[mask2]
+        data1._invalidate_cache()
+        data2._invalidate_cache()
+
+        return mask1, mask2

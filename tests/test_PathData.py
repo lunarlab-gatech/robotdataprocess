@@ -479,6 +479,25 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(path.positions.astype(float),
                                       [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.1, 0.2], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path2 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.1, 0.2], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        with self.assertRaises(NotImplementedError):
+            PathData.crop_to_matched(path1, path2, Decimal('0.01'))
+
     def test_shift_position_pathdata(self):
         """ Test shift_position on PathData directly. """
         path = PathData(

@@ -334,6 +334,15 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.header.stamp.sec, 2)
         self.assertEqual(ros_msg.header.stamp.nanosec, 0)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        point_clouds = [np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 1.0, 1.0]])]
+        timestamps = [Decimal("0.1"), Decimal("0.2")]
+        lidar1 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        lidar2 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            LiDARData.crop_to_matched(lidar1, lidar2, Decimal("0.01"))
+
 
     def test_calculate_point_channels_already_exists(self):
         """ Test that RuntimeError is raised when channels already calculated. """

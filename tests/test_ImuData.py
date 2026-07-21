@@ -81,6 +81,16 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(imu_data_cropped.ang_vel, imu_data.ang_vel[13:75])
         np.testing.assert_equal(imu_data_cropped.orientations, None)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        timestamps = [Decimal('0.1'), Decimal('0.2')]
+        lin_acc = np.zeros((2, 3))
+        ang_vel = np.zeros((2, 3))
+        imu1 = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, None)
+        imu2 = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, None)
+        with self.assertRaises(NotImplementedError):
+            ImuData.crop_to_matched(imu1, imu2, Decimal('0.01'))
+
     @unittest.mock.patch('robotdataprocess.data_types.ImuData.plt')
     def test_visualize_mocked(self, mock_plt):
         """ Test that ImuData.visualize runs without error (mocked matplotlib). """

@@ -2,6 +2,7 @@ from __future__ import annotations
 from ...conversion_utils import col_to_dec_arr
 from ..CameraData import CameraData
 from .ImageData import ImageData
+from ..SequentialData import SequentialData
 import cv2
 import copy
 from decimal import Decimal
@@ -602,3 +603,21 @@ class ImageDataOnDisk(ImageData):
             camera_data.K = new_K
             camera_data.R = np.eye(3, dtype=np.float64)
             camera_data.D = np.zeros_like(camera_data.D)
+
+    @staticmethod
+    def crop_to_matched(data1: ImageDataOnDisk, data2: ImageDataOnDisk, tolerance: Decimal) -> None:
+        """
+        Crop two ImageDataOnDisk objects in place so only mutually-matched
+        entries remain, keeping ``.images`` in sync with ``.timestamps`` for
+        both objects.
+
+        Args:
+            data1: The first ImageDataOnDisk object, cropped in place.
+            data2: The second ImageDataOnDisk object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+        """
+
+        mask1, mask2 = SequentialData.crop_to_matched(data1, data2, tolerance)
+        data1.images = data1.images[mask1]
+        data2.images = data2.images[mask2]

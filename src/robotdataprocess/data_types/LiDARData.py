@@ -466,6 +466,23 @@ class LiDARData(SequentialData):
 
         return LiDARData(path.frame_id, [path.timestamps[0]], [map_points], None, path.frame)
 
+    @staticmethod
+    def crop_to_matched(data1: LiDARData, data2: LiDARData, tolerance: Decimal) -> None:
+        """
+        Crop two LiDARData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first LiDARData object, cropped in place.
+            data2: The second LiDARData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
+
     # =========================================================================
     # ============================ Data Analysis ==============================
     # =========================================================================

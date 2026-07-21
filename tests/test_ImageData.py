@@ -1,3 +1,4 @@
+from decimal import Decimal
 import numpy as np
 import os
 import unittest
@@ -186,6 +187,15 @@ class TestImageData(unittest.TestCase):
 
         with self.assertRaises(NotImplementedError):
             image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+    def test_crop_to_matched_raises(self):
+        """ Test crop_to_matched raises NotImplementedError. """
+        timestamps = np.array([0.1, 0.2])
+        images = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        image_data1 = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
+        image_data2 = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
+        with self.assertRaises(NotImplementedError):
+            ImageData.crop_to_matched(image_data1, image_data2, Decimal("0.01"))
 
     def test_to_image_files_roundtrip_in_memory(self):
         """ Test saving Mono8 images to files and loading back (in-memory). """

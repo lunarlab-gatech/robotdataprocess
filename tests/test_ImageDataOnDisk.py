@@ -317,6 +317,38 @@ class TestImageDataOnDisk(unittest.TestCase):
             for i in range(3):
                 np.testing.assert_array_equal(data4.images[i], images[i][row_top:row_bottom, :])
 
+    def test_crop_to_matched(self):
+        """ crop_to_matched keeps .images in sync with .timestamps for both BagLazyImageArray-backed objects. """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # red
+        images[1, :, :] = [  0, 255,   0]  # green
+        images[2, :, :] = [  0,   0, 255]  # blue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data1 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # data2 is missing the middle (green) entry, and its last timestamp is
+            # slightly offset from data1's, but still within tolerance.
+            data2.timestamps = np.array([data2.timestamps[0], data2.timestamps[2] + Decimal('0.02')])
+            data2.images = data2.images[np.array([True, False, True])]
+
+            ImageDataOnDisk.crop_to_matched(data1, data2, Decimal('0.05'))
+
+            self.assertEqual(data1.len(), 2)
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data1.images[0], images[0])  # red
+            np.testing.assert_array_equal(data1.images[1], images[2])  # blue
+            np.testing.assert_array_equal(data2.images[0], images[0])  # red
+            np.testing.assert_array_equal(data2.images[1], images[2])  # blue
 
     def _write_ros1_compressed_image_bag(self, bag_path: Path, topic: str, frame_id: str,
                                           images: np.ndarray, timestamps_sec: list,

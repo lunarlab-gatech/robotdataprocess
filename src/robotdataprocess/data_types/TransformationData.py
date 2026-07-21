@@ -531,3 +531,24 @@ class TransformationData(SequentialData):
         else:
             raise NotImplementedError(
                 f"Unsupported ROSMsgLibType {lib_type} for TransformationData.get_ros_msg()!")
+
+    # =========================================================================
+    # ===================== Multi TransformationData Methods ===================
+    # =========================================================================
+
+    @staticmethod
+    def crop_to_matched(data1: TransformationData, data2: TransformationData, tolerance: Decimal) -> None:
+        """
+        Crop two TransformationData objects in place so only mutually-matched
+        entries remain.
+
+        Args:
+            data1: The first TransformationData object, cropped in place.
+            data2: The second TransformationData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

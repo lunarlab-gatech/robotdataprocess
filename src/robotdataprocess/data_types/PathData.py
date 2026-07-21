@@ -1530,3 +1530,20 @@ class PathData(SequentialData):
             gt_path_synced.visualize_3D([est_path_align], ['Ground Truth', 'Estimated (Aligned)'],
                               axes_interval=axes_interval, axes_length=axes_length)
         return dict_all_results, est_path_align, gt_path_synced
+
+    @staticmethod
+    def crop_to_matched(data1: PathData, data2: PathData, tolerance: Decimal) -> None:
+        """
+        Crop two PathData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first PathData object, cropped in place.
+            data2: The second PathData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

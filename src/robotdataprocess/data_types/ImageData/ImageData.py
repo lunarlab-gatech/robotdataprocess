@@ -452,3 +452,24 @@ class ImageData(SequentialData):
 
         else:
             raise NotImplementedError(f"Unsupported ROS_MSG_LIBRARY_TYPE {lib_type} for ImageData.get_ros_msg()!")
+
+    # =========================================================================
+    # ========================= Multi ImageData Methods =========================
+    # =========================================================================
+
+    @staticmethod
+    def crop_to_matched(data1: ImageData, data2: ImageData, tolerance: Decimal) -> None:
+        """
+        Crop two ImageData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first ImageData object, cropped in place.
+            data2: The second ImageData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
