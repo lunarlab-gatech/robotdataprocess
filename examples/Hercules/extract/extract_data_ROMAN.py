@@ -32,7 +32,7 @@ def data_extraction(input_dir: str, robot_name: str,
                                            CoordinateFrame.NED, False)
 
     # Convert to the FLU coordinate frame & crop
-    pose_data.to_FLU_frame()
+    pose_data.to_coordinate_frame(CoordinateFrame.FLU)
     pose_data.crop_data(start_time, end_time)
 
     # Save back to a csv file
@@ -44,7 +44,7 @@ def data_extraction(input_dir: str, robot_name: str,
 
 def main(): 
     # Enter desired configuration here
-    dataset_nums = ["V2.4.F"]
+    dataset_nums = ["V2.3.AC"]
 
     for dataset_num in dataset_nums:
         user = getpass.getuser()
@@ -77,7 +77,7 @@ def main():
                             start_time=robot_crop_start_times[i],
                             end_time=robot_crop_end_times[i],
                             skip_depth=False,
-                            skip_rgb=False)
+                            skip_rgb=True)
         
 if __name__ == "__main__":
     main()

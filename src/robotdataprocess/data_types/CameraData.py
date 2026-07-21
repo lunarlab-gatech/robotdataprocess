@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .Data import ROSMsgLibType
 from .SequentialData import SequentialData
+import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
@@ -12,9 +13,11 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+import re
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
-from typing import Any, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 import yaml
 from .ImageData.ImageData import ImageData
 
@@ -29,6 +32,9 @@ class CameraData(SequentialData):
         width: Image width in pixels.
         height: Image height in pixels.
         distortion_model: The distortion model used for this camera.
+        camera_model: The camera projection model used for this camera.
+        timeshift_cam_imu: Time offset between camera and IMU clocks, in
+            seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
         K: 3x3 camera intrinsic matrix (row-major).
         D: Distortion coefficients array (length depends on model).
         R: 3x3 rectification matrix (row-major).
@@ -41,10 +47,14 @@ class CameraData(SequentialData):
 
         Attributes:
             RADIAL_TANGENTIAL: Radial and tangential distortion model,
-                corresponding to ``"plumb_bob"`` in ROS.
+                corresponding to ``"plumb_bob"`` in ROS and Kalibr's 
+                ``"radial-tangential"``.
+            EQUIDISTANT: Equidistant (fisheye) distortion model, 
+                corresponding to Kalibr's ``"equidistant"``.
         """
 
         RADIAL_TANGENTIAL = 0
+        EQUIDISTANT = 1
 
         @staticmethod
         def to_ros_str(model: CameraData.DistortionModel) -> str:
@@ -106,22 +116,61 @@ class CameraData(SequentialData):
                     distortion model string.
             """
 
-            if model_str.lower().replace('_', '-') == 'radial-tangential':
+            model_str_canon = model_str.lower().replace('_', '-') 
+            if model_str_canon == 'radial-tangential':
                 return cls.RADIAL_TANGENTIAL
+            elif model_str_canon == 'equidistant':
+                return cls.EQUIDISTANT
             else:
                 raise NotImplementedError(
                     f"kalibr distortion model string '{model_str}' is not supported!")
 
+    class CameraModel(Enum):
+        """
+        Enum for supported camera projection models.
+
+        Attributes:
+            PINHOLE: Standard pinhole camera model.
+        """
+
+        PINHOLE = 0
+
+        @classmethod
+        def from_kalibr_str(cls, model_str: str) -> CameraData.CameraModel:
+            """
+            Convert a kalibr camera model string to a CameraModel enum value.
+
+            Args:
+                model_str: The kalibr camera model string (e.g. ``"pinhole"``).
+
+            Returns:
+                The corresponding CameraModel enum value.
+
+            Raises:
+                NotImplementedError: If ``model_str`` is not a recognised kalibr
+                    camera model string.
+            """
+
+            if model_str.lower() == 'pinhole':
+                return cls.PINHOLE
+            else:
+                raise NotImplementedError(
+                    f"kalibr camera model string '{model_str}' is not supported!")
+
     width: int
     height: int
     distortion_model: CameraData.DistortionModel
-    K: NDArray  # shape (3, 3)
-    D: NDArray  # shape (N,)
-    R: NDArray  # shape (3, 3)
-    P: NDArray  # shape (3, 4)
+    camera_model: CameraData.CameraModel
+    timeshift_cam_imu: float  # t_imu = t_cam + timeshift_cam_imu
+    K: NDArray  # shape (3, 3) - Intrinstics of the current imagery
+    D: NDArray  # shape (N,) - Current distortion parameters
+    R: NDArray  # shape (3, 3) - Current Rectification matrix that aligns the two stereo image cameras
+    P: NDArray  # shape (3, 4) - Intrinsics of the processed imagery (regardless of current imagery)
 
     def __init__(self, frame_id: str, width: int, height: int,
                  distortion_model: CameraData.DistortionModel,
+                 camera_model: CameraData.CameraModel,
+                 timeshift_cam_imu: float,
                  K: Union[NDArray, list],
                  D: Union[NDArray, list],
                  R: Union[NDArray, list],
@@ -131,6 +180,8 @@ class CameraData(SequentialData):
         self.width = width
         self.height = height
         self.distortion_model = distortion_model
+        self.camera_model = camera_model
+        self.timeshift_cam_imu = timeshift_cam_imu
         self.K = np.array(K, dtype=np.float64).reshape(3, 3)
         self.D = np.array(D, dtype=np.float64).flatten()
         self.R = np.array(R, dtype=np.float64).reshape(3, 3)
@@ -162,6 +213,88 @@ class CameraData(SequentialData):
         self.timestamps = np.array(image_data.timestamps)
 
     # =========================================================================
+    # =========================== Helper Methods ==============================
+    # =========================================================================
+
+    @staticmethod
+    def _load_kalibr_cam(data: dict, cam_name: str) -> Tuple[
+            NDArray, NDArray, int, int, 'CameraData.DistortionModel', 'CameraData.CameraModel', float]:
+        """
+        Parse a single camera's entry from an already-loaded kalibr YAML dict.
+
+        Args:
+            data: The parsed kalibr YAML contents.
+            cam_name: Camera key within ``data`` (e.g. ``"cam0"``).
+
+        Returns:
+            Tuple of ``(K, D, width, height, distortion_model, camera_model,
+            timeshift_cam_imu)``.
+
+        Raises:
+            KeyError: If ``cam_name`` is not present in ``data``.
+            NotImplementedError: If the distortion model or camera model is
+                not supported.
+        """
+
+        if cam_name not in data:
+            raise KeyError(f"Camera '{cam_name}' not found in kalibr YAML.")
+
+        cam = data[cam_name]
+
+        fu, fv, cu, cv = cam['intrinsics']
+        width, height = cam['resolution']
+        D = np.array(cam['distortion_coeffs'], dtype=np.float64)
+
+        distortion_model = CameraData.DistortionModel.from_kalibr_str(cam['distortion_model'])
+        camera_model = CameraData.CameraModel.from_kalibr_str(cam['camera_model'])
+        timeshift_cam_imu = float(cam.get('timeshift_cam_imu', 0.0))
+
+        K = np.array([[fu, 0.0, cu],
+                      [0.0, fv, cv],
+                      [0.0, 0.0, 1.0]], dtype=np.float64)
+
+        return K, D, int(width), int(height), distortion_model, camera_model, timeshift_cam_imu
+
+
+    @staticmethod
+    def _compute_undistorted_K_mono(K: NDArray, D: NDArray, R: NDArray, size_cv2: Tuple,
+                               distortion_model: CameraData.DistortionModel, alpha: float) -> NDArray:
+        """
+        Compute the target (undistorted) camera matrix for a single camera,
+        i.e. the ``new_K`` that ``cv2.initUndistortRectifyMap``/
+        ``cv2.fisheye.initUndistortRectifyMap`` should undistort/rectify into.
+
+        Args:
+            K: The camera's 3x3 intrinsic matrix.
+            D: The camera's distortion coefficients.
+            R: The 3x3 rectification rotation that will be applied (identity
+                for mono).
+            size_cv2: ``(width, height)`` of the imagery.
+            distortion_model: The distortion model of the camera.
+            alpha: Free scaling parameter for RADIAL_TANGENTIAL cameras,
+                forwarded to ``cv2.getOptimalNewCameraMatrix``. ``0`` crops to
+                valid pixels only (no black borders); ``1`` retains all source
+                pixels. Used as the ``balance`` parameter for EQUIDISTANT
+                cameras, with the same interpretation.
+
+        Returns:
+            The target 3x3 camera matrix.
+
+        Raises:
+            NotImplementedError: If ``distortion_model`` is not supported.
+        """
+
+        if distortion_model == CameraData.DistortionModel.RADIAL_TANGENTIAL:
+            new_K, _ = cv2.getOptimalNewCameraMatrix(K, D, size_cv2, alpha, size_cv2)
+            return new_K
+        elif distortion_model == CameraData.DistortionModel.EQUIDISTANT:
+            return cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
+                K, D.reshape(4, 1), size_cv2, R, balance=alpha)
+        else:
+            raise NotImplementedError(
+                f"Undistortion does not support distortion model {distortion_model}.")
+
+    # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================
 
@@ -169,13 +302,20 @@ class CameraData(SequentialData):
     def from_user_mono(cls, frame_id: str, width: int, height: int,
                        fx: float, fy: float, cx: float, cy: float,
                        distortion_model: Union[CameraData.DistortionModel, None] = None,
-                       D: Union[NDArray, list, None] = None) -> CameraData:
+                       camera_model: Union[CameraData.CameraModel, None] = None,
+                       timeshift_cam_imu: float = 0.0,
+                       D: Union[NDArray, list, None] = None,
+                       alpha: float = 0.0) -> CameraData:
         """
         Create a CameraData instance for a monocular camera from individual
         calibration parameters.
 
-        R is fixed to the identity matrix (no stereo rectification). P is
-        derived from K by appending a zero fourth column.
+        R is fixed to the identity matrix (no stereo rectification). P's
+        intrinsic part is the target undistorted camera matrix, computed
+        ahead of time via ``cv2.getOptimalNewCameraMatrix``/
+        ``cv2.fisheye.estimateNewCameraMatrixForUndistortRectify``; its
+        fourth column is zero. ``ImageDataOnDisk.undistort_imagery_mono``
+        later uses ``P`` directly to undistort imagery.
 
         Args:
             frame_id: The camera's optical frame ID.
@@ -187,8 +327,16 @@ class CameraData(SequentialData):
             cy: Principal point y coordinate (pixels).
             distortion_model: The distortion model. Defaults to
                 ``DistortionModel.RADIAL_TANGENTIAL``.
+            camera_model: The camera projection model. Defaults to
+                ``CameraModel.PINHOLE``.
+            timeshift_cam_imu: Time offset between camera and IMU clocks, in
+                seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
+                Defaults to 0.
             D: Distortion coefficients. Defaults to all-zeros (5 coefficients
                 for ``RADIAL_TANGENTIAL``).
+            alpha: Free scaling parameter used to compute ``P``. ``0`` crops
+                to valid pixels only (no black borders); ``1`` retains all
+                source pixels. See ``_compute_undistorted_K`` for details.
 
         Returns:
             CameraData: Instance populated with the provided calibration.
@@ -197,24 +345,31 @@ class CameraData(SequentialData):
         if distortion_model is None:
             distortion_model = CameraData.DistortionModel.RADIAL_TANGENTIAL
 
+        if camera_model is None:
+            camera_model = CameraData.CameraModel.PINHOLE
+
         K = np.array([[fx, 0.0, cx],
                       [0.0, fy, cy],
                       [0.0, 0.0, 1.0]], dtype=np.float64)
 
         if D is None:
             D = np.zeros(5, dtype=np.float64)
+        D = np.array(D, dtype=np.float64).flatten()
 
         R = np.eye(3, dtype=np.float64)
 
+        new_K = cls._compute_undistorted_K_mono(K, D, R, (width, height), distortion_model, alpha)
         P = np.zeros((3, 4), dtype=np.float64)
-        P[:3, :3] = K
+        P[:3, :3] = new_K
 
         return cls(frame_id=frame_id, width=width, height=height,
-                   distortion_model=distortion_model,
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
                    K=K, D=D, R=R, P=P)
 
     @classmethod
-    def from_kalibr_mono(cls, yaml_path: Union[str, Path], cam_name: str) -> CameraData:
+    def from_kalibr_mono(cls, yaml_path: Union[str, Path], cam_name: str,
+                        alpha: float = 0.0) -> CameraData:
         """
         Load a monocular camera calibration from a kalibr YAML file.
 
@@ -223,46 +378,211 @@ class CameraData(SequentialData):
         - ``intrinsics``: ``[fu, fv, cu, cv]``
         - ``distortion_coeffs``: distortion coefficient list
         - ``distortion_model``: e.g. ``"radial-tangential"``
+        - ``camera_model``: must be ``"pinhole"``
         - ``resolution``: ``[width, height]``
 
-        R is fixed to the identity matrix and P is derived from K by
-        appending a zero fourth column.
+        The YAML entry may optionally contain ``timeshift_cam_imu``, the time
+        offset between camera and IMU clocks, in seconds, such that
+        ``t_imu = t_cam + timeshift_cam_imu``. It defaults to 0 if not present.
+
+        R is fixed to the identity matrix. P's intrinsic part is the target
+        undistorted camera matrix, computed ahead of time via
+        ``_compute_undistorted_K``; its fourth column is zero.
+        ``ImageDataOnDisk.undistort_imagery_mono`` later uses ``P`` directly
+        to undistort imagery.
 
         Args:
             yaml_path: Path to the kalibr YAML calibration file.
             cam_name: Camera key within the YAML (e.g. ``"cam0"``).
+            alpha: Free scaling parameter used to compute ``P``. ``0`` crops
+                to valid pixels only (no black borders); ``1`` retains all
+                source pixels. See ``_compute_undistorted_K`` for details.
 
         Returns:
             CameraData: Instance populated with the loaded calibration.
 
         Raises:
             KeyError: If ``cam_name`` is not present in the YAML.
-            NotImplementedError: If the distortion model is not supported.
+            NotImplementedError: If the distortion model or camera model is
+                not supported.
         """
 
         with open(yaml_path, 'r') as f:
             data = yaml.safe_load(f)
 
-        if cam_name not in data:
-            raise KeyError(f"Camera '{cam_name}' not found in {yaml_path}.")
+        K, D, width, height, distortion_model, camera_model, timeshift_cam_imu = cls._load_kalibr_cam(data, cam_name)
 
-        cam = data[cam_name]
-
-        fu, fv, cu, cv = cam['intrinsics']
-        width, height = cam['resolution']
-        D = np.array(cam['distortion_coeffs'], dtype=np.float64)
-
-        distortion_model = CameraData.DistortionModel.from_kalibr_str(cam['distortion_model'])
-
-        K = np.array([[fu, 0.0, cu],
-                      [0.0, fv, cv],
-                      [0.0, 0.0, 1.0]], dtype=np.float64)
         R = np.eye(3, dtype=np.float64)
+        new_K = cls._compute_undistorted_K_mono(K, D, R, (width, height), distortion_model, alpha)
         P = np.zeros((3, 4), dtype=np.float64)
-        P[:3, :3] = K
+        P[:3, :3] = new_K
 
-        return cls(frame_id=cam_name, width=int(width), height=int(height),
-                   distortion_model=distortion_model,
+        return cls(frame_id=cam_name, width=width, height=height,
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
+                   K=K, D=D, R=R, P=P)
+
+    @classmethod
+    def from_kalibr_stereo(cls, yaml_path: Union[str, Path], cam_left_name: str = 'cam0',
+                           cam_right_name: str = 'cam1', alpha: float = 0.0) -> Tuple[CameraData, CameraData]:
+        """
+        Load a stereo camera pair calibration from a kalibr YAML file, with
+        stereo rectification applied.
+
+        ``cam_left_name`` and ``cam_right_name`` entries are parsed the same
+        way as in ``from_kalibr_mono``. The extrinsic transform between the
+        two cameras is read from the ``cam_right_name`` entry's ``T_cn_cnm1``
+        key (kalibr's standard "this camera from the previous camera in the
+        chain" 4x4 homogeneous transform), and used to compute the
+        rectifying rotations (``R``) and projection matrices (``P``) for
+        both cameras via
+        ``cv2.stereoRectify`` (or ``cv2.fisheye.stereoRectify`` for
+        ``EQUIDISTANT`` cameras). ``K`` and ``D`` are left as the original,
+        unrectified calibration; ``undistort_imagery_stereo`` uses the
+        resulting ``R``/``P`` to actually rectify and undistort images.
+
+        Args:
+            yaml_path: Path to the kalibr YAML calibration file.
+            cam_left_name: Left camera key within the YAML. Defaults to ``"cam0"``.
+            cam_right_name: Right camera key within the YAML. Defaults to ``"cam1"``.
+            alpha: Free scaling parameter forwarded to ``cv2.stereoRectify``
+                (or used as ``balance`` for ``cv2.fisheye.stereoRectify``).
+                ``0`` crops to valid pixels only; ``1`` retains all source
+                pixels.
+
+        Returns:
+            Tuple of ``(CameraData for cam_left_name, CameraData for cam_right_name)``.
+
+        Raises:
+            KeyError: If ``cam_left_name``/``cam_right_name`` or
+                ``cam_right_name``'s ``T_cn_cnm1`` entry is not present in
+                the YAML.
+            NotImplementedError: If the distortion model or camera model is
+                not supported, or the two cameras don't share a distortion
+                model.
+        """
+
+        with open(yaml_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        K_left, D_left, width_left, height_left, distortion_model_left, camera_model_left, timeshift_cam_imu_left = \
+            cls._load_kalibr_cam(data, cam_left_name)
+        K_right, D_right, width_right, height_right, distortion_model_right, camera_model_right, timeshift_cam_imu_right = \
+            cls._load_kalibr_cam(data, cam_right_name)
+
+        if distortion_model_left != distortion_model_right:
+            raise NotImplementedError(
+                "from_kalibr_stereo() requires both cameras to share a distortion model, "
+                f"got {distortion_model_left} and {distortion_model_right}.")
+        if camera_model_left != camera_model_right:
+            raise NotImplementedError(
+                "from_kalibr_stereo() requires both cameras to share a camera model, "
+                f"got {camera_model_left} and {camera_model_right}.")
+        if width_left != width_right or height_left != height_right:
+            raise ValueError(
+                f"from_kalibr_stereo() requires both cameras to share a resolution, "
+                f"got {width_left}x{height_left} and {width_right}x{height_right}.")
+
+        if 'T_cn_cnm1' in data[cam_right_name]:
+            T_right_left = np.array(data[cam_right_name]['T_cn_cnm1'], dtype=np.float64).reshape(4, 4)
+        elif 'T_cn_cnm1' in data[cam_left_name]:
+            T_left_right = np.array(data[cam_left_name]['T_cn_cnm1'], dtype=np.float64).reshape(4, 4)
+            T_right_left = np.linalg.inv(T_left_right)
+        else:
+            raise KeyError(
+                f"'T_cn_cnm1' not found in '{cam_right_name}' or '{cam_left_name}' entry of {yaml_path}.")
+
+        R_extrinsic = T_right_left[:3, :3]
+        t_extrinsic = T_right_left[:3, 3]
+        size_cv2: Tuple = (width_left, height_left)
+
+        if distortion_model_left == CameraData.DistortionModel.RADIAL_TANGENTIAL:
+            R_left, R_right, P_left, P_right, _, _, _ = cv2.stereoRectify(
+                K_left, D_left, K_right, D_right, size_cv2, R_extrinsic, t_extrinsic, alpha=alpha)
+        elif distortion_model_left == CameraData.DistortionModel.EQUIDISTANT:
+            R_left, R_right, P_left, P_right, _ = cv2.fisheye.stereoRectify(
+                K_left, D_left.reshape(4, 1), K_right, D_right.reshape(4, 1), size_cv2,
+                R_extrinsic, t_extrinsic, flags=cv2.CALIB_ZERO_DISPARITY, balance=alpha)
+        else:
+            raise NotImplementedError(
+                f"from_kalibr_stereo() does not support distortion model {distortion_model_left}.")
+
+        cam_left = cls(frame_id=cam_left_name, width=width_left, height=height_left,
+                       distortion_model=distortion_model_left, camera_model=camera_model_left,
+                       timeshift_cam_imu=timeshift_cam_imu_left,
+                       K=K_left, D=D_left, R=R_left, P=P_left)
+        cam_right = cls(frame_id=cam_right_name, width=width_right, height=height_right,
+                        distortion_model=distortion_model_right, camera_model=camera_model_right,
+                        timeshift_cam_imu=timeshift_cam_imu_right,
+                        K=K_right, D=D_right, R=R_right, P=P_right)
+        return cam_left, cam_right
+
+    @classmethod
+    def from_ros1_bag(cls, bag_path: Union[Path, str], camera_info_topic: str,
+                      camera_model: Union[CameraData.CameraModel, None] = None,
+                      timeshift_cam_imu: float = 0.0) -> CameraData:
+        """
+        Load a CameraData instance from a ``sensor_msgs/CameraInfo`` topic in a
+        ROS1 ``.bag`` file.
+
+        Only the first message on ``camera_info_topic`` is read; camera
+        calibration is assumed to be static across the bag.
+        ``sensor_msgs/CameraInfo`` does not carry a camera projection model or
+        a camera-IMU time offset, so both must be supplied by the caller.
+
+        Args:
+            bag_path: Path to the ``.bag`` file.
+            camera_info_topic: Topic name of the ``sensor_msgs/CameraInfo``
+                stream.
+            camera_model: The camera projection model. Defaults to
+                ``CameraModel.PINHOLE``.
+            timeshift_cam_imu: Time offset between camera and IMU clocks, in
+                seconds, such that ``t_imu = t_cam + timeshift_cam_imu``.
+                Defaults to 0.
+
+        Returns:
+            CameraData: Instance populated with the calibration from the first
+            message.
+
+        Raises:
+            ValueError: If ``camera_info_topic`` is not present in the bag or
+                the bag contains no messages on that topic.
+            NotImplementedError: If the distortion model in the message is not
+                supported.
+        """
+        if camera_model is None:
+            camera_model = CameraData.CameraModel.PINHOLE
+
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+
+        with Reader1(Path(bag_path)) as reader:
+            conns = [c for c in reader.connections if c.topic == camera_info_topic]
+            if not conns:
+                raise ValueError(
+                    f"Topic {camera_info_topic!r} not found in bag {bag_path}.")
+            conn = conns[0]
+
+            msg = None
+            for _, _, rawdata in reader.messages(connections=conns):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+                break
+
+            if msg is None:
+                raise ValueError(
+                    f"No messages found on topic {camera_info_topic!r} in bag {bag_path}.")
+
+            frame_id = msg.header.frame_id
+            width = int(msg.width)
+            height = int(msg.height)
+            distortion_model = CameraData.DistortionModel.from_ros_str(msg.distortion_model)
+            K = np.array(msg.K, dtype=np.float64).reshape(3, 3)
+            D = np.array(msg.D, dtype=np.float64).flatten()
+            R = np.array(msg.R, dtype=np.float64).reshape(3, 3)
+            P = np.array(msg.P, dtype=np.float64).reshape(3, 4)
+
+        return cls(frame_id=frame_id, width=width, height=height,
+                   distortion_model=distortion_model, camera_model=camera_model,
+                   timeshift_cam_imu=timeshift_cam_imu,
                    K=K, D=D, R=R, P=P)
 
     # =========================================================================
@@ -539,3 +859,46 @@ class CameraData(SequentialData):
         else:
             raise NotImplementedError(
                 f"Unsupported ROSMsgLibType {lib_type} for CameraData.get_ros_msg()!")
+
+    # =========================================================================
+    # ========================= Multi Data Methods =============================
+    # =========================================================================
+
+    @staticmethod
+    def align_ImageData_and_CameraData_to_imu_ts(image_data: List[ImageData], camera_data: CameraData) -> None:
+        """
+        Shift a list of ImageData's timestamps onto the IMU clock using their
+        shared CameraData's ``timeshift_cam_imu``, such that
+        ``t_cam_new (t_imu) = t_cam + timeshift_cam_imu``.
+
+        Modifies all objects in place: each ``ImageData.timestamps`` is
+        shifted onto the IMU clock, and ``camera_data.timeshift_cam_imu`` is
+        reset to 0, since the offset has now been resolved.
+
+        Args:
+            image_data: The ImageData instances whose timestamps to shift
+                onto the IMU clock.
+            camera_data: The CameraData providing the ``timeshift_cam_imu`` offset.
+        """
+
+        shift = Decimal(str(camera_data.timeshift_cam_imu))
+        for data in image_data:
+            data.timestamps = data.timestamps + shift
+        camera_data.timeshift_cam_imu = 0.0
+
+    @staticmethod
+    def crop_to_matched(data1: CameraData, data2: CameraData, tolerance: Decimal) -> None:
+        """
+        Crop two CameraData objects in place so only mutually-matched
+        entries remain.
+
+        Args:
+            data1: The first CameraData object, cropped in place.
+            data2: The second CameraData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

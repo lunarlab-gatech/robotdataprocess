@@ -39,7 +39,7 @@ class TestImageDataInMemory(unittest.TestCase):
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
         with np.testing.assert_raises(NotImplementedError):
-            ImageDataInMemory.ImageEncoding.from_ros_str("fake_name")
+            ImageDataInMemory.ImageEncoding.from_ros2_str("fake_name")
 
     def test_from_npy(self):
         """
@@ -101,7 +101,7 @@ class TestImageDataInMemory(unittest.TestCase):
             os.remove(bag_path / 'rgb_data_bag.db3')
             os.remove(bag_path / 'metadata.yaml')
             os.rmdir(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [image_data], ['/cam0'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [image_data], ['/cam0'], [None], None)
 
         # Load that data directly from the rosbag
         npy_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb', 'npy').absolute()
@@ -192,7 +192,26 @@ class TestImageDataInMemory(unittest.TestCase):
         np.testing.assert_equal(image_data.height, npy_data.height)
         np.testing.assert_equal(image_data.width, npy_data.width)
         np.testing.assert_equal(image_data.encoding, npy_data.encoding)
-        
+
+        # === Test with Mono8 Images ===
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_image_files', 'mono8').absolute()
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'callie')
+
+        # Save to .npy file and reload
+        save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy_mono8').absolute()
+        save_path.mkdir(parents=True, exist_ok=True)
+        image_data.to_npy(save_path)
+        npy_data = ImageDataInMemory.from_npy(save_path)
+
+        # Ensure the data hasn't changed
+        np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
+        np.testing.assert_array_almost_equal(image_data.timestamps, npy_data.timestamps, 16)
+        np.testing.assert_equal(image_data.frame_id, npy_data.frame_id)
+        np.testing.assert_equal(image_data.height, npy_data.height)
+        np.testing.assert_equal(image_data.width, npy_data.width)
+        np.testing.assert_equal(image_data.encoding, npy_data.encoding)
+
     def test_crop_data(self):
         """ Ensure the correct data is cropped. """
 
@@ -223,7 +242,7 @@ class TestImageDataInMemory(unittest.TestCase):
         bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
         if bag_path.exists():
             shutil.rmtree(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(
+        Ros2BagWrapper.write_data_to_ros2_bag(
             bag_path,
             [image_data], 
             ['/cam0/depth'], 

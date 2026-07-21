@@ -41,7 +41,7 @@ def main():
         odom_data.apply_transformation_right_side(H_L_to_I_in_NED)
 
         # Convert frame from NED to FLU
-        odom_data.to_FLU_frame()
+        odom_data.to_coordinate_frame(CoordinateFrame.FLU)
 
         # Save the csv in a ROMAN friendly format
         output_path = '/media/' + user + '/T73/Hercules_datasets/'+dataset_version+'/extract/files_for_roman_baseline/' \

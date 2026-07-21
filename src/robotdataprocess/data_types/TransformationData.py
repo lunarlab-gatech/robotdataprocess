@@ -8,6 +8,7 @@ import json
 from ..ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 from rosbags.typesys import Stores, get_typestore
 from typeguard import typechecked
 from typing import Any, List, Tuple, Union
@@ -97,7 +98,54 @@ class TransformationData(SequentialData):
         )
 
     @classmethod
-    def from_GrAco_yaml(cls, yaml_path: str, transform_name: str) -> TransformationData:
+    def from_kalibr(cls, yaml_path: Union[Path, str], cam_name: str, transform_name: str,
+                     frame: CoordinateFrame) -> TransformationData:
+        """
+        Load a transformation from a kalibr camera calibration YAML file.
+
+        Kalibr stores transforms under a camera block (e.g. ``cam0``) as a
+        4x4 nested list following the convention ``p_A = T_A_B @ p_B``, where
+        ``A`` and ``B`` are given by the transform name (e.g. ``T_cam_imu``
+        maps IMU-frame points into the camera frame). The token ``cam`` (or
+        ``cn``) in the transform name is replaced with ``cam_name`` to
+        recover the frame_id.
+
+        Args:
+            yaml_path: Path to the kalibr YAML file.
+            cam_name: Name of the camera block (e.g. ``'cam0'``).
+            transform_name: Name of the transform key within the camera
+                block (e.g. ``'T_cam_imu'``).
+            frame: The coordinate frame of this transformation.
+
+        Raises:
+            KeyError: If ``cam_name`` or ``transform_name`` is not found in
+                the YAML.
+            ValueError: If the transform is not a 4x4 matrix.
+        """
+
+        with open(yaml_path, "r") as f:
+            data = yaml.safe_load(f)
+
+        if cam_name not in data:
+            raise KeyError(f"Camera '{cam_name}' not found in {yaml_path}")
+        cam = data[cam_name]
+
+        if transform_name not in cam:
+            raise KeyError(f"Transform '{transform_name}' not found for camera '{cam_name}' in {yaml_path}")
+
+        matrix = np.array(cam[transform_name], dtype=float)
+        if matrix.shape != (4, 4):
+            raise ValueError(f"Expected 4x4 transformation matrix, got {matrix.shape}")
+
+        # Extract frame_id and child_frame_id from transform name (e.g. T_cam_imu -> cam0, imu)
+        parts = transform_name.split("_")[1:]
+        frame_id = cam_name if parts[0] in ("cam", "cn") else parts[0]
+        child_frame_id = "_".join(parts[1:])
+
+        return cls.from_matrix(frame_id, child_frame_id, matrix, frame)
+
+    @classmethod
+    def from_GrAco_yaml(cls, yaml_path: Union[Path, str], transform_name: str) -> TransformationData:
         """
         Load a transformation from a GrAco calibration YAML file.
 
@@ -208,8 +256,7 @@ class TransformationData(SequentialData):
             return TransformationData(self.frame_id, self.child_frame_id, self.translation.copy(), self.orientation.copy(), self.frame)
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
-            # The frame change rotation: 180 degrees around X
-            R_frame = R.from_euler('x', 180, degrees=True)
+            R_frame = R.from_matrix(CoordinateFrame.get_rotation(self.frame, target_frame))
 
             if transform_type == TransformType.ROTATION:
                 # Apply as a rotation: R_frame * t, R_frame * q
@@ -302,7 +349,8 @@ class TransformationData(SequentialData):
     # =========================================================================
 
     @staticmethod
-    def visualize(transformations: List[TransformationData], axes_length: float = 1.0):
+    def visualize(transformations: List[TransformationData], axes_length: float = 1.0,
+                  save_path: Union[Path, str, None] = None):
         """
         Visualize multiple transformations in the same 3D space.
 
@@ -310,14 +358,17 @@ class TransformationData(SequentialData):
             transformations: List of TransformationData objects to plot.
                 An identity world frame is appended automatically.
             axes_length: Length of the plotted orientation axes in meters.
+            save_path: If provided, saves the figure to this path instead of
+                displaying it.
         """
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
 
         # Extract data and plot
         points = []
-        transformations.append(TransformationData.from_matrix("World", "World", np.eye(4), CoordinateFrame.FLU))
-        for trans in transformations:
+        world_frame = TransformationData.from_matrix("World", "World", np.eye(4), CoordinateFrame.FLU)
+        for trans in transformations + [world_frame]:
+            is_world = trans is world_frame
             pos = trans.translation
             rot = R.from_quat(trans.orientation)
 
@@ -326,10 +377,12 @@ class TransformationData(SequentialData):
             y_axis = rot.apply([0, 1, 0])
             z_axis = rot.apply([0, 0, 1])
 
-            # Plot axes
-            ax.quiver(*pos, *x_axis, length=axes_length, color='r', normalize=True, linewidth=0.8)
-            ax.quiver(*pos, *y_axis, length=axes_length, color='g', normalize=True, linewidth=0.8)
-            ax.quiver(*pos, *z_axis, length=axes_length, color='b', normalize=True, linewidth=0.8)
+            # Plot axes (world frame drawn darker and slightly shorter to stand out less)
+            length = axes_length * 0.75 if is_world else axes_length
+            x_color, y_color, z_color = ('darkred', 'darkgreen', 'darkblue') if is_world else ('r', 'g', 'b')
+            ax.quiver(*pos, *x_axis, length=length, color=x_color, normalize=True, linewidth=0.8)
+            ax.quiver(*pos, *y_axis, length=length, color=y_color, normalize=True, linewidth=0.8)
+            ax.quiver(*pos, *z_axis, length=length, color=z_color, normalize=True, linewidth=0.8)
 
             # Collect endpoints for bounds
             points.append(pos)
@@ -360,9 +413,12 @@ class TransformationData(SequentialData):
         except AttributeError:
             pass  # older matplotlib
 
-        # Show the plot
+        # Show or save the plot
         plt.tight_layout()
-        plt.show()
+        if save_path is not None:
+            plt.savefig(save_path)
+        else:
+            plt.show()
 
     # =========================================================================
     # =========================== Conversion to ROS ===========================
@@ -475,3 +531,24 @@ class TransformationData(SequentialData):
         else:
             raise NotImplementedError(
                 f"Unsupported ROSMsgLibType {lib_type} for TransformationData.get_ros_msg()!")
+
+    # =========================================================================
+    # ===================== Multi TransformationData Methods ===================
+    # =========================================================================
+
+    @staticmethod
+    def crop_to_matched(data1: TransformationData, data2: TransformationData, tolerance: Decimal) -> None:
+        """
+        Crop two TransformationData objects in place so only mutually-matched
+        entries remain.
+
+        Args:
+            data1: The first TransformationData object, cropped in place.
+            data2: The second TransformationData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

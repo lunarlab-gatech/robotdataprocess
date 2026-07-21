@@ -448,4 +448,25 @@ class ImuData(SequentialData):
 
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg()!")
+
+    # =========================================================================
+    # ========================= Multi ImuData Methods ==========================
+    # =========================================================================
+
+    @staticmethod
+    def crop_to_matched(data1: 'ImuData', data2: 'ImuData', tolerance: Decimal) -> None:
+        """
+        Crop two ImuData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first ImuData object, cropped in place.
+            data2: The second ImuData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     

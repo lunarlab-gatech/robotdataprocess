@@ -28,7 +28,7 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     lidar_data.crop_data(start_time, end_time)
 
     # Save it into a ROS2 bag
-    Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
+    Ros2BagWrapper.write_data_to_ros2_bag(output_path / robot_name,
                       [  imu_data,     lidar_data,     pose_data],
                       ['/imu_raw',  '/points_raw',    '/odom_gt'],
                       [      None,           None,        "Path"], None)

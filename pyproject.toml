@@ -18,10 +18,13 @@ dependencies = ["coverage",
                 "matplotlib",
 
                 # NumPy pin for successful build with ROS2
-                "numpy<1.25; python_version >= '3.10'",
+                "numpy<1.25; python_version >= '3.10' and python_version < '3.12'",
                 "numpy; python_version <= '3.9'",
+                "numpy; python_version >= '3.12'",
 
                 "opencv-python",
+                "open3d",
+                "pymupdf",
                 "rosbags",
                 "scipy",
                 "snakeviz",

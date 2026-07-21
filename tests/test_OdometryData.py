@@ -10,7 +10,10 @@ from robotdataprocess.data_types.Data import ROSMsgLibType, TransformType
 from robotdataprocess.data_types.OdometryData import OdometryData, PATH_SLICE_STEP
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag1 import Writer as Writer1
+from rosbags.typesys import Stores, get_typestore
 from scipy.spatial.transform import Rotation as R
+import tempfile
 from test_utils import safe_urlretrieve
 import unittest
 
@@ -82,7 +85,7 @@ class TestOdometryData(unittest.TestCase):
             os.rmdir(bag_path)
 
         # Save it into a ROS2 bag
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [odom_data, odom_data], ['/odom', '/odom/path'], ["Odometry", "Path"], None)
 
         # Load the data back again
         ros_data = OdometryData.from_ros2_bag(bag_path, '/odom', CoordinateFrame.FLU)
@@ -143,6 +146,9 @@ class TestOdometryData(unittest.TestCase):
             np.testing.assert_equal(odom_data.frame_id, '/Husky1')
             np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
             np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
+            # Verify Decimal dtype is preserved after frame conversion
+            self.assertIsInstance(odom_data.positions[0][0], Decimal)
+            self.assertIsInstance(odom_data.orientations[0][0], Decimal)
 
         # ===  Test NED to FLU (default CHANGE_OF_BASIS) ===
         file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_from_txt_file_AND_get_ros_msg_AND_from_ros2_bag', 'odom.txt').absolute()
@@ -170,6 +176,12 @@ class TestOdometryData(unittest.TestCase):
 
         # Positions should be identical (both apply R * p)
         np.testing.assert_array_equal(odom_rotation.positions, odom_cob.positions)
+
+        # Decimal dtype must be preserved after both transform types
+        self.assertIsInstance(odom_rotation.positions[0][0], Decimal)
+        self.assertIsInstance(odom_rotation.orientations[0][0], Decimal)
+        self.assertIsInstance(odom_cob.positions[0][0], Decimal)
+        self.assertIsInstance(odom_cob.orientations[0][0], Decimal)
 
         # Orientations should differ between ROTATION and CHANGE_OF_BASIS
         self.assertFalse(np.allclose(
@@ -215,7 +227,9 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_almost_equal(odom_data.orientations[13801].astype(np.float128), [-0.0013123360311483368, -0.0005744812796045746, 0.3999401764357198, 0.9165401262454177], 8)
         np.testing.assert_equal(odom_data.frame_id, '/Husky1')
         np.testing.assert_equal(odom_data.child_frame_id, '/Husky1/base_link')
-        np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
+        # shift_to_start_at_identity re-anchors the trajectory to the vehicle's own
+        # starting pose, so it no longer aligns with FLU/NED/ENU world axes.
+        np.testing.assert_equal(odom_data.frame, CoordinateFrame.NONE)
 
     def test_crop_data(self):
         # Load the Odometry data
@@ -237,8 +251,92 @@ class TestOdometryData(unittest.TestCase):
         # Ensure the rotation functions properly
         odom_data_rotated = deepcopy(odom_data)
         rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
-        odom_data_rotated._ori_apply_rotation(rotation)
-        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10], np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
+        odom_data_rotated._ori_apply_rotation_left_side(rotation)
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10].astype(np.float128), np.array([-0.00136472,  0.70713652, -0.7070743, 0.00141704]), 8)
+
+    def test_ori_apply_rotation_right_side(self):
+        # Load the Odometry data
+        file_path = Path(Path('.'), 'tests', 'files', 'test_OdometryData', 'test_ori_apply_rotation', 'odom.txt').absolute()
+        odom_data = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
+
+        # Ensure the rotation functions properly and matches R.from_quat(q) * R_i
+        odom_data_rotated = deepcopy(odom_data)
+        rotation = R.from_quat([0.7071068, 0, 0, 0.7071068])
+        odom_data_rotated._ori_apply_rotation_right_side(rotation)
+        expected = (R.from_quat(odom_data.orientations[10].astype(np.float128)) * rotation).as_quat()
+        np.testing.assert_array_almost_equal(odom_data_rotated.orientations[10].astype(np.float128), expected, 8)
+
+    def test_ori_apply_rotation_right_side_multiple_orientations(self):
+        # Use several distinct, non-trivial orientations to make sure each row is transformed independently
+        orientations = np.array([
+            [0.0, 0.0, 0.0, 1.0],
+            [0.7071068, 0.0, 0.0, 0.7071068],
+            [0.0, 0.7071068, 0.0, 0.7071068],
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1, 2, 3], np.zeros((4, 3)), orientations, CoordinateFrame.FLU)
+
+        rotation = R.from_euler('xyz', [15, -30, 60], degrees=True)
+        odom_data._ori_apply_rotation_right_side(rotation)
+
+        for i in range(len(orientations)):
+            expected = (R.from_quat(orientations[i]) * rotation).as_quat()
+            np.testing.assert_array_almost_equal(odom_data.orientations[i].astype(np.float128), expected, 6)
+
+    def test_ori_apply_rotation_right_side_identity_is_noop(self):
+        # Rotating by the identity should leave every orientation unchanged
+        orientations = np.array([
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+            [-0.5, 0.5, -0.5, 0.5],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1], np.zeros((2, 3)), orientations, CoordinateFrame.FLU)
+
+        odom_data._ori_apply_rotation_right_side(R.identity())
+
+        np.testing.assert_array_almost_equal(odom_data.orientations.astype(np.float128), orientations, 6)
+
+    def test_ori_apply_rotation_right_side_order_matters(self):
+        # Right-side and left-side application should differ for non-commuting rotations
+        orientation = np.array([[0.2705981, 0.2705981, 0.6532815, 0.6532815]])
+        rotation = R.from_euler('xyz', [10, 20, 30], degrees=True)
+
+        odom_right = OdometryData("temp", "child", [0], np.zeros((1, 3)), orientation.copy(), CoordinateFrame.FLU)
+        odom_right._ori_apply_rotation_right_side(rotation)
+
+        odom_left = OdometryData("temp", "child", [0], np.zeros((1, 3)), orientation.copy(), CoordinateFrame.FLU)
+        odom_left._ori_apply_rotation_left_side(rotation)
+
+        with self.assertRaises(AssertionError):
+            np.testing.assert_array_almost_equal(
+                odom_right.orientations[0].astype(np.float128), odom_left.orientations[0].astype(np.float128), 6)
+
+        expected_right = (R.from_quat(orientation[0]) * rotation).as_quat()
+        np.testing.assert_array_almost_equal(odom_right.orientations[0].astype(np.float128), expected_right, 8)
+
+    def test_ori_apply_rotation_right_side_preserves_unit_norm(self):
+        orientations = np.array([
+            [0.2705981, 0.2705981, 0.6532815, 0.6532815],
+            [0.0, 0.0, 0.0, 1.0],
+            [-0.5, 0.5, -0.5, 0.5],
+        ])
+        odom_data = OdometryData("temp", "child", [0, 1, 2], np.zeros((3, 3)), orientations, CoordinateFrame.FLU)
+
+        rotation = R.from_euler('xyz', [42, -17, 8], degrees=True)
+        odom_data._ori_apply_rotation_right_side(rotation)
+
+        norms = np.linalg.norm(odom_data.orientations.astype(np.float128), axis=1)
+        np.testing.assert_array_almost_equal(norms, np.ones(3), 8)
+
+    def test_ori_apply_rotation_right_side_leaves_positions_and_timestamps_unchanged(self):
+        timestamps = [Decimal("0.5"), Decimal("1.5")]
+        positions = np.array([[1.0, 2.0, 3.0], [-4.0, 5.0, -6.0]])
+        orientations = np.array([[0.0, 0.0, 0.0, 1.0], [0.7071068, 0.0, 0.0, 0.7071068]])
+        odom_data = OdometryData("temp", "child", timestamps, positions, orientations, CoordinateFrame.FLU)
+
+        odom_data._ori_apply_rotation_right_side(R.from_euler('xyz', [5, 10, 15], degrees=True))
+
+        np.testing.assert_array_equal(odom_data.positions.astype(float), positions)
+        np.testing.assert_array_equal([float(ts) for ts in odom_data.timestamps], [0.5, 1.5])
 
     def test_apply_transformation(self):
         # Load the Odometry data
@@ -484,6 +582,149 @@ class TestOdometryData(unittest.TestCase):
                 loaded.positions.astype(float), odom.positions.astype(float))
             np.testing.assert_array_almost_equal(
                 loaded.orientations.astype(float), odom.orientations.astype(float))
+
+    def _write_ros1_odom_bag(self, bag_path: Path, topic: str, frame_id: str,
+                              child_frame_id: str, timestamps_sec: list,
+                              positions: np.ndarray, orientations: np.ndarray) -> None:
+        """Write a ROS1 bag containing nav_msgs/msg/Odometry messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        OdomMsg       = typestore.types['nav_msgs/msg/Odometry']
+        Header        = typestore.types['std_msgs/msg/Header']
+        Time          = typestore.types['builtin_interfaces/msg/Time']
+        PoseWithCov   = typestore.types['geometry_msgs/msg/PoseWithCovariance']
+        Pose          = typestore.types['geometry_msgs/msg/Pose']
+        Point         = typestore.types['geometry_msgs/msg/Point']
+        Quaternion    = typestore.types['geometry_msgs/msg/Quaternion']
+        TwistWithCov  = typestore.types['geometry_msgs/msg/TwistWithCovariance']
+        Twist         = typestore.types['geometry_msgs/msg/Twist']
+        Vector3       = typestore.types['geometry_msgs/msg/Vector3']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, OdomMsg.__msgtype__, typestore=typestore)
+            for i, (ts, pos, ori) in enumerate(zip(timestamps_sec, positions, orientations)):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = OdomMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    child_frame_id=child_frame_id,
+                    pose=PoseWithCov(
+                        pose=Pose(
+                            position=Point(x=float(pos[0]), y=float(pos[1]), z=float(pos[2])),
+                            orientation=Quaternion(x=float(ori[0]), y=float(ori[1]),
+                                                   z=float(ori[2]), w=float(ori[3])),
+                        ),
+                        covariance=np.zeros(36),
+                    ),
+                    twist=TwistWithCov(
+                        twist=Twist(
+                            linear=Vector3(x=0.0, y=0.0, z=0.0),
+                            angular=Vector3(x=0.0, y=0.0, z=0.0),
+                        ),
+                        covariance=np.zeros(36),
+                    ),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, OdomMsg.__msgtype__))
+
+    def test_from_ros1_bag(self):
+        """Write a ROS1 bag with known Odometry messages and verify from_ros1_bag round-trips."""
+        frame_id       = 'odom'
+        child_frame_id = 'base_link'
+        topic          = '/odom'
+        timestamps_sec = [1.0, 2.0, 3.0]
+        positions      = np.array([[1.1, 2.2, 3.3],
+                                   [4.4, 5.5, 6.6],
+                                   [7.7, 8.8, 9.9]])
+        # orientations as (qx, qy, qz, qw)
+        orientations   = np.array([[0.0, 0.0, 0.0,        1.0       ],
+                                   [0.5, 0.5, 0.5,        0.5       ],
+                                   [0.0, 0.0, 0.70710678, 0.70710678]])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'odom.bag'
+            self._write_ros1_odom_bag(bag_path, topic, frame_id, child_frame_id,
+                                      timestamps_sec, positions, orientations)
+
+            data = OdometryData.from_ros1_bag(bag_path, topic, CoordinateFrame.FLU)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.child_frame_id, child_frame_id)
+            self.assertEqual(data.frame, CoordinateFrame.FLU)
+            self.assertEqual(data.len(), 3)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- positions ---
+            np.testing.assert_array_almost_equal(
+                data.positions.astype(np.float64), positions, decimal=6)
+
+            # --- orientations ---
+            np.testing.assert_array_almost_equal(
+                data.orientations.astype(np.float64), orientations, decimal=6)
+
+
+    def _make_odom_data(self):
+        return OdometryData(
+            frame_id="world",
+            child_frame_id="base_link",
+            timestamps=np.array([1.0, 2.0, 3.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU,
+        )
+
+    def test_eq(self):
+        from copy import deepcopy
+        from decimal import Decimal
+
+        o1 = self._make_odom_data()
+        o2 = deepcopy(o1)
+        self.assertEqual(o1, o2)
+
+        # child_frame_id differs
+        o = deepcopy(o1); o.child_frame_id = "other_link"
+        self.assertNotEqual(o1, o)
+
+        # frame_id differs (inherited from Data)
+        o = deepcopy(o1); o.frame_id = "other"
+        self.assertNotEqual(o1, o)
+
+        # timestamps differ (inherited from SequentialData)
+        o = deepcopy(o1); o.timestamps[0] = Decimal("9.0")
+        self.assertNotEqual(o1, o)
+
+        # positions differ (inherited from PathData)
+        o = deepcopy(o1); o.positions[0, 0] = Decimal("99.0")
+        self.assertNotEqual(o1, o)
+
+        # orientations differ (inherited from PathData)
+        o = deepcopy(o1); o.orientations[0, 0] = Decimal("0.5")
+        self.assertNotEqual(o1, o)
+
+        # frame differs (inherited from PathData)
+        o = deepcopy(o1); o.frame = CoordinateFrame.NED
+        self.assertNotEqual(o1, o)
+
+        # OdometryData vs PathData is not equal even when common fields match
+        path = PathData(
+            frame_id=o1.frame_id,
+            timestamps=o1.timestamps,
+            positions=o1.positions,
+            orientations=o1.orientations,
+            frame=o1.frame,
+        )
+        self.assertNotEqual(o1, path)
+
+        # poses / poses_rclpy caches do not affect equality
+        o = deepcopy(o1)
+        o.poses = ["fake"]
+        o.poses_rclpy = ["fake"]
+        self.assertEqual(o1, o)
+
 
 if __name__ == "__main__":
     unittest.main()

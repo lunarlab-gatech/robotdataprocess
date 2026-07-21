@@ -1,10 +1,15 @@
+import decimal
+from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
 from robotdataprocess.data_types.CameraData import CameraData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
-from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk, LazyImageArray
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import BagLazyImageArray, ImageDataOnDisk, LazyImageArray
+from rosbags.rosbag1 import Writer as Writer1
+from rosbags.typesys import Stores, get_typestore
+import tempfile
 import unittest
 import cv2
 from PIL import Image
@@ -216,6 +221,332 @@ class TestImageDataOnDisk(unittest.TestCase):
 
         with self.assertRaises((ValueError, TypeError)):
             img_data.crop_images_to_LiDAR_FOV((-10.0, 10.0))
+
+
+    def _write_ros1_image_bag(self, bag_path: Path, topic: str, frame_id: str,
+                               images: np.ndarray, timestamps_sec: list) -> None:
+        """Write a ROS1 bag containing sensor_msgs/msg/Image messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        ImageMsg = typestore.types['sensor_msgs/msg/Image']
+        Header    = typestore.types['std_msgs/msg/Header']
+        Time      = typestore.types['builtin_interfaces/msg/Time']
+
+        n, H, W = images.shape[:3]
+        channels = 1 if images.ndim == 3 else images.shape[3]
+        encoding = 'rgb8' if channels == 3 else 'mono8'
+        step = W * channels
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, ImageMsg.__msgtype__, typestore=typestore)
+            for i, ts in enumerate(timestamps_sec):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = ImageMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    height=H, width=W, encoding=encoding,
+                    is_bigendian=0, step=step,
+                    data=images[i].flatten(),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, ImageMsg.__msgtype__))
+
+    def test_from_ros1_bag(self):
+        """Write a ROS1 bag with known images and verify from_ros1_bag round-trips correctly."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small RGB8 images with distinct solid colours
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # red
+        images[1, :, :] = [  0, 255,   0]  # green
+        images[2, :, :] = [  0,   0, 255]  # blue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.height, H)
+            self.assertEqual(data.width, W)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+            self.assertEqual(data.len(), 3)
+            self.assertIsInstance(data.images, BagLazyImageArray)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- pixel data loaded on demand ---
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            # --- crop_data keeps the right subset ---
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2.crop_data(Decimal('1.5'), Decimal('3.0'))
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data2.images[0], images[1])  # green
+            np.testing.assert_array_equal(data2.images[1], images[2])  # blue
+
+            # --- to_encoding RGB -> BGR ---
+            data3 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data3.to_encoding(ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data3.encoding, ImageData.ImageEncoding.BGR8)
+            expected_bgr_red = np.zeros((H, W, 3), dtype=np.uint8)
+            expected_bgr_red[:, :] = [0, 0, 255]  # red in BGR
+            np.testing.assert_array_equal(data3.images[0], expected_bgr_red)
+
+            # --- crop_images_to_LiDAR_FOV ---
+            # With H=4, cy=2.0, fy=10.0, FOV=(-5°,5°):
+            #   row_top    = floor(2.0 - 10.0*tan(5°))  = 1
+            #   row_bottom = ceil (2.0 - 10.0*tan(-5°)) = 3  →  new_height = 2
+            data4 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            cam = CameraData.from_user_mono('test_cam', W, H, fx=10.0, fy=10.0, cx=3.0, cy=2.0)
+            fy_val, cy_val = float(cam.K[1, 1]), float(cam.K[1, 2])
+            lidar_v_fov = (-5.0, 5.0)
+            row_top    = max(0, int(np.floor(cy_val - fy_val * np.tan(np.radians(lidar_v_fov[1])))))
+            row_bottom = min(H,  int(np.ceil( cy_val - fy_val * np.tan(np.radians(lidar_v_fov[0])))))
+            data4.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+            self.assertEqual(data4.height, row_bottom - row_top)
+            self.assertEqual(cam.height, row_bottom - row_top)
+            for i in range(3):
+                np.testing.assert_array_equal(data4.images[i], images[i][row_top:row_bottom, :])
+
+    def test_crop_to_matched(self):
+        """ crop_to_matched keeps .images in sync with .timestamps for both BagLazyImageArray-backed objects. """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # red
+        images[1, :, :] = [  0, 255,   0]  # green
+        images[2, :, :] = [  0,   0, 255]  # blue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data1 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # data2 is missing the middle (green) entry, and its last timestamp is
+            # slightly offset from data1's, but still within tolerance.
+            data2.timestamps = np.array([data2.timestamps[0], data2.timestamps[2] + Decimal('0.02')])
+            data2.images = data2.images[np.array([True, False, True])]
+
+            ImageDataOnDisk.crop_to_matched(data1, data2, Decimal('0.05'))
+
+            self.assertEqual(data1.len(), 2)
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data1.images[0], images[0])  # red
+            np.testing.assert_array_equal(data1.images[1], images[2])  # blue
+            np.testing.assert_array_equal(data2.images[0], images[0])  # red
+            np.testing.assert_array_equal(data2.images[1], images[2])  # blue
+
+    def _write_ros1_compressed_image_bag(self, bag_path: Path, topic: str, frame_id: str,
+                                          images: np.ndarray, timestamps_sec: list,
+                                          format_str: str = 'bgr8; png compressed bgr8') -> None:
+        """Write a ROS1 bag containing sensor_msgs/msg/CompressedImage messages (PNG)."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        CompressedImageMsg = typestore.types['sensor_msgs/msg/CompressedImage']
+        Header = typestore.types['std_msgs/msg/Header']
+        Time   = typestore.types['builtin_interfaces/msg/Time']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, CompressedImageMsg.__msgtype__, typestore=typestore)
+            for i, ts in enumerate(timestamps_sec):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                ok, buf = cv2.imencode('.png', images[i])
+                assert ok, "cv2.imencode failed"
+                msg = CompressedImageMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    format=format_str,
+                    data=buf.flatten(),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, CompressedImageMsg.__msgtype__))
+
+    def test_from_ros1_bag_compressed(self):
+        """Write a ROS1 bag with compressed images and verify from_ros1_bag round-trips correctly."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0/compressed'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small BGR8 images with distinct solid colours (cv2 convention)
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # blue channel
+        images[1, :, :] = [  0, 255,   0]  # green channel
+        images[2, :, :] = [  0,   0, 255]  # red channel
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_compressed.bag'
+            self._write_ros1_compressed_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.height, H)
+            self.assertEqual(data.width, W)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data.len(), 3)
+            self.assertIsInstance(data.images, BagLazyImageArray)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- pixel data round-trips losslessly through PNG ---
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            # --- crop_data keeps the right subset ---
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2.crop_data(Decimal('1.5'), Decimal('3.0'))
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data2.images[0], images[1])
+            np.testing.assert_array_equal(data2.images[1], images[2])
+
+            # --- crop_images_to_LiDAR_FOV ---
+            data3 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            cam = CameraData.from_user_mono('test_cam', W, H, fx=10.0, fy=10.0, cx=3.0, cy=2.0)
+            fy_val, cy_val = float(cam.K[1, 1]), float(cam.K[1, 2])
+            lidar_v_fov = (-5.0, 5.0)
+            row_top    = max(0, int(np.floor(cy_val - fy_val * np.tan(np.radians(lidar_v_fov[1])))))
+            row_bottom = min(H,  int(np.ceil( cy_val - fy_val * np.tan(np.radians(lidar_v_fov[0])))))
+            data3.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+            self.assertEqual(data3.height, row_bottom - row_top)
+            self.assertEqual(cam.height, row_bottom - row_top)
+            for i in range(3):
+                np.testing.assert_array_equal(data3.images[i], images[i][row_top:row_bottom, :])
+
+
+    def _write_ros1_image_bag_skewed_timestamps(self, bag_path: Path, topic: str, frame_id: str,
+                                                  images: np.ndarray, header_timestamps_sec: list,
+                                                  recording_timestamps_sec: list) -> None:
+        """Write a ROS1 bag where bag recording times differ from msg.header.stamp values."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        ImageMsg = typestore.types['sensor_msgs/msg/Image']
+        Header    = typestore.types['std_msgs/msg/Header']
+        Time      = typestore.types['builtin_interfaces/msg/Time']
+
+        n, H, W = images.shape[:3]
+        channels = 1 if images.ndim == 3 else images.shape[3]
+        encoding = 'rgb8' if channels == 3 else 'mono8'
+        step = W * channels
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, ImageMsg.__msgtype__, typestore=typestore)
+            for i, (h_ts, r_ts) in enumerate(zip(header_timestamps_sec, recording_timestamps_sec)):
+                h_dec = Decimal(str(h_ts))
+                h_sec  = int(h_dec)
+                h_nsec = int((h_dec - Decimal(h_sec)) * Decimal('1e9'))
+
+                r_dec = Decimal(str(r_ts))
+                r_sec  = int(r_dec)
+                r_nsec = int((r_dec - Decimal(r_sec)) * Decimal('1e9'))
+                rec_ns = r_sec * 10**9 + r_nsec
+
+                msg = ImageMsg(
+                    Header(seq=i, stamp=Time(sec=h_sec, nanosec=h_nsec), frame_id=frame_id),
+                    height=H, width=W, encoding=encoding,
+                    is_bigendian=0, step=step,
+                    data=images[i].flatten(),
+                )
+                writer.write(conn, rec_ns, typestore.serialize_ros1(msg, ImageMsg.__msgtype__))
+
+    def test_from_ros1_bag_uses_header_stamp(self):
+        """from_ros1_bag must load timestamps from msg.header.stamp, not bag recording time.
+
+        Writes a bag where recording times are ~1000 s ahead of the header stamps.
+        The bug (entry.time used instead of msg.header.stamp) would cause timestamps
+        to be [1001, 1002, 1003] instead of the correct [1, 2, 3].  The fix must also
+        ensure images are still retrievable after the seek logic is corrected.
+        """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        header_timestamps_sec   = [1.0, 2.0, 3.0]
+        recording_timestamps_sec = [1001.0, 1002.0, 1003.0]
+
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]
+        images[1, :, :] = [  0, 255,   0]
+        images[2, :, :] = [  0,   0, 255]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_skewed.bag'
+            self._write_ros1_image_bag_skewed_timestamps(
+                bag_path, topic, frame_id, images, header_timestamps_sec, recording_timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # Timestamps must come from msg.header.stamp, not the bag recording time
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), header_timestamps_sec, decimal=6)
+
+            # Images must still load correctly after the seek logic is corrected
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+    def test_from_ros1_bag_header_recording_order_mismatch(self):
+        """from_ros1_bag must return images ordered by header stamp even when recording
+        time order differs from header stamp order.
+
+        Bag layout (recording-time order):
+          rec=1001s  header=3.0s  red image
+          rec=1002s  header=1.0s  green image
+          rec=1003s  header=2.0s  blue image
+
+        Expected after from_ros1_bag (sorted by header stamp):
+          timestamps = [1.0, 2.0, 3.0]
+          images[0]  = green  (header 1.0s, rec 1002s)
+          images[1]  = blue   (header 2.0s, rec 1003s)
+          images[2]  = red    (header 3.0s, rec 1001s)
+
+        This catches a bug where seek uses header-stamp values as recording-time
+        indices, which would retrieve the wrong message when the two orderings differ.
+        """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+
+        # Images written in recording-time order
+        images_written = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images_written[0, :, :] = [255,   0,   0]  # red   → header 3.0s
+        images_written[1, :, :] = [  0, 255,   0]  # green → header 1.0s
+        images_written[2, :, :] = [  0,   0, 255]  # blue  → header 2.0s
+
+        # Recording times ascending (required by bag format); header stamps out of order
+        recording_timestamps_sec = [1001.0, 1002.0, 1003.0]
+        header_timestamps_sec    = [   3.0,    1.0,    2.0]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_order_mismatch.bag'
+            self._write_ros1_image_bag_skewed_timestamps(
+                bag_path, topic, frame_id, images_written,
+                header_timestamps_sec, recording_timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # Timestamps must be sorted by header stamp
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), [1.0, 2.0, 3.0], decimal=6)
+
+            # images[i] must match the image whose header stamp is timestamps[i]
+            np.testing.assert_array_equal(data.images[0], images_written[1])  # green (header 1.0s)
+            np.testing.assert_array_equal(data.images[1], images_written[2])  # blue  (header 2.0s)
+            np.testing.assert_array_equal(data.images[2], images_written[0])  # red   (header 3.0s)
 
 
 if __name__ == "__main__":

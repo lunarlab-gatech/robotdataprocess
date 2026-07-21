@@ -1,3 +1,4 @@
+from decimal import Decimal
 import numpy as np
 import os
 import unittest
@@ -41,22 +42,22 @@ class TestImageDataEncoding(unittest.TestCase):
 
     def test_from_ros_str_mono8(self):
         """ Test from_ros_str with mono8 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("mono8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("mono8")
         self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
 
     def test_from_ros_str_mono8_uppercase(self):
         """ Test from_ros_str with MONO8 (uppercase) encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("MONO8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("MONO8")
         self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
 
     def test_from_ros_str_rgb8(self):
         """ Test from_ros_str with rgb8 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("rgb8")
+        encoding = ImageData.ImageEncoding.from_ros2_str("rgb8")
         self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
 
     def test_from_ros_str_32fc1(self):
         """ Test from_ros_str with 32fc1 encoding. """
-        encoding = ImageData.ImageEncoding.from_ros_str("32fc1")
+        encoding = ImageData.ImageEncoding.from_ros2_str("32fc1")
         self.assertEqual(encoding, ImageData.ImageEncoding._32FC1)
 
     # Note: from_ros_str invalid case is already tested in test_ImageDataInMemory.py
@@ -104,24 +105,24 @@ class TestImageDataEncoding(unittest.TestCase):
 
     def test_to_ros_str_mono8(self):
         """ Test to_ros_str with Mono8 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.Mono8)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding.Mono8)
         self.assertEqual(ros_str, 'mono8')
 
     def test_to_ros_str_rgb8(self):
         """ Test to_ros_str with RGB8 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding.RGB8)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding.RGB8)
         self.assertEqual(ros_str, 'rgb8')
 
     def test_to_ros_str_32fc1(self):
         """ Test to_ros_str with 32FC1 encoding. """
-        ros_str = ImageData.ImageEncoding.to_ros_str(ImageData.ImageEncoding._32FC1)
+        ros_str = ImageData.ImageEncoding.to_ros2_str(ImageData.ImageEncoding._32FC1)
         self.assertEqual(ros_str, '32FC1')
 
     def test_to_ros_str_invalid(self):
         """ Test to_ros_str raises NotImplementedError for invalid encoding. """
         with self.assertRaises(NotImplementedError):
             # Pass a non-ImageEncoding value
-            ImageData.ImageEncoding.to_ros_str("invalid")
+            ImageData.ImageEncoding.to_ros2_str("invalid")
 
     # ==================== to_dtype_and_channels tests ====================
 
@@ -186,6 +187,15 @@ class TestImageData(unittest.TestCase):
 
         with self.assertRaises(NotImplementedError):
             image_data.get_ros_msg(ROSMsgLibType.ROSBAGS, 0)
+
+    def test_crop_to_matched_raises(self):
+        """ Test crop_to_matched raises NotImplementedError. """
+        timestamps = np.array([0.1, 0.2])
+        images = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        image_data1 = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
+        image_data2 = ImageData("test_frame", timestamps, 10, 10, ImageData.ImageEncoding.RGB8, images)
+        with self.assertRaises(NotImplementedError):
+            ImageData.crop_to_matched(image_data1, image_data2, Decimal("0.01"))
 
     def test_to_image_files_roundtrip_in_memory(self):
         """ Test saving Mono8 images to files and loading back (in-memory). """
@@ -283,9 +293,9 @@ class TestImageData(unittest.TestCase):
             np.testing.assert_array_equal(images[i], loaded_disk.images[i])
 
     def test_to_npy_unsupported_encoding(self):
-        """ Test that to_npy raises NotImplementedError for Mono8 encoding. """
-        imgs = np.zeros((2, 10, 10), dtype=np.uint8)
-        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        """ Test that to_npy raises NotImplementedError for BGR8 encoding. """
+        imgs = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 1.0], 10, 10, ImageData.ImageEncoding.BGR8, imgs)
         output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_npy_unsupported'
         output = output.absolute()
         with self.assertRaises(NotImplementedError):

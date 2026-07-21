@@ -9,6 +9,7 @@ from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
+from evo.core.units import Unit
 import math
 from ..math_utils import interpolate_poses
 import matplotlib.colors as mcolors
@@ -25,7 +26,7 @@ from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
-from typing import Union, Tuple, List
+from typing import Dict, Union, Tuple, List, Optional
 import tqdm
 
 @typechecked
@@ -47,13 +48,36 @@ class PathData(SequentialData):
     orientations: np.ndarray # quaternions (x, y, z, w)
     frame: CoordinateFrame
 
-    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, List], 
-                 positions: Union[np.ndarray, List], orientations: Union[np.ndarray, List], 
+    def __init__(self, frame_id: str, timestamps: Union[np.ndarray, List],
+                 positions: Union[np.ndarray, List], orientations: Union[np.ndarray, List],
                  frame: CoordinateFrame):
         super().__init__(frame_id, timestamps)
         self.positions = col_to_dec_arr(positions)
         self.orientations = col_to_dec_arr(orientations)
         self.frame = frame
+
+    def __eq__(self, other: PathData) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if not np.array_equal(self.positions, other.positions):
+            if self.positions.shape != other.positions.shape:
+                print(f"  [__eq__] positions shape: {self.positions.shape} != {other.positions.shape}")
+            else:
+                idx = next(i for i in range(len(self.positions)) if not np.array_equal(self.positions[i], other.positions[i]))
+                print(f"  [__eq__] positions first diff at idx {idx}: {self.positions[idx]} != {other.positions[idx]}")
+            return False
+        if not np.array_equal(self.orientations, other.orientations):
+            if self.orientations.shape != other.orientations.shape:
+                print(f"  [__eq__] orientations shape: {self.orientations.shape} != {other.orientations.shape}")
+            else:
+                idx = next(i for i in range(len(self.orientations)) if not np.array_equal(self.orientations[i], other.orientations[i]))
+                print(f"  [__eq__] orientations first diff at idx {idx}: {self.orientations[idx]} != {other.orientations[idx]}")
+            return False
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        return True
 
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in PathData. """
@@ -119,6 +143,9 @@ class PathData(SequentialData):
         self.positions = col_to_dec_arr(self.positions)
         self.orientations = col_to_dec_arr(self.orientations)
 
+        # Set Coordinate Frame to None since this operation may have changed it
+        self.frame = CoordinateFrame.NONE
+
         self._invalidate_cache()
 
     def interpolate_to_hz(self, target_hz: float):
@@ -174,23 +201,36 @@ class PathData(SequentialData):
             return
 
         if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
-            # The frame change rotation: 180 degrees around X
-            R_frame = np.array([[1,  0,  0],
-                                [0, -1,  0],
-                                [0,  0, -1]])
+            R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
 
             if transform_type == TransformType.CHANGE_OF_BASIS:
                 self._convert_frame(R_frame)
             elif transform_type == TransformType.ROTATION:
                 R_frame_Q = R.from_matrix(R_frame)
-                self.positions = (R_frame @ self.positions.T).T
-                self._ori_apply_rotation(R_frame_Q)
+                self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
+                self._ori_apply_rotation_left_side(R_frame_Q)
 
             self.frame = CoordinateFrame.FLU
             self._invalidate_cache()
 
         else:
             raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
+        
+    def redefine_local_axes(self, curr_local_frame: CoordinateFrame, target_local_frame: CoordinateFrame):
+        """
+        Redefines the convention used to express the robot's local (body)
+        axes. Only affects orientations -- positions and the world-frame
+        convention (self.frame) are left untouched.
+
+        Args:
+            curr_local_frame: The current local axes convention.
+            target_local_frame: The desired local axes convention.
+        """
+        R_frame = R.from_matrix(CoordinateFrame.get_rotation(target_local_frame, curr_local_frame))
+        self._ori_apply_rotation_right_side(R_frame)
+
+        self._invalidate_cache()
+
 
     def apply_transformation_left_side(self, H: np.ndarray):
         """
@@ -239,15 +279,24 @@ class PathData(SequentialData):
     def _convert_frame(self, R_frame: np.ndarray):
         """ Uses a change of basis to update the positions and orientations. """
         R_frame_Q = R.from_matrix(R_frame)
-        self.positions = (R_frame @ self.positions.T).T
+        self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
         self._ori_change_of_basis(R_frame_Q)
 
         self._invalidate_cache()
 
-    def _ori_apply_rotation(self, R_i: R):
+    def _ori_apply_rotation_left_side(self, R_i: R):
         """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i])).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
+
+        self._invalidate_cache()
+
+    def _ori_apply_rotation_right_side(self, R_i: R):
+        """ Applies a rotation (not a change of basis) to orientations, thus stays in the same frame. """
+        for i in range(self.len()):
+            self.orientations[i] = (R.from_quat(self.orientations[i]) * R_i).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
 
         self._invalidate_cache()
 
@@ -255,6 +304,7 @@ class PathData(SequentialData):
         """ Applies a change of basis to orientations """
         for i in range(self.len()):
             self.orientations[i] = (R_i * R.from_quat(self.orientations[i]) * R_i.inv()).as_quat()
+        self.orientations = col_to_dec_arr(self.orientations)
 
         self._invalidate_cache()
 
@@ -330,7 +380,8 @@ class PathData(SequentialData):
         return cls(frame_id, timestamps_np, positions_np, orientations_np, frame)
     
     @classmethod
-    def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame) -> PathData:
+    def from_evo(cls, pose_trajectory_3d: PoseTrajectory3D, frame_id: str, frame: CoordinateFrame,
+                 prune_duplicates: bool = True) -> PathData:
         """
         Creates a PathData object from an evo PoseTrajectory3D object.
 
@@ -338,6 +389,15 @@ class PathData(SequentialData):
             pose_trajectory_3d: An evo PoseTrajectory3D with positions, orientations, and timestamps.
             frame_id: The frame ID to assign.
             frame: The coordinate frame of this data.
+            prune_duplicates: If True (default), rows with a duplicate timestamp
+                (which can arise after sync.associate_trajectories) are removed,
+                after verifying the duplicate's position and orientation match the
+                preceding row (raises ValueError if they don't). If False, all rows
+                are kept as-is and no duplicate check is performed -- in this case,
+                calling from_evo() and then to_evo() reproduces the original
+                PoseTrajectory3D exactly, which matters when the row count must
+                stay in lockstep with another trajectory (e.g. in
+                calculate_traj_errors).
 
         Returns:
             PathData: Instance of this class.
@@ -345,10 +405,26 @@ class PathData(SequentialData):
 
         # Convert orientations from wxyz to xyzw
         orientations_xyzw = pose_trajectory_3d.orientations_quat_wxyz[:, [1, 2, 3, 0]]
+        timestamps = pose_trajectory_3d.timestamps
+        positions = pose_trajectory_3d.positions_xyz
+
+        if prune_duplicates:
+            # Remove duplicate timestamps (can arise after sync.associate_trajectories)
+            duplicate_mask = np.concatenate(([False], np.diff(timestamps) == 0))
+            if np.any(duplicate_mask):
+                dup_indices = np.where(duplicate_mask)[0]
+                for i in dup_indices:
+                    if not (np.allclose(positions[i], positions[i - 1], atol=1e-9, rtol=0) and
+                            np.allclose(orientations_xyzw[i], orientations_xyzw[i - 1], atol=1e-9, rtol=0)):
+                        raise ValueError(f"Duplicate timestamp {timestamps[i]} at index {i} has mismatched position or orientation.")
+            unique_mask = ~duplicate_mask
+            timestamps = timestamps[unique_mask]
+            positions = positions[unique_mask]
+            orientations_xyzw = orientations_xyzw[unique_mask]
 
         return cls(frame_id=frame_id,
-                   timestamps=pose_trajectory_3d.timestamps,
-                   positions=pose_trajectory_3d.positions_xyz,
+                   timestamps=timestamps,
+                   positions=positions,
                    orientations=orientations_xyzw,
                    frame=frame)
 
@@ -507,23 +583,116 @@ class PathData(SequentialData):
                             header_included=False,
                             column_to_data=[0, 1, 2, 3, 7, 4, 5, 6])
 
+    @classmethod
+    def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
+                 robot: str, frame_id: str, frame: CoordinateFrame,
+                 names_override: Union[dict, None] = None) -> PathData:
+        """
+        Creates a PathData instance from a g2o file containing VERTEX_SE3:QUAT entries.
+
+        Only VERTEX_SE3:QUAT entries are read; EDGE_SE3:QUAT entries are ignored.
+        GTSAM symbol keys are decoded as ``character = chr(key >> 56)`` and
+        ``index = key & ((1 << 56) - 1)``. If ``names_override`` is provided,
+        character keys are remapped before matching against ``robot``.
+
+        The g2o quaternion order is (qx, qy, qz, qw), which matches the xyzw
+        convention used by this class.
+
+        Args:
+            g2o_path: Path to the .g2o file.
+            time_path: Path to a timestamp file. Each line contains
+                ``robot_id keyframe_id timestamp_ns [ignored...]``, where
+                ``robot_id`` is ``ord(char) - ord('a')``.
+            robot: Name of the robot whose poses to extract. Matched against the
+                decoded character key (e.g. ``'a'``) or, if ``names_override`` is
+                provided, against the remapped name.
+            frame_id: The frame ID to assign to the returned PathData.
+            frame: The coordinate frame convention of this data.
+            names_override: Optional dict mapping decoded character keys to
+                desired robot names (e.g. ``{'a': 'aerial-07', 'b': 'ground-03'}``).
+                Characters not present in the dict are kept as-is.
+
+        Returns:
+            PathData instance containing only the poses for the requested robot,
+            sorted by keyframe index.
+        """
+
+        # Create lookup mapping robot id and keyframe id to timestamp
+        time_lookup: Dict[Tuple[int, int], Decimal] = {}
+        with open(str(time_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                parts = line.split()
+                robot_id = int(parts[0])
+                keyframe_id = int(parts[1])
+                timestamp_ns = Decimal(parts[2])
+                time_lookup[(robot_id, keyframe_id)] = timestamp_ns / Decimal("1000000000")
+
+
+        vertices = []
+        with open(str(g2o_path), 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if not line.startswith("VERTEX_SE3:QUAT"):
+                    continue
+
+                parts = line.split()
+                key = int(parts[1])
+                char = chr(key >> 56)
+                idx = key & ((1 << 56) - 1)
+
+                name = names_override.get(char, char) if names_override is not None else char
+                if name != robot:
+                    continue
+
+                x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
+                qx, qy, qz, qw = float(parts[5]), float(parts[6]), float(parts[7]), float(parts[8])
+                vertices.append((idx, char, [x, y, z], [qx, qy, qz, qw]))
+
+        vertices.sort(key=lambda v: v[0])
+        if not vertices:
+            raise ValueError(f"No data found for robot '{robot}' in {g2o_path}.")
+
+        timestamps = []
+        positions = []
+        orientations = []
+        for idx, char, pos, ori in vertices:
+            robot_id = ord(char) - ord('a')
+            timestamps.append(time_lookup[(robot_id, idx)])
+            positions.append(pos)
+            orientations.append(ori)
+
+        return PathData(
+            frame_id=frame_id,
+            timestamps=np.array(timestamps, dtype=object),
+            positions=np.array(positions, dtype=object),
+            orientations=np.array(orientations, dtype=object),
+            frame=frame,
+        )
+
     # =========================================================================
     # ============================ Visualization ==============================
     # =========================================================================
 
     @staticmethod
-    def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str], 
-                     save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0, 
+    def visualize_2D(dataList: List[PathData], isGTList: List[bool], colorList: List[str], nameList: List[str],
+                     save_path: Union[str, None] = None, no_background: bool = False, line_width: float = 1.0,
                      show_grid: bool = False, legend: bool = True,
                      no_border: bool = False, disable_x_label: bool = False, disable_y_label: bool = False,
                      google_maps_scale_bar: bool = False, google_maps_scale_bar_loc: str ="bottom-right",
                      gt_color_lightness_range_val: int = 3,
                      background_image_path: str | None = None,
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
-                     background_image_extent_offsets: Union[Tuple[float, float], None] = None):
+                     background_image_extent_offsets: Union[Tuple[float, float], None] = None,
+                     loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8,
+                     title: str | None = None, lc_errors_vmax: float = 50.0,
+                     yaw_rotation_deg: float = 0.0):
         """
         Plot all PathData objects on a 2D XY plane.
-        
+
         Args:
             dataList: All PathData objects to plot.
             isGTList: Whether or not each PathData object is GT.
@@ -545,12 +714,33 @@ class PathData(SequentialData):
             background_image_x_edge: The distance in meters from center of image to the x edge.
             background_image_extent_offets: XY locations where the image center should be located.
             ax: If passed, plot is drawn onto these axes instead of on a new figure.
+            yaw_rotation_deg: Rotates every PathData in dataList about the Z axis passing
+                through the center of their combined axis-aligned bounding box, by this many
+                degrees, before plotting (e.g. to align GT trajectories with a background
+                image that isn't exactly aligned with the GT's XY axes). Operates on copies,
+                so it has no effect on the original PathData objects. The background image
+                itself is not rotated.
         """
 
         # Check lengths of arguments
         if len(dataList) != len(isGTList) or len(dataList) != len(colorList) or len(dataList) != len(nameList):
             raise ValueError("Lengths of all Lists must be equal!")
         num_data_objs = len(dataList)
+
+        # Rotate copies of the trajectories about the center of their combined bounding box,
+        # leaving the originals untouched
+        if yaw_rotation_deg != 0.0:
+            all_positions = np.concatenate([dec_arr_to_float_arr(path.positions) for path in dataList])
+            bbox_center = (all_positions.min(axis=0) + all_positions.max(axis=0)) / 2.0
+
+            rot_mat = R.from_euler('z', yaw_rotation_deg, degrees=True).as_matrix()
+            H = np.eye(4)
+            H[:3, :3] = rot_mat
+            H[:3, 3] = bbox_center - rot_mat @ bbox_center
+
+            dataList = [copy.deepcopy(path) for path in dataList]
+            for path in dataList:
+                path.apply_transformation_left_side(H)
 
         # Check other argument requirements
         if gt_color_lightness_range_val < 0 or gt_color_lightness_range_val >= 20:
@@ -607,13 +797,55 @@ class PathData(SequentialData):
         x_min, x_max = all_x.min() - padding_x, all_x.max() + padding_x
         y_min, y_max = all_y.min() - padding_y, all_y.max() + padding_y
 
+        # Plot loop closures (drawn before trajectories so they appear underneath)
+        if loop_closure_data is not None:
+            name_to_est: dict = {}
+            for _path, _is_gt, _name in zip(dataList, isGTList, nameList):
+                if not _is_gt and _name not in name_to_est:
+                    name_to_est[_name] = _path
+
+            pos_cache: dict = {}
+            for _name, _path in name_to_est.items():
+                _ts = dec_arr_to_float_arr(_path.timestamps).astype(float)
+                _x = dec_arr_to_float_arr(_path.positions[:, 0]).astype(float)
+                _y = dec_arr_to_float_arr(_path.positions[:, 1]).astype(float)
+                pos_cache[_name] = (_ts, _x, _y)
+
+            if lc_errors is not None:
+                trans_errs = np.asarray(lc_errors["translation_errors"], dtype=float)
+                lc_norm = mcolors.Normalize(vmin=0, vmax=lc_errors_vmax, clip=True)
+                lc_cmap = mcolors.LinearSegmentedColormap.from_list(
+                    "lc_cmap", ["#1a9641", "#a6611a", "#d7191c"])
+
+            for _i in range(loop_closure_data.num_loop_closures):
+                _name_a, _name_b = loop_closure_data.names[_i]
+                if _name_a not in pos_cache or _name_b not in pos_cache:
+                    print("Warning: LC robot not found in pos_cache!")
+                    continue
+                _ts_a = float(loop_closure_data.timestamps_a[_i])
+                _ts_b = float(loop_closure_data.timestamps_b[_i])
+                _ts_arr_a, _x_a, _y_a = pos_cache[_name_a]
+                _ts_arr_b, _x_b, _y_b = pos_cache[_name_b]
+                _xa = float(np.interp(_ts_a, _ts_arr_a, _x_a))
+                _ya = float(np.interp(_ts_a, _ts_arr_a, _y_a))
+                _xb = float(np.interp(_ts_b, _ts_arr_b, _x_b))
+                _yb = float(np.interp(_ts_b, _ts_arr_b, _y_b))
+                _color = lc_cmap(lc_norm(trans_errs[_i])) if lc_errors is not None else (1.0, 1.0, 1.0, 0.6)
+                axs.plot([_xa, _xb], [_ya, _yb], color=_color, linewidth=lc_line_width, zorder=3)
+                axs.plot([_xa, _xb], [_ya, _yb], 'o', color='black', markersize=3, zorder=4)
+
+            if lc_errors is not None:
+                _sm = plt.cm.ScalarMappable(norm=lc_norm, cmap=lc_cmap)
+                _sm.set_array([])
+                fig.colorbar(_sm, ax=axs, label="LC Translation Error (m)", shrink=0.8)
+
         # Plot the trajectories
         for i in range(num_data_objs):
             label = nameList[i] + (" (GT)" if isGTList[i] else " (Est.)")
             linestyle = ("dotted" if isGTList[i] else None)
             color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
-            axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1], 
-                     label=label, color=color, linewidth=line_width, linestyle=linestyle)
+            axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
+                     label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)
     
         # Calculate the current aspect ratio and make it match the target
         target_ar = 1.5  
@@ -747,23 +979,28 @@ class PathData(SequentialData):
             else: suggested_length = int(round(target_length / 10.0)) * 10
             add_google_maps_scale(axs, suggested_length, google_maps_scale_bar_loc)
 
+        if title is not None:
+            axs.set_title(title)
+
         # Save/Plot the results
         if created_fig:
             if save_path is not None:
-                fig.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=0)
+                pad = 0.05 if title is not None else 0
+                fig.savefig(save_path, format="pdf", bbox_inches="tight", pad_inches=pad)
             else:
                 plt.show()
             plt.close(fig)
 
         return axs
 
-    def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000):
+    def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000, save_path: Optional[Union[Path, str]] = None):
         """
         Visualizes this PathData (and all others included in otherList) on a single plot.
 
         Args:
             otherList (List[PathData]): All other PathData objects whose path should also be visualized on this plot.
             titles (List[str]): Titles for each PathData object, starting with self.
+            save_path (Path | str | None): If provided, saves the figure to this path instead of displaying it.
         """
 
         def draw_axes(data: PathData, axes_length: int, axes_interval: int):
@@ -846,9 +1083,12 @@ class PathData(SequentialData):
         ax.set_ylim(y_center - max_range, y_center + max_range)
         ax.set_zlim(z_center - max_range, z_center + max_range)
 
-        # Show the plot
         plt.tight_layout()
-        plt.show()
+        if save_path is not None:
+            plt.savefig(save_path)
+            plt.close(fig)
+        else:
+            plt.show()
     
     # =========================================================================
     # ============================ Export Methods =============================
@@ -1067,8 +1307,6 @@ class PathData(SequentialData):
             ValueError: If the list is empty or has only one element.
         """
 
-        print("Warning! This code has not been unit tested yet!")
-
         if len(path_data_objs) == 0:
             raise ValueError("path_data_objs list is empty!")
         if len(path_data_objs) == 1:
@@ -1129,33 +1367,96 @@ class PathData(SequentialData):
         # Make deep copies of trajectories
         merged_PathData_copies: list[PathData] = [copy.deepcopy(merged_PathData) for _ in range(len(original_PathDatas))]
 
-        # Reduce trajectories to the specific time that covers each robot
+        # Reduce trajectories to the specific time that covers each robot, then restore original timestamps
         for i, pd in enumerate(merged_PathData_copies):
             pd.crop_data(Decimal(start_times[i]), Decimal(end_times[i]))
+            if i > 0:
+                offset = Decimal(start_times[i]) - original_PathDatas[i].timestamps[0]
+                pd.timestamps = pd.timestamps - offset
         return merged_PathData_copies
-
+    
     @staticmethod
-    def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False, 
-            axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000) -> Tuple[dict, PathData, PathData]:
+    def align(gt_path: PathData, est_path: PathData, max_diff: float) -> Tuple[PathData, PathData]:
         """
-        Utilizing the evo library, calculates a variety of trajectory error metrics
-        and returns them in a dictionary. Also returns aligned PathData objects.
+        Time-syncs gt_path and est_path (via evo's associate_trajectories) and
+        aligns the synced est trajectory onto the synced gt trajectory.
 
-        Parameters:
-            max_diff: maximum absolute time difference allowed between associated timestamps
-            visualize: If true, will show a 3D plot of the aligned trajectories.
-            axes_length: Same as in visualize() method.
-            axes_interval: Same as in visualize() method.
+        Args:
+            gt_path: Ground truth trajectory.
+            est_path: Estimated trajectory to align onto gt_path.
+            max_diff: Maximum absolute time difference allowed between
+                associated timestamps.
+
+        Returns:
+            Tuple[PathData, PathData]: ``(est_path_align, gt_path_synced)``.
+            ``est_path_align`` is the estimated trajectory, trimmed to the
+            timestamps matched against gt_path and rigidly aligned (rotation
+            + translation, no scale correction) onto ``gt_path_synced``.
+            ``gt_path_synced`` is the ground truth trajectory trimmed to
+            those same matched timestamps. These two outputs are a matched
+            pair and must be passed together to ``calculate_traj_errors``.
+            Duplicate timestamps (which can arise from ``associate_trajectories``)
+            are kept as-is in both outputs, rather than pruned, so that
+            ``est_path_align`` and ``gt_path_synced`` always have the same
+            number of rows.
         """
 
+        # Convert from PathData object to PoseTrajectory3D (evo)
         gt_traj: PoseTrajectory3D = gt_path.to_evo()
         est_traj: PoseTrajectory3D = est_path.to_evo()
 
+        # Match timestamps
         gt_traj, est_traj = sync.associate_trajectories(gt_traj, est_traj, max_diff)
 
-
+        # Generate a new est_traj that is aligned with the gt_traj
         est_traj_align: PoseTrajectory3D = copy.deepcopy(est_traj)
         est_traj_align.align(gt_traj, correct_scale=False, correct_only_scale=False) 
+
+        # Convert the aligned trajectory data back to PathData objects. Duplicate
+        # timestamps are kept as-is (prune_duplicates=False) so that est_path_align
+        # and gt_path_synced stay in lockstep -- pruning independently on each side
+        # can silently or loudly desync their row counts (see calculate_traj_errors).
+        est_path_align = PathData.from_evo(est_traj_align, est_path.frame_id, est_path.frame, prune_duplicates=False)
+        gt_path_synced = PathData.from_evo(gt_traj, gt_path.frame_id, gt_path.frame, prune_duplicates=False)
+        return est_path_align, gt_path_synced
+
+    @staticmethod
+    def calculate_traj_errors(gt_path_synced: PathData, est_path_align: PathData,
+                              rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> dict:
+        """
+        Calculates a variety of trajectory error metrics (APE and RPE, via
+        the evo library) between a ground truth and an aligned estimated
+        trajectory.
+
+        Requires: gt_path_synced and est_path_align must be the two outputs
+        of ``align()`` (in the order ``est_path_align, gt_path_synced =
+        align(...)``), not arbitrary PathData objects. They must already be
+        time-synced (same length, matched timestamps) and rigidly aligned to
+        each other -- this function does not perform any syncing or
+        alignment itself, it only computes error metrics between the poses
+        at corresponding indices.
+
+        Args:
+            gt_path_synced: Ground truth trajectory, synced to est_path_align
+                by ``align()``.
+            est_path_align: Estimated trajectory, aligned onto
+                gt_path_synced by ``align()``.
+            rpe_delta: Step size between the pose pairs used for RPE (Relative
+                Pose Error). Does not affect APE. Defaults to ``1.0``.
+            rpe_delta_unit: Unit of ``rpe_delta`` (e.g. ``Unit.frames`` for
+                consecutive poses, ``Unit.meters`` for a fixed travelled
+                distance, ``Unit.seconds`` for a fixed time interval).
+                Defaults to ``Unit.frames``.
+
+        Returns:
+            dict: Nested dictionary of error metrics, keyed by metric name
+            (``APE``, ``RPE``), then by ``PoseRelation`` name, then by
+            statistic name (e.g. ``rmse``, ``mean``, ``max``).
+        """
+
+        # Convert from PathData object to PoseTrajectory3D (evo)
+        gt_traj: PoseTrajectory3D = gt_path_synced.to_evo()
+        est_traj_align: PoseTrajectory3D = est_path_align.to_evo()
 
         path_pair: Tuple[PoseTrajectory3D, PoseTrajectory3D] = (gt_traj, est_traj_align)
 
@@ -1187,7 +1488,10 @@ class PathData(SequentialData):
                     continue
 
                 path_pair_copied = copy.deepcopy(path_pair)
-                metric_with_relation: metrics.PE = metric(pose_relation)
+                if metric is metrics.RPE:
+                    metric_with_relation: metrics.PE = metric(pose_relation, delta=rpe_delta, delta_unit=rpe_delta_unit)
+                else:
+                    metric_with_relation: metrics.PE = metric(pose_relation)
                 metric_with_relation.process_data(path_pair_copied)
 
                 for stat in all_statistic_types:
@@ -1197,14 +1501,49 @@ class PathData(SequentialData):
                 dict_metric[pose_relation.name] = dict_relation
             
             dict_all_results[metric.__name__] = dict_metric
-            
-        # Convert the aligned trajectory data back to PathData objects
-        est_traj_align_pathdata = PathData.from_evo(est_traj_align, est_path.frame_id, est_path.frame)
-        gt_traj_pathdata = PathData.from_evo(gt_traj, gt_path.frame_id, gt_path.frame)
+        return dict_all_results
 
-        # Visualize the aligned trajectories if desired
+    @staticmethod
+    def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False,
+            axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000,
+            rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> Tuple[dict, PathData, PathData]:
+        """
+        Utilizing the evo library, calculates a variety of trajectory error metrics
+        and returns them in a dictionary. Also returns aligned PathData objects.
+
+        Parameters:
+            max_diff: maximum absolute time difference allowed between associated timestamps
+            visualize: If true, will show a 3D plot of the aligned trajectories.
+            axes_length: Same as in visualize() method.
+            axes_interval: Same as in visualize() method.
+            rpe_delta: Step size between the pose pairs used for RPE. Does not
+                affect APE. Forwarded to ``calculate_traj_errors``. Defaults to ``1.0``.
+            rpe_delta_unit: Unit of ``rpe_delta`` (e.g. ``Unit.frames``,
+                ``Unit.meters``, ``Unit.seconds``). Forwarded to
+                ``calculate_traj_errors``. Defaults to ``Unit.frames``.
+        """
+
+        est_path_align, gt_path_synced = PathData.align(gt_path, est_path, max_diff)
+        dict_all_results = PathData.calculate_traj_errors(gt_path_synced, est_path_align,
+                                                           rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
         if visualize:
-            gt_traj_pathdata.visualize_3D([est_traj_align_pathdata], ['Ground Truth', 'Estimated (Aligned)'], 
+            gt_path_synced.visualize_3D([est_path_align], ['Ground Truth', 'Estimated (Aligned)'],
                               axes_interval=axes_interval, axes_length=axes_length)
-        
-        return dict_all_results, est_traj_align_pathdata, gt_traj_pathdata
+        return dict_all_results, est_path_align, gt_path_synced
+
+    @staticmethod
+    def crop_to_matched(data1: PathData, data2: PathData, tolerance: Decimal) -> None:
+        """
+        Crop two PathData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first PathData object, cropped in place.
+            data2: The second PathData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")

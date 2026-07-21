@@ -6,9 +6,11 @@ from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+import open3d as o3d
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
+from scipy.spatial.transform import Rotation as R, Slerp
 import struct
 import sys
 from pathlib import Path
@@ -16,9 +18,11 @@ import tqdm
 from typeguard import typechecked
 from typing import Union, List, Tuple, Optional, Any, Callable
 
-from ..conversion_utils import col_to_dec_arr
+from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ..math_utils import interpolate_poses
 from ..ModuleImporter import ModuleImporter
 from .Data import CoordinateFrame, ROSMsgLibType
+from .PathData import PathData
 from .SequentialData import SequentialData
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
 
@@ -340,9 +344,7 @@ class LiDARData(SequentialData):
             return
 
         elif self.frame == CoordinateFrame.NED:
-            R_NED_to_FLU = np.array([[1,  0,  0],
-                                      [0, -1,  0],
-                                      [0,  0, -1]], dtype=np.float32)
+            R_NED_to_FLU = CoordinateFrame.get_rotation(self.frame, CoordinateFrame.FLU).astype(np.float32)
 
             def ned_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
                 pts = (R_NED_to_FLU @ pts.T).T
@@ -352,10 +354,7 @@ class LiDARData(SequentialData):
             self.frame = CoordinateFrame.FLU
 
         elif self.frame == CoordinateFrame.ENU:
-            # ENU: X=East, Y=North, Z=Up  →  FLU: X=Forward(North), Y=Left(-East), Z=Up
-            R_ENU_to_FLU = np.array([[ 0,  1,  0],
-                                      [-1,  0,  0],
-                                      [ 0,  0,  1]], dtype=np.float32)
+            R_ENU_to_FLU = CoordinateFrame.get_rotation(self.frame, CoordinateFrame.FLU).astype(np.float32)
 
             def enu_to_flu(pts: np.ndarray, channels: Optional[np.ndarray]):
                 pts = (R_ENU_to_FLU @ pts.T).T
@@ -384,6 +383,105 @@ class LiDARData(SequentialData):
 
         # Apply mask to Data attributes
         self.timestamps = self.timestamps[self.data_mask]
+
+    # =========================================================================
+    # =========================== Multi-Data Methods ===========================
+    # =========================================================================
+
+    @staticmethod
+    def build_global_map(lidar_data: LiDARData, path: PathData, voxel_size: float = 0.1,
+                          scan_stride: int = 1, buffer_flush_threshold: int = 500_000) -> LiDARData:
+        """
+        Builds a single global point cloud map by projecting LiDAR scans into
+        the world frame using the pose interpolated from ``path`` at each
+        scan's timestamp. Raw points are accumulated in a buffer and
+        voxel-downsampled in batches (rather than all at once) so peak memory
+        stays bounded by the buffer size plus the current downsampled map,
+        not the size of the entire raw sequence.
+
+        NOTE: Assumes the LiDAR points are already expressed in the same body
+        frame that ``path`` tracks (i.e. no extrinsic offset between them).
+
+        Args:
+            lidar_data: LiDAR scans to project and accumulate.
+            path: Odometry/path data giving the pose of the LiDAR frame at each timestamp.
+            voxel_size: Edge length (in meters) of the voxel grid used to downsample the map.
+            scan_stride: Only process every Nth LiDAR scan (e.g. 20 to use every 20th scan).
+            buffer_flush_threshold: Number of raw points to accumulate before flushing the
+                buffer into the downsampled map.
+        Returns:
+            LiDARData: A single-frame LiDARData holding the downsampled global map, in path's frame.
+        """
+
+        if lidar_data.frame != path.frame:
+            raise ValueError(f"LiDARData frame ({lidar_data.frame}) must match PathData frame ({path.frame})")
+
+        # Only scans that fall within the path's time range can be interpolated
+        path_ts = dec_arr_to_float_arr(path.timestamps)
+        lidar_ts = dec_arr_to_float_arr(lidar_data.timestamps)[::scan_stride]
+        in_range = (lidar_ts >= path_ts[0]) & (lidar_ts <= path_ts[-1])
+        if not np.all(in_range):
+            print(f"build_global_map: dropping {np.sum(~in_range)} LiDAR scans outside the path's time range")
+
+        # Interpolate a pose for every remaining scan
+        path_pos = dec_arr_to_float_arr(path.positions)
+        slerp = Slerp(path_ts, R.from_quat(dec_arr_to_float_arr(path.orientations)))
+        interp_pos, interp_quat = interpolate_poses(path_ts, path_pos, slerp, lidar_ts[in_range])
+        interp_rot = R.from_quat(interp_quat)
+
+        # Project each scan into the world frame, buffering raw points and periodically
+        # flushing them into the downsampled map to bound peak memory usage
+        pcd = o3d.geometry.PointCloud()
+        point_buffer: List[np.ndarray] = []
+        buffered_count = 0
+        valid_indices = np.where(in_range)[0] * scan_stride
+        pbar = tqdm.tqdm(total=len(valid_indices), desc="Projecting LiDAR scans into world frame...", unit=" frames")
+        for i, idx in enumerate(valid_indices):
+            pts, _ = lidar_data.get_point_cloud_at_index(int(idx))
+            if not np.isfinite(pts).all():
+                raise ValueError("build_global_map: point cloud contains invalid points. "
+                                  "Call make_dense() on the LiDARData before calling build_global_map().")
+            world_pts = (interp_rot[i].as_matrix() @ pts.T).T + interp_pos[i]
+            point_buffer.append(world_pts)
+            buffered_count += len(world_pts)
+
+            # Flush buffer: merge into the map and downsample in bulk
+            if buffered_count >= buffer_flush_threshold:
+                new_pcd = o3d.geometry.PointCloud()
+                new_pcd.points = o3d.utility.Vector3dVector(np.concatenate(point_buffer, axis=0))
+                pcd += new_pcd
+                pcd = pcd.voxel_down_sample(voxel_size)
+                point_buffer = []
+                buffered_count = 0
+            pbar.update()
+        pbar.close()
+
+        # Flush any remaining buffered points and do a final downsample
+        if point_buffer:
+            new_pcd = o3d.geometry.PointCloud()
+            new_pcd.points = o3d.utility.Vector3dVector(np.concatenate(point_buffer, axis=0))
+            pcd += new_pcd
+        pcd = pcd.voxel_down_sample(voxel_size)
+        map_points = np.asarray(pcd.points, dtype=np.float32)
+
+        return LiDARData(path.frame_id, [path.timestamps[0]], [map_points], None, path.frame)
+
+    @staticmethod
+    def crop_to_matched(data1: LiDARData, data2: LiDARData, tolerance: Decimal) -> None:
+        """
+        Crop two LiDARData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first LiDARData object, cropped in place.
+            data2: The second LiDARData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
 
     # =========================================================================
     # ============================ Data Analysis ==============================
@@ -548,7 +646,7 @@ class LiDARData(SequentialData):
         if lib_type == ROSMsgLibType.ROSBAGS:
             typestore = get_typestore(Stores.ROS2_HUMBLE)
             return typestore.types['sensor_msgs/msg/PointCloud2'].__msgtype__
-        elif lib_type == ROSMsgLibType.RCLPY:
+        elif lib_type == ROSMsgLibType.RCLPY or lib_type == ROSMsgLibType.ROSPY:
             return ModuleImporter.get_module_attribute('sensor_msgs.msg', 'PointCloud2')
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for LiDARData.get_ros_msg_type()!")

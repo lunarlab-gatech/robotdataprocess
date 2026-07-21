@@ -65,6 +65,48 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_equal(odom_data.child_frame_id, 'robot')
         np.testing.assert_equal(odom_data.frame, CoordinateFrame.FLU)
 
+    def _make_path_data(self):
+        return PathData(
+            frame_id="world",
+            timestamps=np.array([1.0, 2.0, 3.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU,
+        )
+
+    def test_eq(self):
+        p1 = self._make_path_data()
+        p2 = deepcopy(p1)
+        self.assertEqual(p1, p2)
+
+        # frame_id differs
+        p = deepcopy(p1); p.frame_id = "other"
+        self.assertNotEqual(p1, p)
+
+        # timestamps differ
+        p = deepcopy(p1); p.timestamps[0] = Decimal("9.0")
+        self.assertNotEqual(p1, p)
+
+        # positions differ
+        p = deepcopy(p1); p.positions[0, 0] = Decimal("99.0")
+        self.assertNotEqual(p1, p)
+
+        # orientations differ
+        p = deepcopy(p1); p.orientations[0, 0] = Decimal("0.5")
+        self.assertNotEqual(p1, p)
+
+        # frame differs
+        p = deepcopy(p1); p.frame = CoordinateFrame.NED
+        self.assertNotEqual(p1, p)
+
+        # different type (OdometryData vs PathData) is not equal
+        odom = OdometryData(
+            frame_id=p1.frame_id, child_frame_id="base_link",
+            timestamps=p1.timestamps, positions=p1.positions,
+            orientations=p1.orientations, frame=p1.frame,
+        )
+        self.assertNotEqual(p1, odom)
+
     def test_make_start_and_end_times_match(self):
         # Create two PathData objects with non-matching start and end times
         path1 = PathData(
@@ -176,6 +218,70 @@ class TestPathData(unittest.TestCase):
         self.assertEqual(path.frame_id, path_converted.frame_id)
         self.assertEqual(path.frame, path_converted.frame)
 
+    def test_from_evo(self):
+        from evo.core.trajectory import PoseTrajectory3D
+
+        timestamps = np.array([1.0, 2.0, 2.0, 3.0])
+        positions  = np.array([[0.1, 0.2, 0.3],
+                                [1.1, 2.2, 3.3],
+                                [1.1, 2.2, 3.3],   # exact duplicate of index 1
+                                [4.4, 5.5, 6.6]])
+        # orientations in wxyz (normalized, non-trivial)
+        orientations_wxyz = np.array([[1.0,  0.0,  0.0,  0.0],
+                                      [0.5,  0.5,  0.5,  0.5],
+                                      [0.5,  0.5,  0.5,  0.5],   # exact duplicate of index 1
+                                      [0.0,  0.0,  0.0,  1.0]])
+
+        # Identical duplicate should be silently removed
+        traj = PoseTrajectory3D(positions_xyz=positions, orientations_quat_wxyz=orientations_wxyz, timestamps=timestamps)
+        result = PathData.from_evo(traj, "map", CoordinateFrame.FLU)
+        self.assertEqual(result.len(), 3)
+        np.testing.assert_array_equal(result.timestamps, np.array([1.0, 2.0, 3.0]))
+
+        # Position differs by 1e-8 at duplicate timestamp → must raise
+        positions_bad_pos = positions.copy()
+        positions_bad_pos[2, 0] += 1e-8
+        traj_bad_pos = PoseTrajectory3D(positions_xyz=positions_bad_pos,
+                                        orientations_quat_wxyz=orientations_wxyz,
+                                        timestamps=timestamps)
+        with self.assertRaises(ValueError):
+            PathData.from_evo(traj_bad_pos, "map", CoordinateFrame.FLU)
+
+        # Orientation differs by 1e-8 at duplicate timestamp → must raise
+        orientations_bad_ori = orientations_wxyz.copy()
+        orientations_bad_ori[2, 1] += 1e-8
+        traj_bad_ori = PoseTrajectory3D(positions_xyz=positions,
+                                        orientations_quat_wxyz=orientations_bad_ori,
+                                        timestamps=timestamps)
+        with self.assertRaises(ValueError):
+            PathData.from_evo(traj_bad_ori, "map", CoordinateFrame.FLU)
+
+    def test_from_evo_prune_duplicates_false(self):
+        from evo.core.trajectory import PoseTrajectory3D
+
+        timestamps = np.array([1.0, 2.0, 2.0, 3.0])
+        positions  = np.array([[0.1, 0.2, 0.3],
+                                [1.1, 2.2, 3.3],
+                                [1.2, 2.3, 3.4],   # mismatched duplicate of index 1
+                                [4.4, 5.5, 6.6]])
+        orientations_wxyz = np.array([[1.0,  0.0,  0.0,  0.0],
+                                      [0.5,  0.5,  0.5,  0.5],
+                                      [0.5,  0.5,  0.5,  0.4],   # mismatched duplicate of index 1
+                                      [0.0,  0.0,  0.0,  1.0]])
+
+        # With prune_duplicates=False, mismatched duplicate timestamps must NOT
+        # raise, and all rows must be kept as-is.
+        traj = PoseTrajectory3D(positions_xyz=positions, orientations_quat_wxyz=orientations_wxyz, timestamps=timestamps)
+        result = PathData.from_evo(traj, "map", CoordinateFrame.FLU, prune_duplicates=False)
+        self.assertEqual(result.len(), 4)
+        np.testing.assert_array_equal(result.timestamps, timestamps)
+
+        # from_evo() then to_evo() must reproduce the original PoseTrajectory3D exactly.
+        traj_round_trip = result.to_evo()
+        np.testing.assert_array_equal(traj_round_trip.timestamps, traj.timestamps)
+        np.testing.assert_array_equal(traj_round_trip.positions_xyz, traj.positions_xyz)
+        np.testing.assert_array_equal(traj_round_trip.orientations_quat_wxyz, traj.orientations_quat_wxyz)
+
     def test_concatenate_PathData(self):
 
         # Create two PathData objects
@@ -267,6 +373,32 @@ class TestPathData(unittest.TestCase):
         path1.visualize_3D([path2], ['Path1', 'Path2'], axes_length=1.0, axes_interval=1)
         mock_plt.show.assert_called()
 
+    @unittest.mock.patch('robotdataprocess.data_types.PathData.plt')
+    def test_visualize_3D_save_path(self, mock_plt):
+        """ Test that visualize_3D saves to file when save_path is provided. """
+        mock_fig = unittest.mock.MagicMock()
+        mock_ax = unittest.mock.MagicMock()
+        mock_plt.figure.return_value = mock_fig
+        mock_fig.add_subplot.return_value = mock_ax
+
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0],
+                                   [0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+
+        path1.visualize_3D([], ['Path1'], axes_length=1.0, axes_interval=1, save_path='/tmp/test_3d.png')
+        mock_plt.savefig.assert_called_once_with('/tmp/test_3d.png')
+        mock_plt.show.assert_not_called()
+        mock_fig.add_subplot.return_value.clear  # ensure fig closed via plt.close
+        mock_plt.close.assert_called_once_with(mock_fig)
+
     def test_visualize_error_cases(self):
         """ Test that visualize raises errors for mismatched titles, axes_length, axes_interval. """
         path1 = PathData(
@@ -346,6 +478,25 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(path.timestamps.astype(float), [1.0, 1.5, 2.0])
         np.testing.assert_array_equal(path.positions.astype(float),
                                       [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.1, 0.2], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        path2 = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.1, 0.2], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        with self.assertRaises(NotImplementedError):
+            PathData.crop_to_matched(path1, path2, Decimal('0.01'))
 
     def test_shift_position_pathdata(self):
         """ Test shift_position on PathData directly. """
@@ -671,6 +822,31 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(separated[1].positions, path2.positions)
         np.testing.assert_array_equal(separated[1].orientations, path2.orientations)
 
+    def test_seperate_PathData_restores_timestamps(self):
+        """ Test that seperate_PathData restores the original timestamps of each trajectory.
+        Regression test: concatenate_PathData shifts timestamps of all but the first trajectory
+        to be contiguous, and seperate_PathData must undo that shift. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([1.1, 2.1, 4.1], dtype=object),
+            positions=np.array([[3.0, 4.0, 6.8], [4.0, 4.0, 6.8], [5.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]], dtype=object),
+            frame=CoordinateFrame.ENU)
+
+        concatenated = PathData.concatenate_PathData([path1, path2])
+        separated = PathData.seperate_PathData([path1, path2], concatenated)
+
+        # path1 timestamps should be unchanged
+        np.testing.assert_array_equal(separated[0].timestamps, path1.timestamps)
+        # path2 timestamps must be restored to original — NOT the shifted values from concatenation
+        np.testing.assert_array_equal(separated[1].timestamps, path2.timestamps)
+
 
     # =========================================================================
     # =================== to_txt_file / to_tum Tests ==========================
@@ -892,6 +1068,269 @@ class TestPathData(unittest.TestCase):
             # Verify TUM qw is last for OdometryData as well
             first_row = open(tum_out).readline().split()
             self.assertAlmostEqual(float(first_row[7]), 1.0)   # qw
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestPathDataFromG2O(unittest.TestCase):
+
+    G2O_PATH = Path(__file__).parent / "files" / "test_PathData" / "test_g2o" / "result.g2o"
+    TIME_PATH = Path(__file__).parent / "files" / "test_PathData" / "test_g2o" / "odom_all.time.txt"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_minimal_g2o(self, lines):
+        """Write a list of strings to a temp g2o file, return its path."""
+        import tempfile
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.g2o', delete=False)
+        f.write('\n'.join(lines) + '\n')
+        f.flush()
+        return Path(f.name)
+
+    def _make_minimal_time(self, entries):
+        """Write (robot_id, kf_id, ts_ns) tuples to a temp time file."""
+        import tempfile
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+        for robot_id, kf_id, ts_ns in entries:
+            f.write(f"{robot_id} {kf_id} {ts_ns} xxx\n")
+        f.flush()
+        return Path(f.name)
+
+    def _key(self, char, idx):
+        return (ord(char) << 56) | idx
+
+    # ------------------------------------------------------------------
+    # Count / shape
+    # ------------------------------------------------------------------
+
+    def test_robot_a_count(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2297)
+
+    def test_robot_b_count(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2346)
+
+    def test_positions_shape(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.positions.shape, (2297, 3))
+
+    def test_orientations_shape(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.orientations.shape, (2297, 4))
+
+    # ------------------------------------------------------------------
+    # First-entry values (robot 'a', idx=0)
+    # ------------------------------------------------------------------
+
+    def test_first_position_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.positions[0].astype(float),
+            [-0.00309295, -7.58408e-05, -0.849994],
+            rtol=1e-5,
+        )
+
+    def test_first_orientation_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.orientations[0].astype(float),
+            [-4.46122e-05, 0.00181938, 8.1167e-08, 0.999998],
+            rtol=1e-5,
+        )
+
+    def test_first_position_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.positions[0].astype(float),
+            [-20.1833, 153.133, -0.89806],
+            rtol=1e-4,
+        )
+
+    def test_first_orientation_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        np.testing.assert_allclose(
+            result.orientations[0].astype(float),
+            [0.0149417, -0.00782986, -0.70758, 0.706432],
+            rtol=1e-5,
+        )
+
+    # ------------------------------------------------------------------
+    # Timestamps
+    # ------------------------------------------------------------------
+
+    def test_first_timestamp_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[0], Decimal('0.05'))
+
+    def test_first_timestamp_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[0], Decimal('0.05'))
+
+    def test_mid_timestamp_robot_a(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[500], Decimal('83.4'))
+        self.assertEqual(result.timestamps[1500], Decimal('250.05'))
+
+    def test_last_timestamp_robot_b(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'b', 'world', CoordinateFrame.FLU)
+        self.assertEqual(result.timestamps[500], Decimal('83.4'))
+        self.assertEqual(result.timestamps[2345], Decimal('390.9'))
+
+    def test_timestamps_are_sorted(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        ts = result.timestamps.astype(float)
+        self.assertTrue(np.all(ts[1:] >= ts[:-1]))
+
+    # ------------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------------
+
+    def test_frame_id_assigned(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'odom', CoordinateFrame.FLU)
+        self.assertEqual(result.frame_id, 'odom')
+
+    def test_coordinate_frame_assigned(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.NED)
+        self.assertEqual(result.frame, CoordinateFrame.NED)
+
+    def test_returns_pathdata_instance(self):
+        result = PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'a', 'world', CoordinateFrame.FLU)
+        self.assertIsInstance(result, PathData)
+
+    # ------------------------------------------------------------------
+    # Sorted by keyframe index (out-of-order g2o)
+    # ------------------------------------------------------------------
+
+    def test_sorted_by_keyframe_index(self):
+        # Write vertices in reverse index order; result should still be idx-ascending.
+        key0 = self._key('a', 0)
+        key1 = self._key('a', 1)
+        key2 = self._key('a', 2)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key2} 3.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (0, 1, 2_000_000_000),
+            (0, 2, 3_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        x_vals = result.positions[:, 0].astype(float)
+        np.testing.assert_array_equal(x_vals, [1.0, 2.0, 3.0])
+
+    # ------------------------------------------------------------------
+    # names_override
+    # ------------------------------------------------------------------
+
+    def test_names_override_maps_char_to_name(self):
+        key0 = self._key('a', 0)
+        key1 = self._key('b', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (1, 0, 2_000_000_000),
+        ])
+        override = {'a': 'aerial-07', 'b': 'ground-03'}
+        result = PathData.from_g2o(g2o, time, 'ground-03', 'world', CoordinateFrame.FLU, names_override=override)
+        self.assertEqual(len(result.timestamps), 1)
+        self.assertAlmostEqual(float(result.positions[0][0]), 2.0)
+
+    def test_names_override_none_uses_char_directly(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 5.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([(0, 0, 500_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU, names_override=None)
+        self.assertEqual(len(result.timestamps), 1)
+
+    def test_names_override_char_not_in_dict_kept_as_is(self):
+        # 'b' not in override dict — should still match robot='b'
+        key0 = self._key('a', 0)
+        key1 = self._key('b', 0)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (1, 0, 2_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'b', 'world', CoordinateFrame.FLU, names_override={'a': 'aerial'})
+        self.assertEqual(len(result.timestamps), 1)
+        self.assertAlmostEqual(float(result.positions[0][0]), 2.0)
+
+    # ------------------------------------------------------------------
+    # Non-vertex lines ignored
+    # ------------------------------------------------------------------
+
+    def test_edge_lines_skipped(self):
+        key0 = self._key('a', 0)
+        key1 = self._key('a', 1)
+        # EDGE line uses same key format but must be ignored
+        edge_key = self._key('a', 99)
+        g2o = self._make_minimal_g2o([
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            f"EDGE_SE3:QUAT {edge_key} {edge_key} 0.0 0.0 0.0 0.0 0.0 0.0 1.0 1 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0 0 1 0 1",
+            f"VERTEX_SE3:QUAT {key1} 2.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([
+            (0, 0, 1_000_000_000),
+            (0, 1, 2_000_000_000),
+        ])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 2)
+
+    def test_comment_lines_skipped(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            "# This is a comment",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+        ])
+        time = self._make_minimal_time([(0, 0, 1_000_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 1)
+
+    def test_blank_lines_skipped(self):
+        key0 = self._key('a', 0)
+        g2o = self._make_minimal_g2o([
+            "",
+            f"VERTEX_SE3:QUAT {key0} 1.0 0.0 0.0 0.0 0.0 0.0 1.0",
+            "",
+        ])
+        time = self._make_minimal_time([(0, 0, 1_000_000_000)])
+        result = PathData.from_g2o(g2o, time, 'a', 'world', CoordinateFrame.FLU)
+        self.assertEqual(len(result.timestamps), 1)
+
+    # ------------------------------------------------------------------
+    # Error: unknown robot
+    # ------------------------------------------------------------------
+
+    def test_raises_for_unknown_robot(self):
+        with self.assertRaises(ValueError):
+            PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'z', 'world', CoordinateFrame.FLU)
+
+    def test_raises_error_message_contains_robot_name(self):
+        with self.assertRaises(ValueError, msg="error message should mention the robot name"):
+            try:
+                PathData.from_g2o(self.G2O_PATH, self.TIME_PATH, 'z', 'world', CoordinateFrame.FLU)
+            except ValueError as e:
+                self.assertIn('z', str(e))
+                raise
+
+    def test_raises_for_unknown_robot_with_names_override(self):
+        with self.assertRaises(ValueError):
+            PathData.from_g2o(
+                self.G2O_PATH, self.TIME_PATH, 'no-such-robot', 'world', CoordinateFrame.FLU,
+                names_override={'a': 'aerial', 'b': 'ground'},
+            )
 
 
 if __name__ == "__main__":

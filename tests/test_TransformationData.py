@@ -417,8 +417,8 @@ class TestTransformationData(unittest.TestCase):
         """ Test loading transformations from GrAco calibration YAML files. """
         base_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData', 'test_from_GrAco_yaml').absolute()
 
-        # --- imu-lidar.yaml: single transform T_Imu_Lidar ---
-        tf = TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_Imu_Lidar')
+        # --- imu-lidar.yaml: single transform T_Imu_Lidar (passed as a Path, not str) ---
+        tf = TransformationData.from_GrAco_yaml(base_path / 'imu-lidar.yaml', 'T_Imu_Lidar')
         self.assertEqual(tf.frame_id, "Imu")
         self.assertEqual(tf.child_frame_id, "Lidar")
         self.assertEqual(tf.frame, CoordinateFrame.ENU)
@@ -491,6 +491,56 @@ class TestTransformationData(unittest.TestCase):
             TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_nonexistent')
 
 
+    def test_from_kalibr(self):
+        """ Test loading transformations from a kalibr camera calibration YAML file. """
+        yaml_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData',
+                          'test_from_kalibr', 'drone_cameras_calib.yaml').absolute()
+
+        # --- cam0: T_cam_imu ---
+        tf_cam0 = TransformationData.from_kalibr(yaml_path, 'cam0', 'T_cam_imu', CoordinateFrame.ENU)
+        self.assertEqual(tf_cam0.frame_id, "cam0")
+        self.assertEqual(tf_cam0.child_frame_id, "imu")
+        self.assertEqual(tf_cam0.frame, CoordinateFrame.ENU)
+        expected_cam0 = np.array([[ 0.0027305274838303473, -0.999982323169393, -0.005281814877973967,  0.12415900872540632],
+                                   [-0.1738050949758117,     0.004726870081005641, -0.9847687269911081,   0.036012403509607445],
+                                   [ 0.9847762858538534,     0.0036069444107767468, -0.1737891158039203,  -0.20357622084417762],
+                                   [ 0.0,                    0.0,                    0.0,                  1.0]])
+        np.testing.assert_array_almost_equal(tf_cam0.as_matrix(), expected_cam0)
+
+        # --- cam1: T_cam_imu (passed as a str, not a Path) ---
+        tf_cam1 = TransformationData.from_kalibr(str(yaml_path), 'cam1', 'T_cam_imu', CoordinateFrame.ENU)
+        self.assertEqual(tf_cam1.frame_id, "cam1")
+        self.assertEqual(tf_cam1.child_frame_id, "imu")
+        self.assertEqual(tf_cam1.frame, CoordinateFrame.ENU)
+        expected_cam1 = np.array([[-0.0003540123070847889, -0.999998698126567,     0.0015742999896645182, -0.13849989246993996],
+                                   [-0.17139967845626314,   -0.001490325404841203, -0.9852004512561275,     0.03619217829845767],
+                                   [ 0.9852015148691033,    -0.000618607596712395, -0.1713989277220405,    -0.20311129552391755],
+                                   [ 0.0,                     0.0,                  0.0,                    1.0]])
+        np.testing.assert_array_almost_equal(tf_cam1.as_matrix(), expected_cam1)
+
+        # --- cam1: T_cn_cnm1 (frame_id resolved from cam_name, child from the literal token) ---
+        tf_c1_c0 = TransformationData.from_kalibr(yaml_path, 'cam1', 'T_cn_cnm1', CoordinateFrame.ENU)
+        self.assertEqual(tf_c1_c0.frame_id, "cam1")
+        self.assertEqual(tf_c1_c0.child_frame_id, "cnm1")
+        expected_c1_c0 = np.array([[ 0.9999717395175309,   -0.006215656181287534, -0.00422915884312321,  -0.263292507858012],
+                                    [ 0.006225933929098103,  0.9999776870329092,    0.00242140104583302,  -9.94877785432512e-05],
+                                    [ 0.004214013881663212, -0.0024476630794041583, 0.9999881254457255,    2.744638754520268e-05],
+                                    [ 0.0,                    0.0,                    0.0,                  1.0]])
+        np.testing.assert_array_almost_equal(tf_c1_c0.as_matrix(), expected_c1_c0)
+
+        # --- Custom coordinate frame is respected ---
+        tf_flu = TransformationData.from_kalibr(yaml_path, 'cam0', 'T_cam_imu', CoordinateFrame.FLU)
+        self.assertEqual(tf_flu.frame, CoordinateFrame.FLU)
+
+        # --- Error: camera name not found ---
+        with self.assertRaises(KeyError):
+            TransformationData.from_kalibr(yaml_path, 'cam2', 'T_cam_imu', CoordinateFrame.ENU)
+
+        # --- Error: transform name not found ---
+        with self.assertRaises(KeyError):
+            TransformationData.from_kalibr(yaml_path, 'cam0', 'T_nonexistent', CoordinateFrame.ENU)
+
+
     def test_timestamps_single_zero(self):
         """ TransformationData has exactly one timestamp at Decimal('0'). """
         tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
@@ -528,6 +578,13 @@ class TestTransformationData(unittest.TestCase):
         tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
         with self.assertRaises(NotImplementedError):
             tf.get_ros_msg(ROSMsgLibType.NONE, 0)
+
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        tf1 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        tf2 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            TransformationData.crop_to_matched(tf1, tf2, Decimal('0.01'))
 
 
 if __name__ == "__main__":

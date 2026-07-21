@@ -31,7 +31,7 @@ class TestImuData(unittest.TestCase):
             os.remove(bag_path / 'imu_bag.db3')
             os.remove(bag_path / 'metadata.yaml')
             os.rmdir(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [imu_data], ['/imu'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [imu_data], ['/imu'], [None], None)
 
         # Load the data back again
         ros_data = ImuData.from_ros2_bag(bag_path, '/imu', '/Husky1/base_link')
@@ -57,7 +57,7 @@ class TestImuData(unittest.TestCase):
             os.remove(bag_path_2 / 'imu_ori_bag.db3')
             os.remove(bag_path_2 / 'metadata.yaml')
             os.rmdir(bag_path_2)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path_2, [imu_data], ['/imu'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path_2, [imu_data], ['/imu'], [None], None)
 
         ros_data_2 = ImuData.from_ros2_bag(bag_path_2, '/imu', '/Husky1/base_link')
         np.testing.assert_equal(float(ros_data_2.timestamps[84]), 331.79)
@@ -80,6 +80,16 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(imu_data_cropped.lin_acc, imu_data.lin_acc[13:75])
         np.testing.assert_array_equal(imu_data_cropped.ang_vel, imu_data.ang_vel[13:75])
         np.testing.assert_equal(imu_data_cropped.orientations, None)
+
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        timestamps = [Decimal('0.1'), Decimal('0.2')]
+        lin_acc = np.zeros((2, 3))
+        ang_vel = np.zeros((2, 3))
+        imu1 = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, None)
+        imu2 = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, None)
+        with self.assertRaises(NotImplementedError):
+            ImuData.crop_to_matched(imu1, imu2, Decimal('0.01'))
 
     @unittest.mock.patch('robotdataprocess.data_types.ImuData.plt')
     def test_visualize_mocked(self, mock_plt):

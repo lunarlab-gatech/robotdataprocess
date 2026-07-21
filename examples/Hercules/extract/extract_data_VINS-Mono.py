@@ -30,7 +30,7 @@ def to_bag(input_dir: str, robot_name: str, crop_data: bool, end_time: Union[Dec
         image_data.crop_data(Decimal('0.0'), end_time)
 
     # Save it into a ROS2 Humble bag
-    Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
+    Ros2BagWrapper.write_data_to_ros2_bag(output_path / robot_name,
              [imu_data, image_data,  pose_data,       pose_data],
              [  '/imu0',    '/cam0/image_raw', '/odom_gt', '/odom_gt/path'],
              [    None,       None, "Odometry",          "Path"], 

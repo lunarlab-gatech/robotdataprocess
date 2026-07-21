@@ -194,7 +194,13 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
         np.testing.assert_array_equal(channels_expected, lidar_data.get_point_cloud_at_index(0)[1])
 
-    # NOTE: Only testing ROSBAGS right now
+    def test_get_ros_msg_type_rospy(self):
+        """get_ros_msg_type returns the PointCloud2 class for ROSPY."""
+        import sensor_msgs.msg
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        self.assertIs(lidar_data.get_ros_msg_type(ROSMsgLibType.ROSPY), sensor_msgs.msg.PointCloud2)
+
     def test_get_ros_msg_type(self):
         """ Ensure we get the correct ROS message type. """
 
@@ -328,6 +334,15 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.header.stamp.sec, 2)
         self.assertEqual(ros_msg.header.stamp.nanosec, 0)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        point_clouds = [np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 1.0, 1.0]])]
+        timestamps = [Decimal("0.1"), Decimal("0.2")]
+        lidar1 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        lidar2 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            LiDARData.crop_to_matched(lidar1, lidar2, Decimal("0.01"))
+
 
     def test_calculate_point_channels_already_exists(self):
         """ Test that RuntimeError is raised when channels already calculated. """
@@ -357,7 +372,7 @@ class TestLiDARData(unittest.TestCase):
         if bag_path.is_dir():
             shutil.rmtree(bag_path)
         bag_path.parent.mkdir(parents=True, exist_ok=True)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [lidar_data], ['/lidar'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [lidar_data], ['/lidar'], [None], None)
 
         # Read it back -- frame_id should be loaded from the bag header
         loaded_data = LiDARData.from_ros2_bag(bag_path, '/lidar', CoordinateFrame.NED)

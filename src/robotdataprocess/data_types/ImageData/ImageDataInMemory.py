@@ -39,23 +39,6 @@ class ImageDataInMemory(ImageData):
     # ============================ Class Methods ==============================
     # =========================================================================
 
-    @staticmethod
-    def _decode_image_msg(msg: object, encoding: ImageData.ImageEncoding, height: int, width: int):
-        """
-        Helper method that decodes image data from a ROS2 Image message.
-
-        Args:
-            msg (object): The ROS2 Image message.
-            encoding (ImageEncoding): The encoding of the image data.
-            height (int): Height of the image.
-            width (int): Width of the image .
-        """
-        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
-        if channels > 1:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels)) 
-        else:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))
-
     @classmethod
     def from_ros2_bag(cls, bag_path: Union[Path, str], img_topic: str, save_folder: Union[Path, str]):
         """
@@ -85,8 +68,8 @@ class ImageDataInMemory(ImageData):
                 frame_id = msg.header.frame_id
                 height = msg.height
                 width = msg.width
-                encoding = ImageData.ImageEncoding.from_ros_str(msg.encoding)
-                img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
+                encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+                img = ImageData._decode_image_msg(msg, encoding, height, width)
                 image_shape = img.shape
                 break
         
@@ -109,7 +92,7 @@ class ImageDataInMemory(ImageData):
                 # Extract images (skipping malformed ones)
                 img = None
                 try:
-                    img = ImageDataInMemory._decode_image_msg(msg, encoding, height, width)
+                    img = ImageData._decode_image_msg(msg, encoding, height, width)
                 except Exception as e:
                     print("Failure decoding image msg: ", e)
                 if img is not None and img.shape == image_shape: 
