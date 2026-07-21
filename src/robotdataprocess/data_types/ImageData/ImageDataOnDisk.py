@@ -460,26 +460,55 @@ class ImageDataOnDisk(ImageData):
         camera_data.K[1, 2] = new_cy
         camera_data.P[1, 2] = new_cy
 
-    def undistort_imagery_mono(self, camera_data: CameraData, alpha: float = 0.0) -> None:
+    @staticmethod
+    def _build_undistort_map(K: np.ndarray, D: np.ndarray, R: np.ndarray, new_K: np.ndarray,
+                              size_cv2: Tuple, distortion_model: CameraData.DistortionModel
+                              ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Undistort every image using ``camera_data``'s distortion coefficients,
-        then update ``camera_data``'s ``K``, ``D``, and ``P`` so that they
-        describe the now-undistorted imagery.
+        Build ``cv2.remap`` maps that undistort (and, via ``R``, rectify)
+        imagery for a single camera.
+
+        Args:
+            K: The camera's 3x3 intrinsic matrix.
+            D: The camera's distortion coefficients.
+            R: The 3x3 rectification rotation to apply (identity for mono).
+            new_K: The target 3x3 camera matrix for the undistorted imagery.
+            size_cv2: ``(width, height)`` of the imagery.
+            distortion_model: The distortion model of the camera.
+
+        Returns:
+            Tuple of ``(map1, map2)`` as returned by
+            ``cv2.initUndistortRectifyMap``/``cv2.fisheye.initUndistortRectifyMap``.
+
+        Raises:
+            NotImplementedError: If ``distortion_model`` is not supported.
+        """
+
+        if distortion_model == CameraData.DistortionModel.RADIAL_TANGENTIAL:
+            return cv2.initUndistortRectifyMap(K, D, R, new_K, size_cv2, cv2.CV_32FC1)
+        elif distortion_model == CameraData.DistortionModel.EQUIDISTANT:
+            return cv2.fisheye.initUndistortRectifyMap(K, D.reshape(4, 1), R, new_K, size_cv2, cv2.CV_32FC1)
+        else:
+            raise NotImplementedError(
+                f"Undistortion does not support distortion model {distortion_model}.")
+
+    def undistort_imagery_mono(self, camera_data: CameraData) -> None:
+        """
+        Undistort every image using ``camera_data``'s already-computed target
+        camera matrix (``P``'s intrinsic part), e.g. as produced by
+        ``CameraData.from_user_mono``/``CameraData.from_kalibr_mono``.
+        Afterwards, ``camera_data``'s ``K`` is updated to match and ``D`` is
+        zeroed.
 
         The undistortion is applied lazily via the transformation pipeline,
         so no images are read from disk until accessed. Image dimensions are
         unchanged; only pixel content is remapped.
 
         Args:
-            camera_data: The CameraData providing the distortion model and
-                coefficients. Its ``width``/``height`` must match this
-                ImageDataOnDisk's. Its ``K``, ``D``, and ``P`` are updated to
-                describe the undistorted imagery.
-            alpha: Free scaling parameter for RADIAL_TANGENTIAL cameras,
-                forwarded to ``cv2.getOptimalNewCameraMatrix``. ``0`` crops to
-                valid pixels only (no black borders); ``1`` retains all source
-                pixels. Used as the ``balance`` parameter for EQUIDISTANT
-                cameras, with the same interpretation.
+            camera_data: The CameraData providing the distortion model,
+                coefficients, and target ``P``. Its ``width``/``height`` must
+                match this ImageDataOnDisk's. Its ``K`` and ``D`` are updated
+                to describe the undistorted imagery.
 
         Raises:
             ValueError: If ``camera_data``'s dimensions don't match this
@@ -490,20 +519,10 @@ class ImageDataOnDisk(ImageData):
 
         self._ensure_matching_image_shape(camera_data)
         size_cv2: Tuple = (self.width, self.height)
+        new_K = camera_data.P[:3, :3].copy()
 
-        if camera_data.distortion_model == CameraData.DistortionModel.RADIAL_TANGENTIAL:
-            new_K, _ = cv2.getOptimalNewCameraMatrix(camera_data.K, camera_data.D, size_cv2, alpha, size_cv2)
-            map1, map2 = cv2.initUndistortRectifyMap(
-                camera_data.K, camera_data.D, camera_data.R, new_K, size_cv2, cv2.CV_32FC1)
-        elif camera_data.distortion_model == CameraData.DistortionModel.EQUIDISTANT:
-            D_fisheye = camera_data.D.reshape(4, 1)
-            new_K = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(
-                camera_data.K, D_fisheye, size_cv2, camera_data.R, balance=alpha)
-            map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-                camera_data.K, D_fisheye, camera_data.R, new_K, size_cv2, cv2.CV_32FC1)
-        else:
-            raise NotImplementedError(
-                f"undistort_imagery_mono() does not support distortion model {camera_data.distortion_model}.")
+        map1, map2 = self._build_undistort_map(
+            camera_data.K, camera_data.D, camera_data.R, new_K, size_cv2, camera_data.distortion_model)
 
         def _undistort(image: np.ndarray) -> np.ndarray:
             return cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR)
@@ -512,4 +531,74 @@ class ImageDataOnDisk(ImageData):
 
         camera_data.K = new_K
         camera_data.D = np.zeros_like(camera_data.D)
-        camera_data.P[:3, :3] = new_K
+
+    @staticmethod
+    def undistort_imagery_stereo(image_data_left: ImageDataOnDisk, image_data_right: ImageDataOnDisk,
+                                 camera_data_left: CameraData, camera_data_right: CameraData) -> None:
+        """
+        Undistort and rectify a stereo image pair using ``camera_data_left``'s
+        and ``camera_data_right``'s already-computed rectification (``R``) and
+        rectified projection matrix (``P``), e.g. as produced by
+        ``CameraData.from_kalibr_stereo``. Afterwards, each camera's ``K`` is
+        updated to the rectified projection's intrinsics, ``D`` is zeroed,
+        and ``R`` is reset to identity, since each image is now already
+        sitting in its own rectified frame and no further rotation is needed
+        to interpret it. ``P`` is left unchanged, since it still correctly
+        describes the projection (including, for the right camera, the
+        stereo baseline) of the now-rectified image.
+
+        The undistortion/rectification is applied lazily via each
+        ImageDataOnDisk's transformation pipeline, so no images are read from
+        disk until accessed. Image dimensions are unchanged; only pixel
+        content is remapped.
+
+        Args:
+            image_data_left: The left camera's imagery.
+            image_data_right: The right camera's imagery.
+            camera_data_left: The left camera's calibration, including its
+                rectification ``R`` and rectified ``P``. Its ``width``/
+                ``height`` must match ``image_data_left``'s. Its ``K``, ``D``,
+                and ``R`` are updated to describe the undistorted imagery.
+            camera_data_right: The right camera's calibration, matching
+                ``image_data_right``, updated the same way as
+                ``camera_data_left``.
+
+        Raises:
+            ValueError: If either CameraData's dimensions don't match its
+                corresponding ImageDataOnDisk's, if
+                ``camera_data_left.timeshift_cam_imu`` doesn't match
+                ``camera_data_right.timeshift_cam_imu``, or if
+                ``image_data_left`` and ``image_data_right`` don't have
+                identical timestamps.
+            NotImplementedError: If either camera's ``distortion_model`` is
+                not supported.
+        """
+
+        if camera_data_left.timeshift_cam_imu != camera_data_right.timeshift_cam_imu:
+            raise ValueError(
+                "camera_data_left.timeshift_cam_imu "
+                f"({camera_data_left.timeshift_cam_imu}) does not match "
+                f"camera_data_right.timeshift_cam_imu ({camera_data_right.timeshift_cam_imu}). "
+                "Call CameraData.align_ImageData_and_CameraData_to_imu_ts() on both cameras first.")
+
+        if not np.array_equal(image_data_left.timestamps, image_data_right.timestamps):
+            raise ValueError(
+                "image_data_left and image_data_right must have identical timestamps.")
+
+        for image_data, camera_data in ((image_data_left, camera_data_left),
+                                        (image_data_right, camera_data_right)):
+            image_data._ensure_matching_image_shape(camera_data)
+            size_cv2: Tuple = (image_data.width, image_data.height)
+            new_K = camera_data.P[:3, :3].copy()
+
+            map1, map2 = ImageDataOnDisk._build_undistort_map(
+                camera_data.K, camera_data.D, camera_data.R, new_K, size_cv2, camera_data.distortion_model)
+
+            def _undistort(image: np.ndarray, map1=map1, map2=map2) -> np.ndarray:
+                return cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR)
+
+            image_data.images.transformations.append(_undistort)
+
+            camera_data.K = new_K
+            camera_data.R = np.eye(3, dtype=np.float64)
+            camera_data.D = np.zeros_like(camera_data.D)

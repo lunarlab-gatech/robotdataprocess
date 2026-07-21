@@ -235,11 +235,13 @@ class TestCameraData(unittest.TestCase):
         self.assertEqual(cam.height, 1100)
 
     def test_from_kalibr_mono_cam0_R_and_P(self):
-        """ R is identity and P is [K|0] for a monocular load. """
+        """ R is identity and P's intrinsic part is the precomputed undistorted target K. """
         cam = CameraData.from_kalibr_mono(self.KALIBR_YAML, 'cam0')
         np.testing.assert_array_equal(cam.R, np.eye(3))
+        expected_new_K = CameraData._compute_undistorted_K_mono(
+            cam.K, cam.D, np.eye(3), (cam.width, cam.height), cam.distortion_model, 0.0)
         expected_P = np.zeros((3, 4))
-        expected_P[:3, :3] = cam.K
+        expected_P[:3, :3] = expected_new_K
         np.testing.assert_array_almost_equal(cam.P, expected_P)
 
     def test_from_kalibr_mono_cam0_frame_id_and_model(self):
