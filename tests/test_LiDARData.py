@@ -194,6 +194,7 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
         np.testing.assert_array_equal(channels_expected, lidar_data.get_point_cloud_at_index(0)[1])
 
+    @unittest.skipIf(os.getenv("SKIP_ROS1_TESTS") == "True", "ROS1 not installed")
     def test_get_ros_msg_type_rospy(self):
         """get_ros_msg_type returns the PointCloud2 class for ROSPY."""
         import sensor_msgs.msg
