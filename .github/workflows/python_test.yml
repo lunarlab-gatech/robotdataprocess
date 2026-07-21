@@ -134,6 +134,7 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Install the package
       run: |
+        python3 -m pip install --ignore-installed pyyaml
         python3 -m pip install -e .
     - name: Test with unittest & evaluate test coverage
       shell: bash
