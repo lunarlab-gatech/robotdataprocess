@@ -1,7 +1,7 @@
 from ..data_types.Data import ROSMsgLibType
 from ..data_types.SequentialData import SequentialData
 from ..data_types.ImageData.ImageData import ImageData
-from ..ModuleImporter import ModuleImporter
+from ..utils.ModuleImporter import ModuleImporter
 import multiprocessing
 from multiprocessing import Process, Manager, Event, resource_tracker
 from multiprocessing.managers import DictProxy

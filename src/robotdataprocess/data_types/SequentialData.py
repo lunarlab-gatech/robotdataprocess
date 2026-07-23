@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr
+from ..utils.conversion_utils import col_to_dec_arr
 from .Data import Data, CoordinateFrame, ROSMsgLibType
 from decimal import Decimal
 import matplotlib.pyplot as plt

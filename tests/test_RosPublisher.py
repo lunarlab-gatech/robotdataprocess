@@ -9,7 +9,7 @@ from robotdataprocess.data_types.SequentialData import SequentialData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.data_types.OdometryData import PATH_SLICE_STEP
-from robotdataprocess.ModuleImporter import ModuleImporter
+from robotdataprocess.utils.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 import signal
 import struct

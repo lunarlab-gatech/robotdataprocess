@@ -6,7 +6,7 @@ import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
-from ...ModuleImporter import ModuleImporter
+from ...utils.ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.lib.format import open_memmap
 from pathlib import Path

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
 from robotdataprocess import OdometryData, CoordinateFrame, ImageDataOnDisk
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
-from robotdataprocess.conversion_utils import dec_arr_to_float_arr
+from robotdataprocess.utils.conversion_utils import dec_arr_to_float_arr
 from rosbags.highlevel import AnyReader
 
 def main():

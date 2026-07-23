@@ -40,8 +40,8 @@ def main():
     See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
 
-    all_robots = ["drone", "robotA"]
-    run_names = ["ROMAN_O"]
+    all_robots = ["drone", "robotA", "robotB", "robotC"]
+    run_names = ["ROMAN_O", "ROMAN_NM", "MG"]
     dataset_name = "Scenario5"
 
     # Environment image / robot display config

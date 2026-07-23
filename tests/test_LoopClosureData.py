@@ -8,7 +8,7 @@ from pathlib import Path
 from robotdataprocess.data_types.Data import CoordinateFrame
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
 from robotdataprocess.data_types.PathData import PathData
-from robotdataprocess.math_utils import interpolate_poses
+from robotdataprocess.utils.math_utils import interpolate_poses
 from scipy.spatial.transform import Rotation as R
 import unittest
 

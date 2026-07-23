@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ..utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .Data import CoordinateFrame, ROSMsgLibType
 import decimal
 from decimal import Decimal
 from evo.core import geometry
 import matplotlib.pyplot as plt
-from ..ModuleImporter import ModuleImporter
+from ..utils.ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.typing import NDArray
 from .PathData import PathData

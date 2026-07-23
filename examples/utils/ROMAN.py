@@ -12,24 +12,80 @@ from pathlib import Path
 import fitz
 import pandas as pd
 import re
-from robotdataprocess import CoordinateFrame, LoopClosureData, OdometryData, PathData
+from robotdataprocess import CoordinateFrame, LoopClosureData, OdometryData, PathData, TablePlotter
 from typing import Dict, List, Tuple
 
-from utils.visualization import save_styled_tables, render_tables_onto_axes, HEADER_COLOR
+def _make_raw_df(run_names: List[str], run_display_names: Dict[str, str],
+                 cols_for_run, value_fn) -> pd.DataFrame:
+    """Build a raw numeric DataFrame indexed by run display name.
+
+    Args:
+        run_names: Ordered list of run identifiers to use as rows.
+        run_display_names: Maps each run identifier to its display name (row label).
+        cols_for_run: callable(run) -> iterable of column labels for that run.
+        value_fn: callable(run, col) -> float; return float('nan') for missing/
+            suppressed cells.
+    """
+    return pd.DataFrame(
+        {run_display_names.get(run, run): {col: value_fn(run, col) for col in cols_for_run(run)}
+         for run in run_names}
+    ).T
+
+def _style_columns(raw_df: pd.DataFrame, title: str, color_fn=None, fmt=None,
+                   highlight: bool = True, higher_is_better: bool = True) -> pd.DataFrame:
+    """Resolve each column of a raw numeric DataFrame into TablePlotter segments.
+
+    Missing/suppressed values must be represented as NaN in raw_df; fmt and
+    color_fn are responsible for rendering NaN however the caller wants
+    (e.g. "---"), since TablePlotter._rank_groups already excludes NaN from
+    ranking automatically. The table's title is stored in the returned
+    DataFrame's ``attrs["title"]``.
+    """
+    styled = {
+        col: TablePlotter.convert_numbers_to_TextSegments(
+            raw_df[col], color_fn=color_fn, fmt=fmt, emphasize_rankings=highlight, higher_is_better=higher_is_better)
+        for col in raw_df.columns
+    }
+    styled_df = pd.DataFrame(styled).reindex(index=raw_df.index)
+    styled_df.attrs["title"] = title
+    return styled_df
+
+
+def _style_combined_columns(raw_df_a: pd.DataFrame, raw_df_b: pd.DataFrame, title: str,
+                            color_fn=None, fmt=None,
+                            highlight: bool = True, higher_is_better: bool = True,
+                            separator: str = '/') -> pd.DataFrame:
+    """Resolve two raw numeric DataFrames into one merged-segment DataFrame.
+
+    Each column's two values (e.g. successful/total counts) are ranked
+    independently and combined into a single "A<separator>B" cell. The
+    table's title is stored in the returned DataFrame's ``attrs["title"]``.
+    """
+    styled = {}
+    for col in raw_df_a.columns:
+        segments_a = TablePlotter.convert_numbers_to_TextSegments(
+            raw_df_a[col], color_fn=color_fn, fmt=fmt, emphasize_rankings=highlight, higher_is_better=higher_is_better)
+        segments_b = TablePlotter.convert_numbers_to_TextSegments(
+            raw_df_b[col], color_fn=color_fn, fmt=fmt, emphasize_rankings=highlight, higher_is_better=higher_is_better)
+        styled[col] = TablePlotter.merge_Series(segments_a, segments_b, separator=separator)
+    styled_df = pd.DataFrame(styled).reindex(index=raw_df_a.index)
+    styled_df.attrs["title"] = title
+    return styled_df
 
 
 def pair_label(name_a: str, name_b: str) -> str:
     def abbrev(n):
         m = re.match(r'([A-Za-z]+)(\d+)', n)
-        return (m.group(1)[0].upper() + m.group(2)) if m else n
-    return abbrev(name_a) + abbrev(name_b)
-
-
-def print_metrics(metrics_dictionary: Dict) -> None:
-    print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+        if m:
+            return m.group(1)[0].upper() + m.group(2)
+        # No trailing number (e.g. "drone", "robotA"): abbreviate to the
+        # first letter, keeping a trailing capital if present to distinguish
+        # same-base-name robots (e.g. "robotA"/"robotB" -> "RA"/"RB").
+        first = n[0].upper()
+        if len(n) > 1 and n[-1].isupper():
+            return first + n[-1]
+        return first
+    return abbrev(name_a) + '-' + abbrev(name_b)
 
 class LCFilterMode(Enum):
     """
@@ -312,18 +368,24 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
             the fixed-distance RPE convention used by GrAco.
 
     Returns:
-        Tuple of ``(first_stage_ate, merged_ate, individual_ate, individual_rpe)``
-        where ``first_stage_ate`` is the pre-optimize RMS ATE in metres (``None``
+        Tuple of ``(first_stage_ate, merged_ate, individual_ate, individual_rpe, merged_rot_err, merged_rte,
+        merged_rel_rot_err)`` where ``first_stage_ate`` is the pre-optimize RMS ATE in metres (``None``
         if the pre-optimize file is unavailable), ``merged_ate`` is the final
         post-optimize RMS ATE in metres computed on the merged (both-robot)
         trajectory, ``individual_ate`` is a list of per-robot post-optimize RMS ATE
-        values (``['APE']['translation_part']['rmse']``), and ``individual_rpe`` is
+        values (``['APE']['translation_part']['rmse']``), ``individual_rpe`` is
         a list of per-robot post-optimize RMS RPE values
         (``['RPE']['translation_part']['rmse']``) -- both in the same order as
         ``robot_names``, computed by separating the merged aligned trajectories
         back into per-robot trajectories (via :meth:`PathData.seperate_PathData`)
         and calling :meth:`PathData.calculate_traj_errors` on each robot's
-        already-aligned pair.
+        already-aligned pair -- ``merged_rot_err`` is the post-optimize RMS
+        absolute rotation angle error in degrees on the merged trajectory
+        (``['APE']['rotation_angle_deg']['rmse']``) -- ``merged_rte`` is the
+        post-optimize RMS RTE in metres on the merged trajectory
+        (``['RPE']['translation_part']['rmse']``) -- and ``merged_rel_rot_err`` is the
+        post-optimize RMS relative rotation angle error in degrees on the merged
+        trajectory (``['RPE']['rotation_angle_deg']['rmse']``).
 
     Raises:
         ValueError: If ``robot_names`` does not have exactly two entries.
@@ -345,12 +407,10 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         #print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, method, "============")
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False,
                                                                                 rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        #print_metrics(metrics_dictionary)
 
         #print("\n=========== Individual Trajectory", robot1_name, "for dataset: ", dataset_name, method, "============")
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot1, est_data_robot1, max_diff=0.1, visualize=False,
                                                                                 rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        #print_metrics(metrics_dictionary)
 
     # Calculate first-stage (pre-optimize) ATE
     first_stage_ate = None
@@ -362,7 +422,6 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         #print("\n========== First Stage for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
         first_stage_metrics, _, _ = OdometryData.align_and_calculate_traj_errors(first_stage_gt, first_stage_est, max_diff=0.1, visualize=False,
                                                                                  rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        #print_metrics(first_stage_metrics)
         first_stage_ate = first_stage_metrics['APE']['translation_part']['rmse']
     except Exception as e:
         print(f"Warning: Could not compute first-stage ATE for {dataset_name} {method}: {e}")
@@ -374,7 +433,7 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
 
     # Calculate RMS ATE, among other metrics
     #print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True,
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False,
                                                                                                      rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
 
     # Seperate the aligned trajectories into their single-robot forms, and compute
@@ -449,23 +508,36 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
                                title=f"{method} LC overlaid on trajectory",
                                save_path=str(traj_lc_dir / f'traj_lc_{pair_lbl}_{method}.pdf'))
 
-    return first_stage_ate, metrics_dictionary['APE']['translation_part']['rmse'], individual_ate, individual_rpe
+    return (first_stage_ate, metrics_dictionary['APE']['translation_part']['rmse'], individual_ate, individual_rpe,
+            metrics_dictionary['APE']['rotation_angle_deg']['rmse'], metrics_dictionary['RPE']['translation_part']['rmse'],
+            metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
 
 
 def _save_ate_tables(run_names: List[str], cols: List[str],
                      run_display_names: Dict[str, str],
                      table_data: Dict[str, Dict[str, float]],
                      first_stage_table_data: Dict[str, Dict],
-                     table_data_lc: Dict[str, Dict[str, Dict]],
-                     table_data_lc_inlier: Dict[str, Dict[str, Dict]],
+                     table_data_lc_inter_robot: Dict[str, Dict[str, Dict]],
+                     table_data_lc_inlier_inter_robot: Dict[str, Dict[str, Dict]],
+                     rot_err_table_data: Dict[str, Dict[str, float]],
+                     rte_table_data: Dict[str, Dict[str, float]],
+                     rel_rot_err_table_data: Dict[str, Dict[str, float]],
                      save_path: Path) -> None:
     """
-    Build and save the ATE summary PDF tables.
+    Build and save the ATE/RTE summary PDF tables.
 
-    Produces two tables — pre-optimize (first-stage) and post-optimize merged
-    RMS ATE — styled so that cells with no loop closures or ATE > 20 m are
-    highlighted in red. The pre-optimize table is suppressed for pairs with
-    zero total LC; the post-optimize table for pairs with zero inlier LC.
+    Produces five tables — pre-optimize (first-stage) merged RMS ATE,
+    post-optimize merged RMS ATE, post-optimize merged RMS absolute rotation
+    angle error, post-optimize merged RMS RTE, and post-optimize merged RMS
+    relative rotation angle error — styled so that cells with no loop
+    closures or a value > 20 are highlighted in red. The pre-optimize table
+    is suppressed for pairs with zero total inter-robot LC; the post-optimize
+    ATE, rotation error, RTE, and relative rotation error tables for pairs
+    with zero inlier inter-robot LC.
+
+    Each table gets a trailing "Average" column (the row-wise mean across
+    the pair columns, ignoring suppressed/NaN pairs), set off from the pair
+    columns by a heavy divider.
 
     Args:
         run_names: Ordered list of run identifiers (e.g. ``["ROMAN", "MG_TS"]``).
@@ -474,41 +546,53 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
         table_data: Post-optimize RMS ATE keyed by run then column.
         first_stage_table_data: Pre-optimize RMS ATE keyed by run then column
             (``None`` values are rendered as ``"---"``).
-        table_data_lc: All-LC stats dicts keyed by run then column; used to
-            suppress pre-optimize cells where total LC count is zero.
-        table_data_lc_inlier: Inlier-LC stats dicts keyed by run then column;
-            used to suppress post-optimize cells where inlier LC count is zero.
+        table_data_lc_inter_robot: All-LC stats dicts (inter-robot LC only)
+            keyed by run then column; used to suppress pre-optimize cells
+            where total inter-robot LC count is zero.
+        table_data_lc_inlier_inter_robot: Inlier-LC stats dicts (inter-robot
+            LC only) keyed by run then column; used to suppress post-optimize
+            cells where inlier inter-robot LC count is zero.
+        rot_err_table_data: Post-optimize RMS absolute rotation angle error (deg)
+            keyed by run then column.
+        rte_table_data: Post-optimize merged RMS RTE (m) keyed by run then column.
+        rel_rot_err_table_data: Post-optimize merged RMS relative rotation angle
+            error (deg) keyed by run then column.
         save_path: Destination PDF path.
     """
-    def make_df(data: dict, lc_filter: Dict[str, Dict[str, Dict]]) -> pd.DataFrame:
-        rows = {}
-        for run in run_names:
-            row = {}
-            for col in cols:
-                val = data[run].get(col)
-                if val is None or lc_filter[run].get(col, {}).get('num_loop_closures', -1) == 0:
-                    row[col] = "---"
-                else:
-                    row[col] = f"{val:.3f}"
-            rows[run_display_names.get(run, run)] = row
-        return pd.DataFrame(rows).T
+    def make_raw_df(data: dict, lc_filter: Dict[str, Dict[str, Dict]]) -> pd.DataFrame:
+        def value_fn(run, col):
+            val = data[run].get(col)
+            suppressed = val is None or lc_filter[run].get(col, {}).get('num_loop_closures', -1) == 0
+            return float('nan') if suppressed else val
+        raw_df = _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
+        raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
+        return raw_df
 
-    def make_rank_df(data: dict) -> pd.DataFrame:
-        # Negate so that lower ATE → higher rank value → sorted first by _col_rank_groups
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: -(data[run][col] if data[run].get(col) is not None else float('inf'))
-                for col in cols}
-             for run in run_names}
-        ).T
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_above(20)
+    fmt = TablePlotter.fmt_fixed(3)
+    # The trailing "Average" column is a summary column, not another pair —
+    # set it off from the pair columns with a heavy divider.
+    heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
     dfs = [
-        ("Merged RMS ATE (m) — Pre-Optimize", make_df(first_stage_table_data, table_data_lc), [make_rank_df(first_stage_table_data)]),
-        ("Merged RMS ATE (m)", make_df(table_data, table_data_lc_inlier), [make_rank_df(table_data)]),
+        _style_columns(make_raw_df(first_stage_table_data, table_data_lc_inter_robot),
+                       "Merged RMS ATE (m) — Pre-Optimize",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df(table_data, table_data_lc_inlier_inter_robot),
+                       "Merged RMS ATE (m)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df(rot_err_table_data, table_data_lc_inlier_inter_robot),
+                       "Merged RMS Absolute Rotation Error (deg)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df(rte_table_data, table_data_lc_inlier_inter_robot),
+                       "Merged RMS RTE (m) - Δ5m",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df(rel_rot_err_table_data, table_data_lc_inlier_inter_robot),
+                       "Merged RMS Relative Rotation Error (deg) - Δ5m",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
-                       cell_is_red=lambda s: s == "---" or float(s) > 20)
+    TablePlotter.plot_tables_on_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, heavy_divider_before=heavy_divider_before)
 
 
 def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str]],
@@ -538,35 +622,27 @@ def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str
     """
     sub_cols = [f"{pair_label(a, b)}\n{name}" for a, b in robot_pairs for name in (a, b)]
 
-    def make_df(data: Dict[str, Dict[str, List[float]]]) -> pd.DataFrame:
-        rows = {}
-        for run in run_names:
-            row = {}
-            for a, b in robot_pairs:
-                vals = data[run].get(pair_label(a, b))
-                for i, name in enumerate((a, b)):
-                    row[f"{pair_label(a, b)}\n{name}"] = "---" if vals is None else f"{vals[i]:.6f}"
-            rows[run_display_names.get(run, run)] = row
-        return pd.DataFrame(rows).T[sub_cols]
+    subcol_pair_idx = {f"{pair_label(a, b)}\n{name}": (pair_label(a, b), i)
+                      for a, b in robot_pairs for i, name in enumerate((a, b))}
 
-    def make_rank_df(data: Dict[str, Dict[str, List[float]]]) -> pd.DataFrame:
-        rows = {}
-        for run in run_names:
-            row = {}
-            for a, b in robot_pairs:
-                vals = data[run].get(pair_label(a, b))
-                for i, name in enumerate((a, b)):
-                    row[f"{pair_label(a, b)}\n{name}"] = -(vals[i] if vals is not None else float('inf'))
-            rows[run_display_names.get(run, run)] = row
-        return pd.DataFrame(rows).T[sub_cols]
+    def make_raw_df(data: Dict[str, Dict[str, List[float]]]) -> pd.DataFrame:
+        def value_fn(run, subcol):
+            pair, i = subcol_pair_idx[subcol]
+            vals = data[run].get(pair)
+            return float('nan') if vals is None else vals[i]
+        return _make_raw_df(run_names, run_display_names, lambda run: sub_cols, value_fn)
+
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_above(20)
+    fmt = TablePlotter.fmt_fixed(3)
 
     dfs = [
-        ("Individual RMS ATE (m)", make_df(split_ate_table_data), [make_rank_df(split_ate_table_data)]),
-        ("Individual RMS RPE (m) - Δ5m", make_df(split_rpe_table_data), [make_rank_df(split_rpe_table_data)]),
+        _style_columns(make_raw_df(split_ate_table_data), "Individual RMS ATE (m)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df(split_rpe_table_data), "Individual RMS RPE (m) - Δ5m",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
-                       cell_is_red=lambda s: s == "---" or float(s) > 20)
+    TablePlotter.plot_tables_on_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
 
 
 def _save_timing_table(run_names: List[str], cols: List[str],
@@ -594,31 +670,25 @@ def _save_timing_table(run_names: List[str], cols: List[str],
             return None if entry is None else entry["align"] + entry["offline_rpgo"]
         return None if entry is None else entry[key]
 
-    def make_df(key: str) -> pd.DataFrame:
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: ("---" if get_val(run, col, key) is None else f"{get_val(run, col, key):.1f}")
-                for col in cols}
-             for run in run_names}
-        ).T
+    def make_raw_df(key: str) -> pd.DataFrame:
+        def value_fn(run, col):
+            v = get_val(run, col, key)
+            return float('nan') if v is None else v
+        return _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
 
-    def make_rank_df(key: str) -> pd.DataFrame:
-        # Negate so that lower runtime → higher rank value → sorted first
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: -(get_val(run, col, key) if get_val(run, col, key) is not None else float('inf'))
-                for col in cols}
-             for run in run_names}
-        ).T
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_above(float('inf'))
+    fmt = TablePlotter.fmt_fixed(1)
 
     dfs = [
-        ("Alignment Runtime (s)", make_df("align"), [make_rank_df("align")]),
-        ("Offline RPGO Runtime (s)", make_df("offline_rpgo"), [make_rank_df("offline_rpgo")]),
-        ("Total Runtime (s)", make_df("total"), [make_rank_df("total")]),
+        _style_columns(make_raw_df("align"), "Alignment Runtime (s)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df("offline_rpgo"), "Offline RPGO Runtime (s)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
+        _style_columns(make_raw_df("total"), "Total Runtime (s)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
-                       cell_is_red=lambda s: s == "---")
+    TablePlotter.plot_tables_on_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
 
 
 def _save_data_size_table(run_names: List[str], cols: List[str],
@@ -636,27 +706,19 @@ def _save_data_size_table(run_names: List[str], cols: List[str],
             (``None`` for pairs with unavailable data size files).
         save_path: Destination PDF path.
     """
-    def make_df() -> pd.DataFrame:
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: ("---" if data_size_table_data[run].get(col) is None else f"{data_size_table_data[run][col]:.2f}")
-                for col in cols}
-             for run in run_names}
-        ).T
+    def make_raw_df() -> pd.DataFrame:
+        def value_fn(run, col):
+            v = data_size_table_data[run].get(col)
+            return float('nan') if v is None else v
+        return _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
 
-    def make_rank_df() -> pd.DataFrame:
-        # Negate so that lower data size → higher rank value → sorted first
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: -(data_size_table_data[run][col] if data_size_table_data[run].get(col) is not None else float('inf'))
-                for col in cols}
-             for run in run_names}
-        ).T
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_above(float('inf'))
+    fmt = TablePlotter.fmt_fixed(2)
 
-    dfs = [("Estimated Communication Data Size (MB)", make_df(), [make_rank_df()])]
+    dfs = [_style_columns(make_raw_df(), "Estimated Communication Data Size (MB)",
+                         color_fn=color_fn, fmt=fmt, higher_is_better=False)]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5,
-                       cell_is_red=lambda s: s == "---")
+    TablePlotter.plot_tables_on_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
 
 
 def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
@@ -676,43 +738,28 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
         table_data_lc_inlier: Per-run, per-pair stats dicts for inlier LC.
         save_path: Destination PDF path.
     """
-    def make_df(data: dict, key: str, fmt) -> pd.DataFrame:
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {col: fmt(data[run][col][key]) for col in data[run]}
-             for run in run_names}
-        ).T
+    def make_raw_df(data: dict, key: str) -> pd.DataFrame:
+        return _make_raw_df(run_names, run_display_names, lambda run: data[run].keys(),
+                            lambda run, col: float(data[run][col][key]))
 
-    def make_rank_df(data: dict, key: str) -> pd.DataFrame:
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {col: float(data[run][col][key]) for col in data[run]}
-             for run in run_names}
-        ).T
-
-    def make_combined_df(data: dict) -> pd.DataFrame:
-        def fmt(s): return f"{s['num_successful_loop_closures']}/{s['num_loop_closures']}"
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {col: fmt(data[run][col]) for col in data[run]}
-             for run in run_names}
-        ).T
+    percent_fmt = TablePlotter.fmt_fixed(1, suffix='%')
+    int_fmt = TablePlotter.fmt_fixed(0)
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_equal(style=TablePlotter.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY)
 
     dfs = [
-        ("LC Success Rate %",
-         make_df(table_data_lc, "success_rate", lambda x: f"{x:.1f}%"),
-         [make_rank_df(table_data_lc, "success_rate")]),
-        ("LC Successful / Total",
-         make_combined_df(table_data_lc),
-         [make_rank_df(table_data_lc, "num_successful_loop_closures"),
-          make_rank_df(table_data_lc, "num_loop_closures")]),
-        ("Inlier LC Success Rate %",
-         make_df(table_data_lc_inlier, "success_rate", lambda x: f"{x:.1f}%"),
-         [make_rank_df(table_data_lc_inlier, "success_rate")]),
-        ("Inlier LC Successful / Total",
-         make_combined_df(table_data_lc_inlier),
-         [make_rank_df(table_data_lc_inlier, "num_successful_loop_closures"),
-          make_rank_df(table_data_lc_inlier, "num_loop_closures")]),
+        _style_columns(make_raw_df(table_data_lc, "success_rate"), "LC Success Rate %",
+                       color_fn=color_fn, fmt=percent_fmt),
+        _style_combined_columns(make_raw_df(table_data_lc, "num_successful_loop_closures"),
+                                make_raw_df(table_data_lc, "num_loop_closures"),
+                                "LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
+        _style_columns(make_raw_df(table_data_lc_inlier, "success_rate"), "Inlier LC Success Rate %",
+                       color_fn=color_fn, fmt=percent_fmt),
+        _style_combined_columns(make_raw_df(table_data_lc_inlier, "num_successful_loop_closures"),
+                                make_raw_df(table_data_lc_inlier, "num_loop_closures"),
+                                "Inlier LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    save_styled_tables(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+    TablePlotter.plot_tables_on_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TablePlotter.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY)
 
 
 def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names: Dict[str, str],
@@ -738,7 +785,7 @@ def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names
         ax.text(0.5, 0.5, "No MG match data", ha='center', va='center', transform=ax.transAxes)
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.suptitle(title, fontsize=14, fontweight='bold', color=HEADER_COLOR)
+        fig.suptitle(title, fontsize=14, fontweight='bold', color=TablePlotter.get_table_style(TablePlotter.TableStyleName.GEORGIA_TECH).HeaderColor)
         fig.tight_layout(rect=[0, 0, 1, 0.95])
         return fig
 
@@ -788,7 +835,7 @@ def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names
             if j == 0:
                 ax.set_ylabel(run_display_names.get(run, run), fontsize=9, rotation=0, ha='right', va='center')
 
-    fig.suptitle(title, fontsize=14, fontweight='bold', color=HEADER_COLOR)
+    fig.suptitle(title, fontsize=14, fontweight='bold', color=TablePlotter.get_table_style(TablePlotter.TableStyleName.GEORGIA_TECH).HeaderColor)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
@@ -819,28 +866,32 @@ def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str]
             (``None`` for pairs with no MG match files).
         save_path: Destination PDF path.
     """
-    def make_counts_df() -> pd.DataFrame:
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {
-                col: ("---" if stats is None else f"{stats['stage_counts'][1]}-{stats['stage_counts'][2]}")
-                for col, stats in table_data_mg_match[run].items()}
-             for run in run_names}
-        ).T
+    def make_raw_stage_count_df(stage: int) -> pd.DataFrame:
+        def value_fn(run, col):
+            stats = table_data_mg_match[run][col]
+            return float('nan') if stats is None else float(stats['stage_counts'][stage])
+        return _make_raw_df(run_names, run_display_names, lambda run: table_data_mg_match[run].keys(), value_fn)
 
-    def make_percent_df() -> pd.DataFrame:
-        def fmt(stats):
+    def make_raw_stage_percent_df(stage: int) -> pd.DataFrame:
+        def value_fn(run, col):
+            stats = table_data_mg_match[run][col]
             if stats is None:
-                return "---"
+                return float('nan')
             counts = stats['stage_counts']
             total = counts[0] + counts[1] + counts[2]
-            if total == 0:
-                return "---"
-            return "-".join(f"{100 * counts[s] / total:.1f}%" for s in (1, 2))
+            return float('nan') if total == 0 else 100 * counts[stage] / total
+        return _make_raw_df(run_names, run_display_names, lambda run: table_data_mg_match[run].keys(), value_fn)
 
-        return pd.DataFrame(
-            {run_display_names.get(run, run): {col: fmt(stats) for col, stats in table_data_mg_match[run].items()}
-             for run in run_names}
-        ).T
+    color_fn = TablePlotter.color_fn_NAVY_RED_missing_or_above(float('inf'))
+    int_fmt = TablePlotter.fmt_fixed(0)
+    percent_fmt = TablePlotter.fmt_fixed(1, suffix='%')
+
+    counts_df = _style_combined_columns(make_raw_stage_count_df(1), make_raw_stage_count_df(2),
+                                        "MG Match Stage Counts (1-2)",
+                                        color_fn=color_fn, fmt=int_fmt, highlight=False, separator='-')
+    percent_df = _style_combined_columns(make_raw_stage_percent_df(1), make_raw_stage_percent_df(2),
+                                         "MG Match Stage Percentages (1-2)",
+                                         color_fn=color_fn, fmt=percent_fmt, highlight=False, separator='-')
 
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -849,10 +900,8 @@ def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str]
         for ax in axes:
             ax.axis('off')
         fig.tight_layout(pad=0.0, h_pad=0.5)
-        render_tables_onto_axes(fig, [
-            (axes[0], "MG Match Stage Counts (1-2)", make_counts_df(), None),
-            (axes[1], "MG Match Stage Percentages (1-2)", make_percent_df(), None),
-        ], cell_is_red=lambda s: s == "---")
+        TablePlotter.render_table_onto_ax(fig, axes[0], counts_df)
+        TablePlotter.render_table_onto_ax(fig, axes[1], percent_df)
         pp.savefig(fig, bbox_inches='tight')
         plt.close(fig)
 
@@ -874,6 +923,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
                                  group_indices: List[int],
                                  stats_list: List[Dict],
                                  ate_table_data: Dict[str, Dict[str, float]],
+                                 table_data_lc_inlier_inter_robot: Dict[str, Dict[str, Dict]],
                                  run_names: List[str], save_dir: Path) -> None:
     """
     Generate and save a composite 16:9 slide figure for one robot pair.
@@ -890,7 +940,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
         — combined inlier-LC table with ``"Inlier LC Success Rate %"`` and
         ``"Inlier LC Successful / Total"`` per run.
 
-    Table styling is applied via :func:`render_tables_onto_axes`.  Column names
+    Table styling is applied via :meth:`TablePlotter.render_table_onto_ax`.  Column names
     match the PDF table titles produced by :func:`_save_ate_tables` and
     :func:`_save_lc_tables`.
 
@@ -908,6 +958,9 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
             :meth:`LoopClosureData.visualize_error_scatter` (length
             ``2 * len(run_names)``).  Even indices are all-LC; odd are inlier-LC.
         ate_table_data: Post-optimize RMS ATE keyed by run name then pair column.
+        table_data_lc_inlier_inter_robot: Inlier-LC stats dicts (inter-robot LC
+            only) keyed by run then column; used to suppress the ATE cell where
+            inlier inter-robot LC count is zero, matching :func:`_save_ate_tables`.
         run_names: Ordered list of run identifiers.
         save_dir: Directory in which to save ``lc_context_<col>.pdf``.
     """
@@ -927,6 +980,8 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
         2, 1, subplot_spec=gs[0], height_ratios=[1, 1], hspace=0.05)
     ax_l = fig.add_subplot(gs_left[0])
     ax_r = fig.add_subplot(gs_left[1])
+    ax_l.axis('off')
+    ax_r.axis('off')
 
     # Center: scatter (forced square box regardless of figure proportions)
     ax_center = fig.add_subplot(gs[1])
@@ -934,6 +989,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 
     # Right: ATE table centered by itself
     ax_ate = fig.add_subplot(gs[2])
+    ax_ate.axis('off')
 
     # Column name constants matching the PDF table titles
     COL_SR_ALL     = "LC Success \n Rate %"
@@ -942,39 +998,57 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
     COL_CNT_INL    = "Inlier LC \nSuccessful / Total"
     COL_ATE        = "RMS ATE (m)"
 
-    def _count(s: Dict) -> str:
-        return f"{s['num_successful_loop_closures']}/{s['num_loop_closures']}"
+    percent_fmt = TablePlotter.fmt_fixed(1, suffix='%')
+    int_fmt = TablePlotter.fmt_fixed(0)
 
-    def _sr(s: Dict) -> str:
-        return f"{s['success_rate']:.1f}%"
+    def sr_series(idx: int) -> pd.Series:
+        return pd.Series(
+            {rn: stats_list[2 * i + idx]['success_rate'] for i, rn in enumerate(run_names)}
+        ).reindex(run_names)
+
+    def successful_series(idx: int) -> pd.Series:
+        return pd.Series(
+            {rn: float(stats_list[2 * i + idx]['num_successful_loop_closures']) for i, rn in enumerate(run_names)}
+        ).reindex(run_names)
+
+    def total_series(idx: int) -> pd.Series:
+        return pd.Series(
+            {rn: float(stats_list[2 * i + idx]['num_loop_closures']) for i, rn in enumerate(run_names)}
+        ).reindex(run_names)
+
+    def make_combined_col(idx: int) -> pd.Series:
+        # Only the successful count is ranked; the total is display-only.
+        successful_segments = TablePlotter.convert_numbers_to_TextSegments(successful_series(idx), fmt=int_fmt)
+        total_segments = TablePlotter.convert_numbers_to_TextSegments(total_series(idx), fmt=int_fmt, emphasize_rankings=False)
+        return TablePlotter.merge_Series(successful_segments, total_segments)
 
     # Combined DataFrames: one per LC side, columns match PDF table titles
     df_l = pd.DataFrame({
-        COL_SR_ALL:  {rn: _sr(stats_list[2 * i])    for i, rn in enumerate(run_names)},
-        COL_CNT_ALL: {rn: _count(stats_list[2 * i]) for i, rn in enumerate(run_names)},
+        COL_SR_ALL:  TablePlotter.convert_numbers_to_TextSegments(sr_series(0), fmt=percent_fmt),
+        COL_CNT_ALL: make_combined_col(0),
     }).reindex(run_names)
+    df_l.attrs["title"] = "Method"
     df_r = pd.DataFrame({
-        COL_SR_INL:  {rn: _sr(stats_list[2 * i + 1])    for i, rn in enumerate(run_names)},
-        COL_CNT_INL: {rn: _count(stats_list[2 * i + 1]) for i, rn in enumerate(run_names)},
+        COL_SR_INL:  TablePlotter.convert_numbers_to_TextSegments(sr_series(1), fmt=percent_fmt),
+        COL_CNT_INL: make_combined_col(1),
     }).reindex(run_names)
-    ate_vals = {rn: ate_table_data[rn].get(col) for rn in run_names}
-    df_ate = pd.DataFrame({
-        COL_ATE: {rn: f"{v:.2f}" if v is not None else "---"
-                  for rn, v in ate_vals.items()}
-    }).reindex(run_names)
+    df_r.attrs["title"] = "Method"
 
-    # Rank DataFrames — one per combined table (whole-cell mode, independent per column)
-    rank_l = pd.DataFrame({
-        COL_SR_ALL:  {rn: stats_list[2 * i]['success_rate']                          for i, rn in enumerate(run_names)},
-        COL_CNT_ALL: {rn: float(stats_list[2 * i]['num_successful_loop_closures'])    for i, rn in enumerate(run_names)},
+    def _ate_suppressed(rn: str) -> bool:
+        return table_data_lc_inlier_inter_robot[rn].get(col, {}).get('num_loop_closures', -1) == 0
+
+    ate_raw = pd.Series(
+        {rn: float('nan') if _ate_suppressed(rn) or ate_table_data[rn].get(col) is None
+             else ate_table_data[rn][col]
+         for rn in run_names}
+    ).reindex(run_names)
+
+    df_ate = pd.DataFrame({
+        COL_ATE: TablePlotter.convert_numbers_to_TextSegments(
+            ate_raw, color_fn=TablePlotter.color_fn_NAVY_RED_missing_or_above(20),
+            fmt=TablePlotter.fmt_fixed(2), higher_is_better=False)
     }).reindex(run_names)
-    rank_r = pd.DataFrame({
-        COL_SR_INL:  {rn: stats_list[2 * i + 1]['success_rate']                          for i, rn in enumerate(run_names)},
-        COL_CNT_INL: {rn: float(stats_list[2 * i + 1]['num_successful_loop_closures'])    for i, rn in enumerate(run_names)},
-    }).reindex(run_names)
-    rank_ate = pd.DataFrame({
-        COL_ATE: {rn: -(v if v is not None else float('inf')) for rn, v in ate_vals.items()}
-    }).reindex(run_names)
+    df_ate.attrs["title"] = "Method"
 
     # Scatter in center
     LoopClosureData.visualize_error_scatter(
@@ -985,7 +1059,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 
     # Pair name top-left in golden
     fig.text(0.01, 0.97, f"{pair[0]} / {pair[1]}",
-             fontsize=40, fontweight='bold', va='top', color=HEADER_COLOR)
+             fontsize=40, fontweight='bold', va='top', color=TablePlotter.get_table_style(TablePlotter.TableStyleName.GEORGIA_TECH).HeaderColor)
 
     # bbox=[x0, y0, width, height] in axes coordinates; height fraction limits row height.
     # Top table sits at the bottom of its axes; bottom table sits at the top of its axes
@@ -1000,11 +1074,9 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
     ax_r.text(0.45, _bbox_lc_bot[1] + _bbox_lc_bot[3] + 0.02, "After Kimera-RPGO",
               transform=ax_r.transAxes, fontsize=10, fontweight='bold', ha='center', va='bottom')
 
-    render_tables_onto_axes(fig, [
-        (ax_l,   "Method", df_l,   [rank_l],   None,                                  _bbox_lc_top, None,             16),
-        (ax_r,   "Method", df_r,   [rank_r],   None,                                  _bbox_lc_bot, None,             16),
-        (ax_ate, "Method", df_ate, [rank_ate], lambda s: s == "---" or float(s) > 20, _bbox_ate, 16, 20),
-    ])
+    TablePlotter.render_table_onto_ax(fig, ax_l,   df_l,   _bbox_lc_top, None, 16)
+    TablePlotter.render_table_onto_ax(fig, ax_r,   df_r,   _bbox_lc_bot, None, 16)
+    TablePlotter.render_table_onto_ax(fig, ax_ate, df_ate, _bbox_ate,    16,   20)
 
     save_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(save_dir / f'lc_context_{col}.pdf'), bbox_inches='tight')
@@ -1084,7 +1156,7 @@ def _generate_lc_side_by_side_figure(
     ax_inlier.set_title("Inlier Loop Closures", fontsize=16, fontweight='bold')
 
     fig.text(0.01, 0.97, f"{pair[0]} / {pair[1]}",
-             fontsize=40, fontweight='bold', va='top', color=HEADER_COLOR)
+             fontsize=40, fontweight='bold', va='top', color=TablePlotter.get_table_style(TablePlotter.TableStyleName.GEORGIA_TECH).HeaderColor)
 
     save_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(save_dir / f'lc_side_by_side_{col}.pdf'), bbox_inches='tight')
@@ -1166,7 +1238,7 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
         viz_config: Dict forwarded to :func:`calculate_merged_ate` (see its docstring).
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/``:
-      - ``ate_table.pdf``      — pre/post-optimize RMS ATE summary tables
+      - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
       - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, two columns per
         robot pair
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
@@ -1190,18 +1262,8 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     # Define mapping between run name and display name
     run_display_names = {
         "ROMAN": "ROMAN",
-        "ROMAN_Deduplication": "ROMAN w/o duplicate LC",
-        "ROMAN_NM":   "NM + ROMAN",
-        "ROMAN_NM_POA_Triplet": "NM + ROMAN + Triplet POA",
+        "ROMAN_NM": "NM + ROMAN",
         "MG": "MeronomyGraph",
-        "MG_TS": "NM + MG",
-        "MG_TS_noGM": "NM + MG (no Global Map)",
-        "MG_TS_Duplication": "NM + MG (Above but with Dup. LC)",
-        "MG_TS_<Old_Version>": "NM + MG (Two Stage - Reworked 4)",
-        "MG_TS_2-4":  "NM + MG (Two Stage - 2/4 req)",
-        "MG_TS_3-4":  "NM + MG (Two Stage - 3/4 req)",
-        "MG_SS_3":    "NM + MG (Single Stage - 3 req)",
-        "MG_SS_3_POA":"NM + MG (SS3) + POA"
     }
 
     # Calculate RMS ATE
@@ -1217,12 +1279,18 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     first_stage_table_data: Dict[str, Dict] = {run: {} for run in run_names}
     split_ate_table_data: Dict[str, Dict[str, List[float]]] = {run: {} for run in run_names}
     split_rpe_table_data: Dict[str, Dict[str, List[float]]] = {run: {} for run in run_names}
-    for (_, _, run_name, pair, *_), (first_stage_ate, ate, individual_ate, individual_rpe) in zip(tasks, results):
+    rot_err_table_data: Dict[str, Dict[str, float]] = {run: {} for run in run_names}
+    rte_table_data: Dict[str, Dict[str, float]] = {run: {} for run in run_names}
+    rel_rot_err_table_data: Dict[str, Dict[str, float]] = {run: {} for run in run_names}
+    for (_, _, run_name, pair, *_), (first_stage_ate, ate, individual_ate, individual_rpe, rot_err, rte, rel_rot_err) in zip(tasks, results):
         col = pair_label(*pair)
         table_data[run_name][col] = ate
         first_stage_table_data[run_name][col] = first_stage_ate
         split_ate_table_data[run_name][col] = individual_ate
         split_rpe_table_data[run_name][col] = individual_rpe
+        rot_err_table_data[run_name][col] = rot_err
+        rte_table_data[run_name][col] = rte
+        rel_rot_err_table_data[run_name][col] = rel_rot_err
 
     # Define sequence pair column names
     cols = [pair_label(*p) for p in robot_pairs]
@@ -1257,7 +1325,9 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     table_data_lc_by_mode: Dict[LCFilterMode, Dict[str, Dict[str, Dict]]] = {}
     table_data_lc_inlier_by_mode: Dict[LCFilterMode, Dict[str, Dict[str, Dict]]] = {}
 
-    for lc_filter in LCFilterMode:
+    # Process ONLY_INTER_LC first so its inlier-LC stats are available for the ATE
+    # suppression logic in _generate_lc_context_figure across all modes.
+    for lc_filter in sorted(LCFilterMode, key=lambda m: m != LCFilterMode.ONLY_INTER_LC):
         mode_dir = base_dir / lc_filter.name
         lc_dir = mode_dir / 'lc'
         lc_sr_dir = mode_dir / 'lc_success_rate'
@@ -1308,8 +1378,11 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
                 table_data_lc[run_name][col] = stats[2 * i]
                 table_data_lc_inlier[run_name][col] = stats[2 * i + 1]
 
+            lc_inlier_inter_robot = (table_data_lc_inlier if lc_filter == LCFilterMode.ONLY_INTER_LC
+                                     else table_data_lc_inlier_by_mode[LCFilterMode.ONLY_INTER_LC])
             _generate_lc_context_figure(pair, col, errors_list, labels_list, group_indices,
-                                        stats, table_data, run_names, lc_with_context_dir)
+                                        stats, table_data, lc_inlier_inter_robot,
+                                        run_names, lc_with_context_dir)
             _generate_lc_side_by_side_figure(pair, col, errors_list, labels_list, group_indices,
                                              run_names, lc_side_by_side_dir)
             _generate_traj_lc_comb_figure(col, run_names, traj_lc_dir, traj_lc_comb_dir)
@@ -1325,7 +1398,7 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     # connect the pair's pose graph — intra-robot closures don't merge the two robots' trajectories.
     _save_ate_tables(run_names, cols, run_display_names, table_data, first_stage_table_data,
                      table_data_lc_by_mode[LCFilterMode.ONLY_INTER_LC], table_data_lc_inlier_by_mode[LCFilterMode.ONLY_INTER_LC],
-                     base_dir / 'ate_table.pdf')
+                     rot_err_table_data, rte_table_data, rel_rot_err_table_data, base_dir / 'metrics_table.pdf')
 
     # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
     _save_ate_split_table(run_names, robot_pairs, run_display_names, split_ate_table_data, split_rpe_table_data,

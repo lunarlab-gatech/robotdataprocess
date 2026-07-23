@@ -18,9 +18,9 @@ import tqdm
 from typeguard import typechecked
 from typing import Union, List, Tuple, Optional, Any, Callable
 
-from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-from ..math_utils import interpolate_poses
-from ..ModuleImporter import ModuleImporter
+from ..utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ..utils.math_utils import interpolate_poses
+from ..utils.ModuleImporter import ModuleImporter
 from .Data import CoordinateFrame, ROSMsgLibType
 from .PathData import PathData
 from .SequentialData import SequentialData

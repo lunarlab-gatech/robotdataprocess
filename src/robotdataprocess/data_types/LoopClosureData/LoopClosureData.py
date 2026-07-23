@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ...conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
-from ...math_utils import interpolate_poses
+from ...utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ...utils.math_utils import interpolate_poses
 from scipy.spatial.transform import Slerp
 from ..Data import Data
 from collections import Counter

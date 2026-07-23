@@ -18,3 +18,6 @@ from .data_types.TransformationData import TransformationData
 # ROS Classes & Functions
 from .ros.Ros2BagWrapper import Ros2BagWrapper
 from .ros.RosPublisher import publish_data_ROS_multiprocess
+
+# Utils
+from .utils.TablePlotter import TablePlotter

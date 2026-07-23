@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import colorsys
-from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ..utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
 import csv
 from .Data import CoordinateFrame, TransformType
@@ -11,7 +11,7 @@ from evo.core import sync, metrics
 from evo.core.trajectory import PoseTrajectory3D
 from evo.core.units import Unit
 import math
-from ..math_utils import interpolate_poses
+from ..utils.math_utils import interpolate_poses
 import matplotlib.colors as mcolors
 import matplotlib.image as mpimg
 import matplotlib.patheffects as path_effects

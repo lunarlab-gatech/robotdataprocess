@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...conversion_utils import col_to_dec_arr
+from ...utils.conversion_utils import col_to_dec_arr
 import cv2
 
 from decimal import Decimal

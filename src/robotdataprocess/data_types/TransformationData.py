@@ -5,7 +5,7 @@ from .SequentialData import SequentialData
 import decimal
 from decimal import Decimal
 import json
-from ..ModuleImporter import ModuleImporter
+from ..utils.ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path

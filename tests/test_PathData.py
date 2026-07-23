@@ -6,7 +6,7 @@ from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess.conversion_utils import col_to_dec_arr
+from robotdataprocess.utils.conversion_utils import col_to_dec_arr
 from robotdataprocess.data_types.OdometryData import OdometryData, CoordinateFrame
 from robotdataprocess.data_types.PathData import PathData
 from scipy.spatial.transform import Rotation as R

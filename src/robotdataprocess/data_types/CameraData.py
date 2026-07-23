@@ -6,7 +6,7 @@ import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
-from ..ModuleImporter import ModuleImporter
+from ..utils.ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection

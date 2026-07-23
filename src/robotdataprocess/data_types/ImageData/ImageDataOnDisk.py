@@ -1,5 +1,5 @@
 from __future__ import annotations
-from ...conversion_utils import col_to_dec_arr
+from ...utils.conversion_utils import col_to_dec_arr
 from ..CameraData import CameraData
 from .ImageData import ImageData
 from ..SequentialData import SequentialData
