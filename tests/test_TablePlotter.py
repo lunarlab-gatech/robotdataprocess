@@ -12,7 +12,7 @@ import tempfile
 import unittest
 import unittest.mock
 
-from robotdataprocess.utils.TablePlotter import TablePlotter
+from robotdataprocess.data_types.TableData import TablePlotter
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

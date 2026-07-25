@@ -53,10 +53,10 @@ def main():
             est_data.visualize_3D([gt_data], [f"{name} Maplab Results", f"{name} Ground Truth"], [10, 10], [40, 1000])
 
             metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=True)
-            print(f"{name} RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-            print(f"{name} RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-            print(f"{name} RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-            print(f"{name} RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+            print(f"{name} RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+            print(f"{name} RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
+            print(f"{name} RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+            print(f"{name} RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
         # 2. Compare combined results
         print(f"\n{'='*50}")
@@ -71,10 +71,10 @@ def main():
         est_data_combined.visualize_3D([gt_data_combined], ["Drone1+Husky1 Maplab Results", "Ground Truth"], [10, 10], [40, 1000])
 
         metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data_combined, est_data_combined, max_diff=0.1, visualize=True)
-        print("Combined RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-        print("Combined RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-        print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-        print("Combined RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+        print("Combined RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+        print("Combined RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
+        print("Combined RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+        print("Combined RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
 if __name__ == "__main__":
     main()

@@ -83,11 +83,11 @@ def main():
         print("=========== Individual Trajectory", robot_names_text[i], "for dataset: Kimera-Multi ============")
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_lst[i], est_data_lst[i],
                                                                                 max_diff=0.1, visualize=False)
-        print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-        print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+        print("RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+        print("RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
 
-        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
     # Calculate merged RMS ATE:
     if len(est_data_lst) > 1:
@@ -98,11 +98,11 @@ def main():
         print("\n========== Merged Trajectories for dataset: Kimera-Multi ==========")
         metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, 
                                                                         est_data, max_diff=0.1, visualize=True)
-        print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-        print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+        print("RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+        print("RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
 
-        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
     # Load and print the runtimes
     robot_names_set = set(robot_names_text)

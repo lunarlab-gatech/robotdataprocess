@@ -12,6 +12,7 @@ from evo.core.trajectory import PoseTrajectory3D
 from evo.core.units import Unit
 import math
 from ..utils.math_utils import interpolate_poses
+from ..utils.PathDataAlignResult import PathDataAlignResult, PoseRelationErrors, TrajErrorStatistics
 import matplotlib.colors as mcolors
 import matplotlib.image as mpimg
 import matplotlib.patheffects as path_effects
@@ -1422,7 +1423,7 @@ class PathData(SequentialData):
 
     @staticmethod
     def calculate_traj_errors(gt_path_synced: PathData, est_path_align: PathData,
-                              rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> dict:
+                              rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> PathDataAlignResult:
         """
         Calculates a variety of trajectory error metrics (APE and RPE, via
         the evo library) between a ground truth and an aligned estimated
@@ -1449,9 +1450,9 @@ class PathData(SequentialData):
                 Defaults to ``Unit.frames``.
 
         Returns:
-            dict: Nested dictionary of error metrics, keyed by metric name
-            (``APE``, ``RPE``), then by ``PoseRelation`` name, then by
-            statistic name (e.g. ``rmse``, ``mean``, ``max``).
+            PathDataAlignResult: Error metrics, with ``.APE``/``.RPE``, each
+            broken down by ``PoseRelation`` (e.g. ``.translation_part``),
+            each holding the summary statistics (e.g. ``.rmse``, ``.mean``, ``.max``).
         """
 
         # Convert from PathData object to PoseTrajectory3D (evo)
@@ -1498,18 +1499,18 @@ class PathData(SequentialData):
                     final_stat: float = metric_with_relation.get_statistic(stat)
                     dict_relation[stat.name] = final_stat
 
-                dict_metric[pose_relation.name] = dict_relation
-            
-            dict_all_results[metric.__name__] = dict_metric
-        return dict_all_results
+                dict_metric[pose_relation.name] = TrajErrorStatistics(**dict_relation)
+
+            dict_all_results[metric.__name__] = PoseRelationErrors(**dict_metric)
+        return PathDataAlignResult(**dict_all_results)
 
     @staticmethod
     def align_and_calculate_traj_errors(gt_path: PathData, est_path: PathData, max_diff: float, visualize: bool = False,
             axes_length: Union[float, list[float]] = 10.0, axes_interval: Union[int, list[int]] = 1000,
-            rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> Tuple[dict, PathData, PathData]:
+            rpe_delta: float = 1.0, rpe_delta_unit: Unit = Unit.frames) -> Tuple[PathDataAlignResult, PathData, PathData]:
         """
         Utilizing the evo library, calculates a variety of trajectory error metrics
-        and returns them in a dictionary. Also returns aligned PathData objects.
+        and returns them as a PathDataAlignResult. Also returns aligned PathData objects.
 
         Parameters:
             max_diff: maximum absolute time difference allowed between associated timestamps

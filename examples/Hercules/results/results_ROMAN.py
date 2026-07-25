@@ -31,8 +31,8 @@ def main():
     See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
     all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    run_names = ["ROMAN", "ROMAN_NM", "MG"]
-    dataset_name = "V2.3.AC"
+    run_names = ["ROMAN", "MG"]
+    dataset_name = "V2.4.C"
 
     # Environment image / robot display config
     user = getpass.getuser()

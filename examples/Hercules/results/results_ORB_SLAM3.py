@@ -18,11 +18,11 @@ def main():
     metrics_dictionary: dict = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
                                                                         visualize=True, axes_interval=5000, axes_length=1)
     print("\nMetrics for file: ", file_name)
-    print("Robot: ", "RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("Robot: ", "RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'], "\n")
+    print("Robot: ", "RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+    print("Robot: ", "RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse, "\n")
 
-    print("Robot: ", "RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-    print("Robot: ", "RMS RPE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+    print("Robot: ", "RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
+    print("Robot: ", "RMS RPE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
 if __name__ == "__main__":
     main()
