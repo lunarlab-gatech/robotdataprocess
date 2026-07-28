@@ -128,8 +128,9 @@ class BagLazyImageArray:
             if self.msgtype == ImageData._COMPRESSED_MSGTYPE:
                 image, _ = ImageData._decode_compressed_image_msg(msg)
             else:
+                wire_encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
                 image = ImageData._decode_image_msg(
-                    msg, self.container.encoding, msg.height, msg.width).copy()
+                    msg, wire_encoding, msg.height, msg.width).copy()
             for transform in self.transformations:
                 image = transform(image)
             return image
