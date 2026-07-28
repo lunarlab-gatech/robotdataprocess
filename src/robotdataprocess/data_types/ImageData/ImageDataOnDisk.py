@@ -192,7 +192,7 @@ class ImageDataOnDisk(ImageData):
     def to_encoding(self, encoding: ImageData.ImageEncoding):
         """
         Swap the encoding of the image data.
-        Currently only supports RGB8 -> BGR8.
+        Currently supports RGB8 -> BGR8 and Mono8 -> BGR8.
 
         Args:
             encoding: The target encoding to convert to.
@@ -208,6 +208,11 @@ class ImageDataOnDisk(ImageData):
             def rgb_to_bgr(image: np.ndarray) -> np.ndarray:
                 return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             self.images.transformations.append(rgb_to_bgr)
+            self.encoding = ImageData.ImageEncoding.BGR8
+        elif self.encoding == ImageData.ImageEncoding.Mono8 and encoding == ImageData.ImageEncoding.BGR8:
+            def mono_to_bgr(image: np.ndarray) -> np.ndarray:
+                return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            self.images.transformations.append(mono_to_bgr)
             self.encoding = ImageData.ImageEncoding.BGR8
         else:
             raise NotImplementedError(f"Encoding conversion from {self.encoding} to {encoding} is not supported.")

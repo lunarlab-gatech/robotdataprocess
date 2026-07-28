@@ -4,6 +4,7 @@ from evo.core.units import Unit
 import getpass
 import itertools
 import math
+import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -14,6 +15,7 @@ import fitz
 import pandas as pd
 import re
 from robotdataprocess import CoordinateFrame, LoopClosureData, OdometryData, PathData, PathDataAlignResult, TableData
+import seaborn as sns
 from typing import Dict, List, Optional, Tuple
 
 def _make_raw_df(run_names: List[str], run_display_names: Dict[str, str],
@@ -102,7 +104,7 @@ class LCFilterMode(Enum):
     ONLY_INTRA_LC = 2
 
 @dataclass
-class DatasetSequenceResults:
+class ROMANResults:
     """
     All computed results for one run (method) on one robot pair within a dataset.
 
@@ -370,7 +372,7 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
                          load_gt_data_fn,
                          figures_base_dir: Path = None, visualize: bool = False, do_individual_calcs: bool = False,
                          viz_config: Dict = None,
-                         rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> DatasetSequenceResults:
+                         rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> ROMANResults:
     """
     Compute the merged RMS ATE for a robot pair after ROMAN offline RPGO.
 
@@ -534,12 +536,12 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
                                title=f"{method} LC overlaid on trajectory",
                                save_path=str(traj_lc_dir / f'traj_lc_{pair_lbl}_{method}.pdf'))
 
-    return DatasetSequenceResults(first_stage_metrics, metrics_dictionary, robot0_metrics, robot1_metrics)
+    return ROMANResults(first_stage_metrics, metrics_dictionary, robot0_metrics, robot1_metrics)
 
 
 def _save_ate_tables(run_names: List[str], cols: List[str],
                      run_display_names: Dict[str, str],
-                     results: Dict[str, Dict[str, DatasetSequenceResults]],
+                     results: Dict[str, Dict[str, ROMANResults]],
                      save_path: Path) -> None:
     """
     Build and save the ATE/RTE summary PDF tables.
@@ -621,7 +623,7 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
 
 def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str]],
                           run_display_names: Dict[str, str],
-                          results: Dict[str, Dict[str, DatasetSequenceResults]],
+                          results: Dict[str, Dict[str, ROMANResults]],
                           save_path: Path) -> None:
     """
     Build and save the per-robot RMS ATE/RPE split summary PDF tables.
@@ -667,7 +669,7 @@ def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str
 
 def _save_timing_table(run_names: List[str], cols: List[str],
                        run_display_names: Dict[str, str],
-                       results: Dict[str, Dict[str, DatasetSequenceResults]],
+                       results: Dict[str, Dict[str, ROMANResults]],
                        save_path: Path) -> None:
     """
     Build and save the runtime summary PDF table.
@@ -713,10 +715,13 @@ def _save_timing_table(run_names: List[str], cols: List[str],
 
 def _save_data_size_table(run_names: List[str], cols: List[str],
                           run_display_names: Dict[str, str],
-                          results: Dict[str, Dict[str, DatasetSequenceResults]],
+                          results: Dict[str, Dict[str, ROMANResults]],
                           save_path: Path) -> None:
     """
     Build and save the estimated communication data size summary PDF table.
+
+    Also saves a standalone ``.tex`` version of the table (same path with a
+    ``.tex`` suffix), ready to paste into Overleaf.
 
     Args:
         run_names: Ordered list of run identifiers.
@@ -736,21 +741,31 @@ def _save_data_size_table(run_names: List[str], cols: List[str],
     color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
     fmt = TableData.fmt_fixed(2)
 
-    dfs = [make_highlighted_table(make_raw_df(), "Estimated Communication Data Size (MB)",
-                         color_fn=color_fn, fmt=fmt, higher_is_better=False)]
+    data_size_table = make_highlighted_table(make_raw_df(), "Estimated Communication Data Size (MB)",
+                         color_fn=color_fn, fmt=fmt, higher_is_better=False)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+    TableData.to_pdf([data_size_table], str(save_path), row_height=2.4, h_pad=0.5)
+    data_size_table.to_latex(str(save_path.with_suffix('.tex')),
+                              caption="Estimated Communication Data Size (MB)", label="tab:data_size")
 
 
 def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
-                    results: Dict[str, Dict[str, DatasetSequenceResults]],
+                    results: Dict[str, Dict[str, ROMANResults]],
                     lc_filter: LCFilterMode,
                     save_path: Path) -> None:
     """
     Build and save the LC summary PDF tables.
 
     Produces four tables: success rate and successful/total counts for all LC
-    and for inlier LC, across all run names and robot pairs.
+    and for inlier LC, across all run names and robot pairs. The all-LC
+    success rate table gets a trailing "Average" column (the row-wise mean
+    across the pair columns, ignoring suppressed/NaN pairs), set off from the
+    pair columns by a heavy divider — matching ``_save_ate_tables``.
+
+    When ``lc_filter`` is ``LCFilterMode.ALL``, the all-LC success rate and
+    successful/total tables are additionally saved as standalone ``.tex``
+    files (``lc_success_rate_table.tex``, ``lc_successful_total_table.tex``)
+    next to ``save_path``, ready to paste into Overleaf.
 
     Args:
         run_names: Ordered list of run identifiers.
@@ -764,19 +779,38 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
         return _make_raw_df(run_names, run_display_names, lambda run: results[run].keys(),
                             lambda run, col: float(stats_selector(results[run][col])[key]))
 
+    def make_success_rate_df(stats_selector) -> pd.DataFrame:
+        raw_df = make_raw_df(stats_selector, "success_rate")
+        raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
+        return raw_df
+
     all_lc = lambda r: r.lc_stats_by_mode[lc_filter]
     inlier_lc = lambda r: r.lc_inlier_stats_by_mode[lc_filter]
 
     percent_fmt = TableData.fmt_fixed(1, suffix='%')
     int_fmt = TableData.fmt_fixed(0)
     color_fn = TableData.color_fn_NAVY_RED_missing_or_equal(style=TableData.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY)
+    latex_color_fn = TableData.color_fn_NAVY_RED_missing_or_equal(style=TableData.TableStyleName.LATEX)
+    # The trailing "Average" column on the success rate tables is a summary
+    # column, not another pair — set it off from the pair columns with a
+    # heavy divider (matches _save_ate_tables).
+    heavy_divider_before = lambda col_idx: col_idx == len(list(results[run_names[0]].keys()))
+
+    all_lc_success_rate_table = make_highlighted_table(make_success_rate_df(all_lc), "LC Success Rate %",
+                   color_fn=color_fn, fmt=percent_fmt)
+    all_lc_successful_total_table = _style_combined_columns(make_raw_df(all_lc, "num_successful_loop_closures"),
+                            make_raw_df(all_lc, "num_loop_closures"),
+                            "LC Successful / Total", color_fn=color_fn, fmt=int_fmt)
+
+    all_lc_success_rate_table_latex = make_highlighted_table(make_success_rate_df(all_lc), "LC Success Rate %",
+                   color_fn=latex_color_fn, fmt=percent_fmt)
+    all_lc_successful_total_table_latex = _style_combined_columns(make_raw_df(all_lc, "num_successful_loop_closures"),
+                            make_raw_df(all_lc, "num_loop_closures"),
+                            "LC Successful / Total", color_fn=latex_color_fn, fmt=int_fmt)
 
     dfs = [
-        make_highlighted_table(make_raw_df(all_lc, "success_rate"), "LC Success Rate %",
-                       color_fn=color_fn, fmt=percent_fmt),
-        _style_combined_columns(make_raw_df(all_lc, "num_successful_loop_closures"),
-                                make_raw_df(all_lc, "num_loop_closures"),
-                                "LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
+        all_lc_success_rate_table,
+        all_lc_successful_total_table,
         make_highlighted_table(make_raw_df(inlier_lc, "success_rate"), "Inlier LC Success Rate %",
                        color_fn=color_fn, fmt=percent_fmt),
         _style_combined_columns(make_raw_df(inlier_lc, "num_successful_loop_closures"),
@@ -784,7 +818,14 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
                                 "Inlier LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY)
+    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY,
+                     heavy_divider_before=heavy_divider_before)
+
+    if lc_filter == LCFilterMode.ALL:
+        all_lc_success_rate_table_latex.to_latex(str(save_path.parent / 'lc_success_rate_table.tex'),
+                                            caption="LC Success Rate \%", label="tab:lc_success_rate")
+        all_lc_successful_total_table_latex.to_latex(str(save_path.parent / 'lc_successful_total_table.tex'),
+                                                caption="LC Successful / Total", label="tab:lc_successful_total")
 
 
 def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names: Dict[str, str],
@@ -866,7 +907,7 @@ def _make_mg_match_histogram_grid_figure(run_names: List[str], run_display_names
 
 
 def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str], cols: List[str],
-                         results: Dict[str, Dict[str, DatasetSequenceResults]],
+                         results: Dict[str, Dict[str, ROMANResults]],
                          save_path: Path) -> None:
     """
     Build and save the MG two-stage matcher stats summary PDF.
@@ -950,7 +991,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
                                  errors_list: List[Dict], labels_list: List[str],
                                  group_indices: List[int],
                                  stats_list: List[Dict],
-                                 results: Dict[str, Dict[str, DatasetSequenceResults]],
+                                 results: Dict[str, Dict[str, ROMANResults]],
                                  run_names: List[str], save_dir: Path) -> None:
     """
     Generate and save a composite 16:9 slide figure for one robot pair.
@@ -1265,12 +1306,15 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
       - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, two columns per
         robot pair
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
-      - ``data_size_table.pdf`` — estimated communication data size (MB) summary table
+      - ``data_size_table.pdf``, ``data_size_table.tex`` — estimated communication data size (MB) summary table
       - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
       - ``traj/``              — per-pair estimated vs. GT trajectory plots
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/<LCFilterMode.name>/``, once per LC filter mode:
       - ``lc_tables.pdf``      — LC success rate and count summary tables
+      - ``lc_success_rate_table.tex``, ``lc_successful_total_table.tex`` — under
+        ``LCFilterMode.ALL`` only, standalone LaTeX versions of the all-LC
+        success rate and successful/total tables
       - ``lc/<pair>.pdf``      — per-pair LC error scatter plots
       - ``lc_success_rate/``   — per-pair LC success rate plots
       - ``lc_with_context/``   — per-pair composite slide figures
@@ -1299,7 +1343,7 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
 
     # All computed results for this dataset, keyed by run then robot-pair column —
     # the single object threaded through every table/figure function below.
-    results: Dict[str, Dict[str, DatasetSequenceResults]] = {run: {} for run in run_names}
+    results: Dict[str, Dict[str, ROMANResults]] = {run: {} for run in run_names}
     for (_, _, run_name, pair, *_), result in zip(tasks, pool_results):
         results[run_name][pair_label(*pair)] = result
 

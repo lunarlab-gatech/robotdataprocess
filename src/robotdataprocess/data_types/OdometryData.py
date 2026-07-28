@@ -132,19 +132,33 @@ class OdometryData(PathData):
         return cls(frame_id, child_frame_id, timestamps_np, positions_np, orientations_np, frame)
 
     @classmethod
-    def from_ros1_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame):
+    def from_ros1_bag(cls, bag_path: Union[Path, str], odom_topic: str, frame: CoordinateFrame,
+                       msg_type: str = "Odometry", child_frame_id: Union[str, None] = None):
         """
-        Creates a class structure from a ROS1 bag file with an Odometry topic.
+        Creates a class structure from a ROS1 bag file with an Odometry or PoseStamped topic.
 
         Args:
             bag_path (Path | str): Path to the ROS1 .bag file.
-            odom_topic (str): Topic of the nav_msgs/Odometry messages.
+            odom_topic (str): Topic of the nav_msgs/Odometry or geometry_msgs/PoseStamped messages.
             frame (CoordinateFrame): The coordinate frame convention of this data.
+            msg_type (str): The message type stored on ``odom_topic``. Either ``"Odometry"``
+                or ``"PoseStamped"``.
+            child_frame_id (str | None): The child frame ID to assign to the returned data.
+                Required when ``msg_type`` is ``"PoseStamped"``, since that message type has
+                no child frame field. Ignored when ``msg_type`` is ``"Odometry"``, since the
+                child frame ID is read directly from the messages.
         Returns:
             OdometryData: Instance of this class.
         Raises:
-            ValueError: If ``odom_topic`` is not present in the bag.
+            ValueError: If ``odom_topic`` is not present in the bag, if ``msg_type`` is
+                unsupported, or if ``msg_type`` is ``"PoseStamped"`` and ``child_frame_id``
+                is not provided.
         """
+        if msg_type not in ("Odometry", "PoseStamped"):
+            raise ValueError(f"Unsupported msg_type for OdometryData.from_ros1_bag: {msg_type!r}")
+        if msg_type == "PoseStamped" and child_frame_id is None:
+            raise ValueError("child_frame_id must be provided when msg_type is 'PoseStamped'.")
+
         typestore = get_typestore(Stores.ROS1_NOETIC)
 
         with Reader1(Path(bag_path)) as reader:
@@ -158,7 +172,7 @@ class OdometryData(PathData):
             positions_np = np.zeros((num_msgs, 3), dtype=Decimal)
             orientations_np = np.zeros((num_msgs, 4), dtype=Decimal)
 
-            frame_id, child_frame_id = None, None
+            frame_id = None
             pbar = tqdm.tqdm(total=num_msgs, desc="Extracting Odometry...", unit=" msgs")
 
             for i, (_, _, rawdata) in enumerate(reader.messages(connections=conns)):
@@ -166,13 +180,15 @@ class OdometryData(PathData):
 
                 if i == 0:
                     frame_id = msg.header.frame_id
-                    child_frame_id = msg.child_frame_id
+                    if msg_type == "Odometry":
+                        child_frame_id = msg.child_frame_id
 
                 timestamps_np[i] = (Decimal(msg.header.stamp.sec) +
                                     Decimal(msg.header.stamp.nanosec) * Decimal('1e-9'))
-                pos = msg.pose.pose.position
+                pose = msg.pose.pose if msg_type == "Odometry" else msg.pose
+                pos = pose.position
                 positions_np[i] = np.array([Decimal(pos.x), Decimal(pos.y), Decimal(pos.z)])
-                ori = msg.pose.pose.orientation
+                ori = pose.orientation
                 orientations_np[i] = np.array([Decimal(ori.x), Decimal(ori.y), Decimal(ori.z), Decimal(ori.w)])
 
                 pbar.update(1)

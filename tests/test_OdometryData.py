@@ -666,6 +666,79 @@ class TestOdometryData(unittest.TestCase):
             np.testing.assert_array_almost_equal(
                 data.orientations.astype(np.float64), orientations, decimal=6)
 
+    def _write_ros1_pose_stamped_bag(self, bag_path: Path, topic: str, frame_id: str,
+                                      timestamps_sec: list, positions: np.ndarray,
+                                      orientations: np.ndarray) -> None:
+        """Write a ROS1 bag containing geometry_msgs/msg/PoseStamped messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        PoseStampedMsg = typestore.types['geometry_msgs/msg/PoseStamped']
+        Header         = typestore.types['std_msgs/msg/Header']
+        Time           = typestore.types['builtin_interfaces/msg/Time']
+        Pose           = typestore.types['geometry_msgs/msg/Pose']
+        Point          = typestore.types['geometry_msgs/msg/Point']
+        Quaternion     = typestore.types['geometry_msgs/msg/Quaternion']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, PoseStampedMsg.__msgtype__, typestore=typestore)
+            for i, (ts, pos, ori) in enumerate(zip(timestamps_sec, positions, orientations)):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = PoseStampedMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    pose=Pose(
+                        position=Point(x=float(pos[0]), y=float(pos[1]), z=float(pos[2])),
+                        orientation=Quaternion(x=float(ori[0]), y=float(ori[1]),
+                                               z=float(ori[2]), w=float(ori[3])),
+                    ),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, PoseStampedMsg.__msgtype__))
+
+    def test_from_ros1_bag_pose_stamped(self):
+        """Write a ROS1 bag with known PoseStamped messages and verify from_ros1_bag round-trips."""
+        frame_id       = 'odom'
+        child_frame_id = 'base_link'
+        topic          = '/pose'
+        timestamps_sec = [1.0, 2.0, 3.0]
+        positions      = np.array([[1.1, 2.2, 3.3],
+                                   [4.4, 5.5, 6.6],
+                                   [7.7, 8.8, 9.9]])
+        # orientations as (qx, qy, qz, qw)
+        orientations   = np.array([[0.0, 0.0, 0.0,        1.0       ],
+                                   [0.5, 0.5, 0.5,        0.5       ],
+                                   [0.0, 0.0, 0.70710678, 0.70710678]])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'pose.bag'
+            self._write_ros1_pose_stamped_bag(bag_path, topic, frame_id,
+                                              timestamps_sec, positions, orientations)
+
+            data = OdometryData.from_ros1_bag(bag_path, topic, CoordinateFrame.FLU,
+                                              msg_type="PoseStamped", child_frame_id=child_frame_id)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.child_frame_id, child_frame_id)
+            self.assertEqual(data.frame, CoordinateFrame.FLU)
+            self.assertEqual(data.len(), 3)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- positions ---
+            np.testing.assert_array_almost_equal(
+                data.positions.astype(np.float64), positions, decimal=6)
+
+            # --- orientations ---
+            np.testing.assert_array_almost_equal(
+                data.orientations.astype(np.float64), orientations, decimal=6)
+
+            # --- missing child_frame_id should raise ---
+            with self.assertRaises(ValueError):
+                OdometryData.from_ros1_bag(bag_path, topic, CoordinateFrame.FLU, msg_type="PoseStamped")
+
 
     def _make_odom_data(self):
         return OdometryData(

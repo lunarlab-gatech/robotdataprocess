@@ -116,18 +116,26 @@ class TestImageDataOnDisk(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             image_data.to_encoding(ImageData.ImageEncoding.Mono8)
         
-        # Test unsupported conversion from Mono8 to BGR8
+        # Test conversion from Mono8 to BGR8
         mono_folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', 'mono_images').absolute()
         mono_folder.mkdir(parents=True, exist_ok=True)
         # Create a dummy mono image
         mono_image_path = mono_folder / "1.000000000.png"
         img = Image.new('L', (100, 100)) # 'L' mode for monochrome
         img.save(str(mono_image_path))
-        
+
         mono_image_data = ImageDataOnDisk.from_image_files(mono_folder, 'optical')
         self.assertEqual(mono_image_data.encoding, ImageData.ImageEncoding.Mono8)
-        with self.assertRaises(NotImplementedError):
-            mono_image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        original_mono_image = mono_image_data.images[0]
+
+        mono_image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        self.assertEqual(mono_image_data.encoding, ImageData.ImageEncoding.BGR8)
+        self.assertEqual(len(mono_image_data.images.transformations), 1)
+
+        bgr_from_mono = mono_image_data.images[0]
+        self.assertEqual(bgr_from_mono.shape, (100, 100, 3))
+        mono_converted_back = cv2.cvtColor(bgr_from_mono, cv2.COLOR_BGR2GRAY)
+        np.testing.assert_array_equal(original_mono_image, mono_converted_back)
 
     def test_from_npy_files(self):
         """ Test loading 32FC1 npy files from disk matches ImageDataInMemory. """
@@ -316,6 +324,36 @@ class TestImageDataOnDisk(unittest.TestCase):
             self.assertEqual(cam.height, row_bottom - row_top)
             for i in range(3):
                 np.testing.assert_array_equal(data4.images[i], images[i][row_top:row_bottom, :])
+
+    def test_from_ros1_bag_mono8_to_encoding_bgr8(self):
+        """Write a ROS1 bag with mono8 images and verify from_ros1_bag + to_encoding(BGR8) round-trips."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small Mono8 images with distinct solid grey levels
+        images = np.zeros((3, H, W), dtype=np.uint8)
+        images[0, :, :] = 10
+        images[1, :, :] = 128
+        images[2, :, :] = 250
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            data.to_encoding(ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.BGR8)
+            for i in range(3):
+                bgr_image = data.images[i]
+                self.assertEqual(bgr_image.shape, (H, W, 3))
+                mono_converted_back = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
+                np.testing.assert_array_equal(images[i], mono_converted_back)
 
     def test_crop_to_matched(self):
         """ crop_to_matched keeps .images in sync with .timestamps for both BagLazyImageArray-backed objects. """
