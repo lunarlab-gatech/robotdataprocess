@@ -5,7 +5,7 @@ from robotdataprocess import ImuData, OdometryData, CoordinateFrame, LiDARData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from typing import Union
 
-def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decimal):
+def to_bag(input_dir: str, dataset_num: str, robot_name: str, start_time: Decimal, end_time: Decimal):
 
     # Make directory paths
     input_path = Path(input_dir).absolute()
@@ -17,7 +17,17 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Prepare LiDARData
-    lidar_data.calculate_point_channels(16, -20, 20)
+    if dataset_num == "SmallTownSequence":
+        num_channels = 32
+        v_min_angle = -25
+        v_max_angle = 25
+    elif dataset_num == "V2.4.C" or dataset_num == "V2.3.AP" or dataset_num == "V2.3.AC" or dataset_num == "V2.4.F":
+        num_channels = 16
+        v_min_angle = -20
+        v_max_angle = 20
+    else:
+        raise ValueError("LiDAR point channels not specified for this dataset number.")
+    lidar_data.calculate_point_channels(num_channels, v_min_angle, v_max_angle)
     lidar_data.make_dense()
 
     # Shift GT data to start at Identity to be roughly close to odometry output
@@ -40,7 +50,7 @@ def main():
     dataset_num = "SmallTownSequence"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky1"]
+    robot_names = ["Drone1"]
 
     # Define robot name to index mapping
     robot_name_to_index = {"Husky1": 0, "Husky2": 1, "Drone1": 2, "Drone2": 3}
@@ -67,6 +77,7 @@ def main():
     # Run extraction for each robot
     for i in range(len(robot_names)):
         to_bag(input_dir=input_dir,
+               dataset_num=dataset_num,
                robot_name=robot_names[i],
                start_time=robot_crop_start_times[robot_name_to_index[robot_names[i]]],
                end_time=robot_crop_end_times[robot_name_to_index[robot_names[i]]])

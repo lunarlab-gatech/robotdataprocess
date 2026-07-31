@@ -7,10 +7,15 @@ from scipy.spatial.transform import Rotation as R
 def main():
     # Load the GT and estimated path data
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.4.C"
+    dataset_version = "SmallTownSequence"
     file_name = dataset_version + '.txt'
 
+    skip_robots = ["Husky1", "Husky2", "Drone2"]
+
     for robot_name in robot_names:
+        if robot_name in skip_robots:
+            continue
+
         print("\n=== Processing results for robot:", robot_name)
         user = getpass.getuser()
         dataset_folder = '/media/' + user + '/T73/Hercules_datasets/' + dataset_version
@@ -19,8 +24,9 @@ def main():
         input_coordinate_frame = CoordinateFrame.NED if "Husky" in robot_name else CoordinateFrame.FLU
         est_data = OdometryData.from_tum(dataset_folder + '/results/FAST-LIVO2/' + robot_name + '/' + file_name, 
                                         "world", "robot", input_coordinate_frame)
-        gt_data = OdometryData.from_csv(dataset_folder + "/extract/files_for_roman_baseline/" + robot_name + '/poseGT.csv', 
-                                        "world", "robot", CoordinateFrame.FLU, True, None)
+        gt_data = OdometryData.from_txt(dataset_folder + "/data/" +  robot_name +  '/pose_world_frame.txt', 
+                                          robot_name + '/odom', robot_name + '/ground_truth/base_link', 
+                                          CoordinateFrame.NED, False)
 
         # Crop the GT data to match the estimated data time range
         if dataset_version == "V2.4.C":
@@ -35,6 +41,9 @@ def main():
         elif dataset_version == "V2.4.F":
             robot_crop_start_times = [Decimal('35.05'), Decimal('34.60'), Decimal('27.45'), Decimal('31.50')]
             robot_crop_end_times = [Decimal('575.55'), Decimal('762.35'), Decimal('898.10'), Decimal('906.85')]
+        elif dataset_version == "SmallTownSequence":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [None, None, None, None]
         else:
             raise ValueError("Crop times not specified for this dataset number.")
         
@@ -43,6 +52,7 @@ def main():
             
         # Convert frame to FLU
         est_data.to_coordinate_frame(CoordinateFrame.FLU)
+        gt_data.to_coordinate_frame(CoordinateFrame.FLU)
         if "Drone" in robot_name: 
             # Drone are in FLU frame but the local coordinate frame is NED
             # Thus, this sets local coordinate frame to FLU as well.

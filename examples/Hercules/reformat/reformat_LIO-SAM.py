@@ -9,9 +9,9 @@ from scipy.spatial.transform import Rotation as R
 def main():
     """ Reformat data from LIO-SAM to be used as input odometry for ROMAN """
     
-    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.4.F"
-    file_name = 'odometry.csv'
+    robot_names = ["Husky1", "Drone1"]
+    dataset_version = "SmallTownSequence"
+    file_name = 'odometryHighHertz.csv'
 
     # Do it for all files, robots, and datasets
     for robot_name in robot_names:
@@ -34,6 +34,11 @@ def main():
                                             [0.0,  1.0,  0.0,  0.0],
                                             [0.0,  0.0,  1.0,  0.5],
                                             [0.0,  0.0,  0.0,  1.0]])
+        elif dataset_version == "SmallTownSequence":
+            H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
+                                        [0.0,  1.0,  0.0,  0.0],
+                                        [0.0,  0.0,  1.0,  0.5],
+                                        [0.0,  0.0,  0.0,  1.0]])
         else:
             raise NotImplementedError(f"H_L_to_I not defined for dataset_version {dataset_version}")
         

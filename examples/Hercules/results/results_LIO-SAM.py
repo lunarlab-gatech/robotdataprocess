@@ -6,10 +6,14 @@ from scipy.spatial.transform import Rotation as R
 
 def main():
     # Load the GT and estimated path data
-    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "V2.4.C"
-    file_name = 'odometry.csv'
+    robot_names = ["Husky1", "Drone1"]
+    dataset_version = "SmallTownSequence"
+    file_name = 'odometryHighHertz.csv'
 
+    # Define robot name to index mapping
+    robot_name_to_index = {"Husky1": 0, "Husky2": 1, "Drone1": 2, "Drone2": 3}
+    
+    # Iterate through each robot name
     for robot_name in robot_names:
         print("\n=== Processing results for robot:", robot_name)
         user = getpass.getuser()
@@ -18,8 +22,9 @@ def main():
         # Load the data
         est_data = OdometryData.from_csv(dataset_folder + '/results/LIO-SAM/' + robot_name + '/' + file_name, 
                                         "world", "robot", CoordinateFrame.NED, True, None)
-        gt_data = OdometryData.from_csv(dataset_folder + "/extract/files_for_roman_baseline/" + robot_name + '/poseGT.csv', 
-                                        "world", "robot", CoordinateFrame.FLU, True, None)
+        gt_data = OdometryData.from_txt(dataset_folder + "/data/" +  robot_name +  '/pose_world_frame.txt', 
+                                                  robot_name + '/odom', robot_name + '/ground_truth/base_link', 
+                                                  CoordinateFrame.NED, False)
         
         # Crop the GT data to match the estimated data time range
         if dataset_version == "V2.4.C":
@@ -34,11 +39,14 @@ def main():
         elif dataset_version == "V2.4.F":
             robot_crop_start_times = [Decimal('35.05'), Decimal('34.60'), Decimal('27.45'), Decimal('31.50')]
             robot_crop_end_times = [Decimal('575.55'), Decimal('762.35'), Decimal('898.10'), Decimal('906.85')]
+        elif dataset_version == "SmallTownSequence":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [None, None, None, None]
         else:
             raise ValueError("Crop times not specified for this dataset number.")
         
-        gt_data.crop_data(robot_crop_start_times[robot_names.index(robot_name)], 
-                          robot_crop_end_times[robot_names.index(robot_name)])
+        gt_data.crop_data(robot_crop_start_times[robot_name_to_index[robot_name]],
+                          robot_crop_end_times[robot_name_to_index[robot_name]])
             
         # Get L->I transformation
         if dataset_version == "V2.3.C" or dataset_version == "V2.3.AP" or dataset_version == "V2.3.AC" or dataset_version == "V2.4.C" \
@@ -53,14 +61,20 @@ def main():
                                             [0.0,  1.0,  0.0,  0.0],
                                             [0.0,  0.0,  1.0,  0.5],
                                             [0.0,  0.0,  0.0,  1.0]])
+        elif dataset_version == "SmallTownSequence":
+            H_L_to_I_in_NED = np.array([[1.0,  0.0,  0.0,  0.0],
+                                        [0.0,  1.0,  0.0,  0.0],
+                                        [0.0,  0.0,  1.0,  0.5],
+                                        [0.0,  0.0,  0.0,  1.0]])
         else:
             raise NotImplementedError(f"H_L_to_I not defined for dataset_version {dataset_version}")
         
         # LIO-SAM output is W->L. However, our GT is W->I. Thus, we need to convert it (W->I = W->L @ L->I)
         est_data.apply_transformation_right_side(H_L_to_I_in_NED)
 
-        # Convert frame to FLU
+        # Convert frames to FLU
         est_data.to_coordinate_frame(CoordinateFrame.FLU)
+        gt_data.to_coordinate_frame(CoordinateFrame.FLU)
 
         # Calculate RMS ATE, among other metrics
         metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,   
