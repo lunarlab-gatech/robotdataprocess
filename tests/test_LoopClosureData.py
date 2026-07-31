@@ -5,8 +5,10 @@ from decimal import Decimal
 import numpy as np
 import os
 from pathlib import Path
+import tempfile
 from robotdataprocess.data_types.Data import CoordinateFrame
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
+from robotdataprocess.data_types.LoopClosureData.LoopClosureDataResult import LoopClosureDataResult
 from robotdataprocess.data_types.PathData import PathData
 from robotdataprocess.utils.math_utils import interpolate_poses
 from scipy.spatial.transform import Rotation as R
@@ -123,6 +125,34 @@ class TestLoopClosureDataFromJson(unittest.TestCase):
             float(lc_data.orientations[0][0]), 0.023114926598089634, 10)
         np.testing.assert_almost_equal(
             float(lc_data.orientations[0][3]), 0.9997169950776631, 10)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataToJson(unittest.TestCase):
+    """Test to_json round-trips exactly through from_json."""
+
+    def test_round_trip_matches_original(self):
+        lc_data = LoopClosureData(
+            timestamps_a=np.array([Decimal("0.05"), Decimal("98.549999999")], dtype=object),
+            timestamps_b=np.array([Decimal("1.123456789"), Decimal("200")], dtype=object),
+            names=[("Husky1", "Husky2"), ("aerial-07", "ground-03")],
+            translations=np.array(
+                [[5.661624933379803, 2.73853263907489, 1.0984062303330102], [1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array(
+                [[0.023114926598089634, 0.0, 0.0, 0.9997169950776631], [0.0, 0.0, 0.0, 1.0]], dtype=object),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            json_path = Path(tmp_dir) / 'roundtrip.json'
+            lc_data.to_json(json_path)
+            reloaded = LoopClosureData.from_json(json_path)
+
+        self.assertEqual(reloaded.num_loop_closures, lc_data.num_loop_closures)
+        np.testing.assert_array_equal(reloaded.timestamps_a, lc_data.timestamps_a)
+        np.testing.assert_array_equal(reloaded.timestamps_b, lc_data.timestamps_b)
+        self.assertEqual(reloaded.names, lc_data.names)
+        np.testing.assert_array_equal(reloaded.translations, lc_data.translations)
+        np.testing.assert_array_equal(reloaded.orientations, lc_data.orientations)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -495,11 +525,6 @@ class TestLoopClosureDataFromMaplabJson(unittest.TestCase):
         np.testing.assert_almost_equal(
             float(lc_data.orientations[0][3]), 0.99142825348947716, 10)
 
-    def test_from_maplab_json_detected_inliers_none(self):
-        """detected_inliers should be None since switch_variable is not parsed."""
-        lc_data = LoopClosureData.from_maplab_json(self.JSON_PATH)
-        self.assertFalse(hasattr(lc_data, 'detected_inliers'))
-
     def test_from_maplab_json_names_override(self):
         """names_override replaces mission UUIDs with friendly names."""
         lc_data = LoopClosureData.from_maplab_json(
@@ -562,10 +587,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"RobotA": path_a, "RobotB": path_b})
+        lc.calculate_errors({"RobotA": path_a, "RobotB": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 10)
 
     def test_known_error(self):
         """Test with a known translation error."""
@@ -591,10 +616,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 1.0, 10)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 1.0, 10)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 10)
 
     def test_rotation_error(self):
         """Test with a known rotation error."""
@@ -619,10 +644,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([r_90z.tolist()], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 90.0, 5)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 90.0, 5)
 
     def test_with_interpolation(self):
         """Test that interpolation is used correctly for non-exact timestamps."""
@@ -649,10 +674,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 8)
 
     def test_missing_robot_name_raises(self):
         """Should raise ValueError if robot name is not in name_to_path."""
@@ -693,10 +718,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 8)
 
     def test_timestamp_after_range_clamped_to_last(self):
         """A loop closure timestamp after the path range is clamped to the
@@ -724,10 +749,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 8)
 
     def test_one_timestamp_in_range_one_clamped(self):
         """Only the out-of-range timestamp is clamped; the in-range one is
@@ -755,10 +780,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 8)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 8)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 8)
 
     def test_flipped_names(self):
         """When names are (B, A) instead of (A, B) the GT relative transform is
@@ -791,10 +816,10 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([r_rel.as_quat().tolist()], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.calculate_errors({"A": path_a, "B": path_b})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 10)
 
     def test_same_robot_both_names(self):
         """When both names refer to the same robot the GT relative transform is
@@ -819,226 +844,130 @@ class TestLoopClosureDataCalculateErrors(unittest.TestCase):
             orientations=np.array([r_end.as_quat().tolist()], dtype=object),
         )
 
-        errors = lc.calculate_errors({"A": path_a})
+        lc.calculate_errors({"A": path_a})
 
-        np.testing.assert_almost_equal(errors["translation_errors"][0], 0.0, 10)
-        np.testing.assert_almost_equal(errors["rotation_errors"][0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.translation_errors[0], 0.0, 10)
+        np.testing.assert_almost_equal(lc.results.rotation_errors[0], 0.0, 10)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestLabelInliersViaOtherLoopClosureData(unittest.TestCase):
-    """Test label_inliers_via_other_LoopClosureData."""
+class TestLoopClosureDataLabelSuccessful(unittest.TestCase):
+    """Test the label_successful delegate method."""
 
-    def _make_lc(self, timestamps_a, timestamps_b, names, translations, orientations):
-        return LoopClosureData(
-            timestamps_a=np.array(timestamps_a, dtype=object),
-            timestamps_b=np.array(timestamps_b, dtype=object),
-            names=names,
-            translations=np.array(translations, dtype=object),
+    def _make_path_data(self, timestamps, positions, orientations):
+        return PathData(
+            frame_id="world",
+            timestamps=np.array(timestamps, dtype=object),
+            positions=np.array(positions, dtype=object),
             orientations=np.array(orientations, dtype=object),
+            frame=CoordinateFrame.FLU,
         )
 
-    def test_exact_match(self):
-        """Loop closures with identical fields are labelled as inliers."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0"), Decimal("2.0")],
-            timestamps_b=[Decimal("1.5"), Decimal("2.5")],
-            names=[("A", "B"), ("A", "B")],
-            translations=[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
+    def test_raises_before_calculate_errors(self):
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("1.0")], dtype=object),
             names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-
-        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-        np.testing.assert_array_equal(lc_self.detected_inliers, [True, False])
-
-    def test_no_match_raises(self):
-        """Unmatched loop closures in other should raise ValueError."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("9.0")],
-            timestamps_b=[Decimal("9.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
+            translations=np.array([[0.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
         )
 
         with self.assertRaises(ValueError):
-            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+            lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
 
-    def test_different_translation_raises(self):
-        """Same timestamps and names but different translation should raise."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
+    def test_translation_threshold_is_tight(self):
+        # Robot A stationary at origin; robot B stationary at [10, 0, 0], both
+        # identity rotation -> GT relative transform is [10, 0, 0], identity
+        # rotation (zero rotation error) for every loop closure below.
+        path_a = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
         )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[99.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-
-        with self.assertRaises(ValueError):
-            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-    def test_different_orientation_raises(self):
-        """Same timestamps and names but different orientation should raise."""
-        r_90z = R.from_euler('z', 90, degrees=True).as_quat().tolist()
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[r_90z],
-        )
-
-        with self.assertRaises(ValueError):
-            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-    def test_swapped_names_raises(self):
-        """Swapped name pairs (A,B) vs (B,A) should raise."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.5")],
-            timestamps_b=[Decimal("1.0")],
-            names=[("B", "A")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-
-        with self.assertRaises(ValueError):
-            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-    def test_numerical_imprecision_still_matches(self):
-        """Values differing by tiny floating-point noise should still match."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0 + 1e-12, 2.0 - 1e-12, 3.0]],
-            orientations=[[0.0, 0.0, 1e-13, 1.0]],
-        )
-
-        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-        np.testing.assert_array_equal(lc_self.detected_inliers, [True])
-
-    def test_negated_quaternion_matches(self):
-        """q and -q represent the same rotation and should match."""
-        q = [0.1, 0.2, 0.3, 0.9327379053088816]  # normalized quaternion
-        q_neg = [-x for x in q]
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[q],
-        )
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0")],
-            timestamps_b=[Decimal("1.5")],
-            names=[("A", "B")],
-            translations=[[1.0, 2.0, 3.0]],
-            orientations=[q_neg],
-        )
-
-        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-        np.testing.assert_array_equal(lc_self.detected_inliers, [True])
-
-    def test_multiple_inliers(self):
-        """Multiple loop closures can be labelled as inliers at once."""
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0"), Decimal("2.0"), Decimal("3.0")],
-            timestamps_b=[Decimal("1.5"), Decimal("2.5"), Decimal("3.5")],
-            names=[("A", "B"), ("A", "B"), ("A", "B")],
-            translations=[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0]] * 3,
-        )
-        # other contains first and third but not second
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("3.0"), Decimal("1.0")],
-            timestamps_b=[Decimal("3.5"), Decimal("1.5")],
-            names=[("A", "B"), ("A", "B")],
-            translations=[[3.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        path_b = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[10.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
             orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
         )
 
-        lc_self.label_inliers_via_other_LoopClosureData(lc_other)
-
-        np.testing.assert_array_equal(lc_self.detected_inliers, [True, False, True])
-
-    def test_duplicate_other_entries_not_fully_matched_raises(self):
-        """When other contains two identical entries and self has two entries
-        that both match the same j=0 entry (inner loop breaks on j=0 each
-        time, so j=1 is never distinctly matched), ValueError must be raised.
-
-        Bug: the check uses num_matched = np.sum(self.detected_inliers) instead
-        of len(matched_other_indices).  With two self entries both matching j=0:
-          - matched_other_indices = {0}   (size 1, j=1 never added)
-          - num_matched = 2               (both self entries are True)
-        The correct check len(matched_other_indices)=1 < other.num_loop_closures=2
-        raises ValueError.  The buggy check num_matched=2 >= 2 passes silently.
-        """
-        # other: two identical entries — j=0 and j=1 have the same values.
-        lc_other = self._make_lc(
-            timestamps_a=[Decimal("1.0"), Decimal("1.0")],
-            timestamps_b=[Decimal("1.5"), Decimal("1.5")],
+        lc = LoopClosureData(
+            # First LC estimates [10.99, 0, 0] -> 0.99 m translation error (just within target)
+            # Second LC estimates [11.001, 0, 0] -> 1.001 m translation error (just outside target)
+            timestamps_a=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
             names=[("A", "B"), ("A", "B")],
-            translations=[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
-        )
-        # self: two identical entries that both match j=0 (and would also match
-        # j=1, but the inner loop breaks after j=0, so j=1 is never recorded in
-        # matched_other_indices).
-        lc_self = self._make_lc(
-            timestamps_a=[Decimal("1.0"), Decimal("1.0")],
-            timestamps_b=[Decimal("1.5"), Decimal("1.5")],
-            names=[("A", "B"), ("A", "B")],
-            translations=[[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]],
-            orientations=[[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
+            translations=np.array([[10.99, 0.0, 0.0], [11.001, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]] * 2, dtype=object),
         )
 
-        with self.assertRaises(ValueError):
-            lc_self.label_inliers_via_other_LoopClosureData(lc_other)
+        lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+
+        np.testing.assert_array_equal(lc.results.successful, [True, False])
+        self.assertEqual(lc.results.trans_err_in_target, 1.0)
+        self.assertEqual(lc.results.rot_err_in_target, 5.0)
+
+    def test_rotation_threshold_is_tight(self):
+        # Both robots stationary at the same position -> GT relative transform
+        # has identity rotation (zero translation error) for every loop closure below.
+        path_a = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        # First LC estimates a 4.99 deg rotation about Z (just within target)
+        # Second LC estimates a 5.001 deg rotation about Z (just outside target)
+        r_within = R.from_euler('z', 4.99, degrees=True).as_quat()
+        r_outside = R.from_euler('z', 5.001, degrees=True).as_quat()
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
+            names=[("A", "B"), ("A", "B")],
+            translations=np.array([[0.0, 0.0, 0.0]] * 2, dtype=object),
+            orientations=np.array([r_within.tolist(), r_outside.tolist()], dtype=object),
+        )
+
+        lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+
+        np.testing.assert_array_equal(lc.results.successful, [True, False])
+
+    def test_both_thresholds_required(self):
+        # Both robots stationary at the same position -> GT relative transform
+        # is identity (zero translation and rotation error).
+        path_a = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+        path_b = self._make_path_data(
+            timestamps=[0.0, 1.0],
+            positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            orientations=[[0.0, 0.0, 0.0, 1.0]] * 2,
+        )
+
+        # First LC: translation error within target (0.5 m), rotation error outside target (10 deg)
+        # Second LC: translation error outside target (2.0 m), rotation error within target (1 deg)
+        r_10deg = R.from_euler('z', 10.0, degrees=True).as_quat()
+        r_1deg = R.from_euler('z', 1.0, degrees=True).as_quat()
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
+            timestamps_b=np.array([Decimal("1.0"), Decimal("1.0")], dtype=object),
+            names=[("A", "B"), ("A", "B")],
+            translations=np.array([[0.5, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([r_10deg.tolist(), r_1deg.tolist()], dtype=object),
+        )
+
+        lc.calculate_errors({"A": path_a, "B": path_b})
+        lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+
+        np.testing.assert_array_equal(lc.results.successful, [False, False])
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -1093,12 +1022,28 @@ class TestLoopClosureDataRoundTimestamps(unittest.TestCase):
 
         self.assertEqual(lc.num_loop_closures, 3)
 
+    def test_invalidates_results(self):
+        """round_timestamps should invalidate any previously computed results,
+        since rounding can shift which GT poses are interpolated."""
+        lc = self._make_lc(
+            timestamps_a=[Decimal("1.111")],
+            timestamps_b=[Decimal("2.222")],
+        )
+        lc.results = LoopClosureDataResult(
+            translation_errors=np.array([0.1]),
+            rotation_errors=np.array([1.0]),
+        )
+
+        lc.round_timestamps(1)
+
+        self.assertIsNone(lc.results)
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestPruneIntraRobotLoopClosures(unittest.TestCase):
     """Test prune_intra_robot_loop_closures method."""
 
-    def _make_lc(self, names, detected_inliers=None):
+    def _make_lc(self, names):
         n = len(names)
         return LoopClosureData(
             timestamps_a=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
@@ -1106,7 +1051,6 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
             names=names,
             translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
             orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
-            detected_inliers=detected_inliers,
         )
 
     def test_removes_intra_robot(self):
@@ -1134,17 +1078,6 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
         np.testing.assert_almost_equal(float(lc.translations[0][0]), 1.0)
         np.testing.assert_almost_equal(float(lc.orientations[0][0]), 2.0)
 
-    def test_prunes_detected_inliers_when_set(self):
-        """detected_inliers array is pruned in sync with the other fields."""
-        lc = self._make_lc(
-            [("A", "B"), ("A", "A"), ("B", "C")],
-            detected_inliers=[True, True, False],
-        )
-        lc.prune_intra_robot_loop_closures()
-
-        self.assertEqual(lc.num_loop_closures, 2)
-        np.testing.assert_array_equal(lc.detected_inliers, [True, False])
-
     def test_no_intra_robot_is_noop(self):
         """When there are no intra-robot loop closures, nothing changes."""
         lc = self._make_lc([("A", "B"), ("B", "C")])
@@ -1167,7 +1100,7 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
 class TestPruneInterRobotLoopClosures(unittest.TestCase):
     """Test prune_inter_robot_loop_closures method."""
 
-    def _make_lc(self, names, detected_inliers=None):
+    def _make_lc(self, names):
         n = len(names)
         return LoopClosureData(
             timestamps_a=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
@@ -1175,7 +1108,6 @@ class TestPruneInterRobotLoopClosures(unittest.TestCase):
             names=names,
             translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
             orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
-            detected_inliers=detected_inliers,
         )
 
     def test_removes_inter_robot(self):
@@ -1205,17 +1137,6 @@ class TestPruneInterRobotLoopClosures(unittest.TestCase):
         np.testing.assert_almost_equal(float(lc.translations[0][0]), 0.0)
         np.testing.assert_almost_equal(float(lc.translations[1][0]), 2.0)
 
-    def test_prunes_detected_inliers_when_set(self):
-        """detected_inliers array is pruned in sync with the other fields."""
-        lc = self._make_lc(
-            [("A", "B"), ("A", "A"), ("B", "C")],
-            detected_inliers=[True, True, False],
-        )
-        lc.prune_inter_robot_loop_closures()
-
-        self.assertEqual(lc.num_loop_closures, 1)
-        np.testing.assert_array_equal(lc.detected_inliers, [True])
-
     def test_no_inter_robot_is_noop(self):
         """When there are no inter-robot loop closures, nothing changes."""
         lc = self._make_lc([("A", "A"), ("B", "B")])
@@ -1239,14 +1160,13 @@ class TestPruneInterRobotLoopClosures(unittest.TestCase):
 class TestLoopClosureDataMerge(unittest.TestCase):
     """Test LoopClosureData.merge static method."""
 
-    def _make_lc(self, timestamps_a, timestamps_b, names, translations, orientations, detected_inliers=None):
+    def _make_lc(self, timestamps_a, timestamps_b, names, translations, orientations):
         return LoopClosureData(
             timestamps_a=np.array(timestamps_a, dtype=object),
             timestamps_b=np.array(timestamps_b, dtype=object),
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
-            detected_inliers=detected_inliers,
         )
 
     def test_merge_count(self):
@@ -1337,68 +1257,6 @@ class TestLoopClosureDataMerge(unittest.TestCase):
         self.assertEqual(lc1.names, [("A", "B")])
         self.assertEqual(lc2.names, [("C", "D")])
         self.assertEqual(len(input_list), 2)
-
-    def test_merge_with_detected_inliers(self):
-        """When all inputs have detected_inliers, they are concatenated."""
-        lc1 = self._make_lc(
-            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
-            [("A", "B"), ("A", "B")],
-            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
-            detected_inliers=[True, False],
-        )
-        lc2 = self._make_lc(
-            [Decimal("3.0")], [Decimal("3.5")],
-            [("A", "C")],
-            [[3.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0]],
-            detected_inliers=[True],
-        )
-
-        merged = LoopClosureData.merge([lc1, lc2])
-
-        self.assertTrue(hasattr(merged, 'detected_inliers'))
-        np.testing.assert_array_equal(merged.detected_inliers, [True, False, True])
-
-    def test_merge_without_detected_inliers(self):
-        """When no inputs have detected_inliers, the result has none either."""
-        lc1 = self._make_lc(
-            [Decimal("1.0")], [Decimal("1.5")],
-            [("A", "B")],
-            [[1.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0]],
-        )
-        lc2 = self._make_lc(
-            [Decimal("2.0")], [Decimal("2.5")],
-            [("A", "C")],
-            [[2.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0]],
-        )
-
-        merged = LoopClosureData.merge([lc1, lc2])
-
-        self.assertFalse(hasattr(merged, 'detected_inliers'))
-
-    def test_merge_mixed_detected_inliers(self):
-        """When only some inputs have detected_inliers, missing ones default to False."""
-        lc1 = self._make_lc(
-            [Decimal("1.0"), Decimal("2.0")], [Decimal("1.5"), Decimal("2.5")],
-            [("A", "B"), ("A", "B")],
-            [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]],
-            detected_inliers=[True, True],
-        )
-        lc2 = self._make_lc(
-            [Decimal("3.0")], [Decimal("3.5")],
-            [("A", "C")],
-            [[3.0, 0.0, 0.0]],
-            [[0.0, 0.0, 0.0, 1.0]],
-        )
-
-        merged = LoopClosureData.merge([lc1, lc2])
-
-        self.assertTrue(hasattr(merged, 'detected_inliers'))
-        np.testing.assert_array_equal(merged.detected_inliers, [True, True, False])
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -1510,7 +1368,7 @@ class TestPrintDuplicateInfo(unittest.TestCase):
 class TestPruneDuplicates(unittest.TestCase):
     """Test prune_duplicates method."""
 
-    def _make_lc(self, names, timestamps_a, timestamps_b, detected_inliers=None):
+    def _make_lc(self, names, timestamps_a, timestamps_b):
         n = len(names)
         return LoopClosureData(
             timestamps_a=np.array([Decimal(str(t)) for t in timestamps_a], dtype=object),
@@ -1518,7 +1376,6 @@ class TestPruneDuplicates(unittest.TestCase):
             names=names,
             translations=np.array([[float(i), 0.0, 0.0] for i in range(n)], dtype=object),
             orientations=np.array([[float(i + 1), 0.0, 0.0, 0.0] for i in range(n)], dtype=object),
-            detected_inliers=detected_inliers,
         )
 
     def test_no_duplicates_is_noop(self):
@@ -1547,16 +1404,6 @@ class TestPruneDuplicates(unittest.TestCase):
         self.assertEqual(lc.num_loop_closures, 1)
         self.assertEqual(lc.names, [("A", "B")])
 
-    def test_prunes_detected_inliers_when_set(self):
-        lc = self._make_lc(
-            [("A", "B"), ("A", "B"), ("A", "C")], [0, 0, 1], [10, 10, 11],
-            detected_inliers=[True, False, True],
-        )
-        lc.prune_duplicates()
-
-        self.assertEqual(lc.num_loop_closures, 2)
-        np.testing.assert_array_equal(lc.detected_inliers, [True, True])
-
     def test_matches_print_duplicate_info_unique_count(self):
         lc = self._make_lc(
             [("A", "B"), ("A", "B"), ("A", "C"), ("B", "A")], [0, 0, 1, 10], [10, 10, 11, 0]
@@ -1566,19 +1413,43 @@ class TestPruneDuplicates(unittest.TestCase):
         # ("A", "B", 0, 10) appears 3 times (once swapped as ("B", "A", 10, 0)); ("A", "C", 1, 11) once
         self.assertEqual(lc.num_loop_closures, 2)
 
+    def test_prunes_results_when_set(self):
+        lc = self._make_lc([("A", "B"), ("A", "B"), ("A", "C")], [0, 0, 1], [10, 10, 11])
+        lc.results = LoopClosureDataResult(
+            translation_errors=np.array([0.1, 0.2, 0.3]),
+            rotation_errors=np.array([1.0, 2.0, 3.0]),
+        )
+        lc.results.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+        lc.prune_duplicates()
+
+        # Duplicate at index 1 is dropped; indices 0 and 2 survive.
+        self.assertEqual(lc.num_loop_closures, 2)
+        np.testing.assert_array_equal(lc.results.translation_errors, [0.1, 0.3])
+        np.testing.assert_array_equal(lc.results.rotation_errors, [1.0, 3.0])
+        np.testing.assert_array_equal(lc.results.successful, [True, True])
+
 
 class TestLoopClosureDataVisualization(unittest.TestCase):
     """Test visualization methods don't crash."""
 
-    def _make_errors(self):
-        return {
-            "translation_errors": np.array([0.1, 0.5, 1.0, 2.0, 3.0, 0.3]),
-            "rotation_errors": np.array([1.0, 5.0, 10.0, 20.0, 45.0, 2.0]),
-        }
+    def _make_lc_with_results(self):
+        n = 6
+        lc = LoopClosureData(
+            timestamps_a=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
+            timestamps_b=np.array([Decimal(str(i)) for i in range(n)], dtype=object),
+            names=[("A", "B")] * n,
+            translations=np.array([[0.0, 0.0, 0.0]] * n, dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]] * n, dtype=object),
+        )
+        lc.results = LoopClosureDataResult(
+            translation_errors=np.array([0.1, 0.5, 1.0, 2.0, 3.0, 0.3]),
+            rotation_errors=np.array([1.0, 5.0, 10.0, 20.0, 45.0, 2.0]),
+        )
+        return lc
 
     def test_visualize_success_rate(self):
-        errors = self._make_errors()
-        fig = LoopClosureData.visualize_success_rate([errors], labels=["A"], show_plots=False)
+        lc = self._make_lc_with_results()
+        fig = LoopClosureData.visualize_success_rate([lc], labels=["A"], show_plots=False)
         self.assertIsNotNone(fig)
         import matplotlib.pyplot as plt
         plt.close('all')

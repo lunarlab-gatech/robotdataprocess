@@ -59,9 +59,11 @@ def calculate_LC_errors_ROMAN(run_path: str, robot_names: List, dataset_number: 
         gt_data_dict[rn] = OdometryData.from_csv(dataset_path / (rn + '_gt_odom.csv'),
                                                   'world', 'robot', CoordinateFrame.FLU, True, None, ts_in_ns=True)
 
-    return (merged_lc.calculate_errors(gt_data_dict),
-            merged_lc_intermediate.calculate_errors(gt_data_dict),
-            merged_lc_inlier.calculate_errors(gt_data_dict))
+    for lc in (merged_lc, merged_lc_intermediate, merged_lc_inlier):
+        lc.calculate_errors(gt_data_dict)
+        lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+
+    return merged_lc, merged_lc_intermediate, merged_lc_inlier
 
 
 def main():
@@ -81,29 +83,27 @@ def main():
     ]
     run_names = ["MG"] # ["ROMAN", "ROMAN + NM", "MG"]
 
-    errors_list = []
+    lc_data_list = []
     labels_list = []
     group_indices = []
     n_runs = len(run_paths)
     for i, (run_path, run_name) in enumerate(zip(run_paths, run_names)):
-        all_errs, intermediate_errs, inlier_errs = calculate_LC_errors_ROMAN(run_path, robot_names, dataset_number)
+        all_lc, intermediate_lc, inlier_lc = calculate_LC_errors_ROMAN(run_path, robot_names, dataset_number)
 
-        errors_list.append(all_errs)
+        lc_data_list.append(all_lc)
         labels_list.append(run_name)
         group_indices.append(i)
 
-        errors_list.append(intermediate_errs)
+        lc_data_list.append(intermediate_lc)
         labels_list.append(run_name + " [Intermediate Step]")
         group_indices.append(i + 1)
 
-        errors_list.append(inlier_errs)
+        lc_data_list.append(inlier_lc)
         labels_list.append(run_name + " [Inliers]")
         group_indices.append(i + 2)
 
-    LoopClosureData.visualize_error_scatter(errors_list, labels_list, group_indices=group_indices,
-                                            max_rotation_frac=1.0, max_translation_frac=1.0,
-                                            trans_err_in_target=1.0, show_plots=False,
-                                            rot_err_in_target=5.0,
+    LoopClosureData.visualize_error_scatter(lc_data_list, labels_list, group_indices=group_indices,
+                                            max_rotation_frac=1.0, max_translation_frac=1.0, show_plots=False,
                                             save_path='/home/dbutterfield3/Research/robotdataprocess/' + dataset_number + "-" + difficulty + '-' + robots_str +'.pdf')
 
 

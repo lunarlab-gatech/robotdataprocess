@@ -688,7 +688,7 @@ class PathData(SequentialData):
                      background_image_path: str | None = None,
                      background_image_x_edge: float | None = None, ax: plt.Axes | None = None,
                      background_image_extent_offsets: Union[Tuple[float, float], None] = None,
-                     loop_closure_data=None, lc_errors=None, lc_line_width: float = 0.8,
+                     loop_closure_data=None, lc_line_width: float = 0.8,
                      title: str | None = None, lc_errors_vmax: float = 50.0,
                      yaw_rotation_deg: float = 0.0):
         """
@@ -715,6 +715,15 @@ class PathData(SequentialData):
             background_image_x_edge: The distance in meters from center of image to the x edge.
             background_image_extent_offets: XY locations where the image center should be located.
             ax: If passed, plot is drawn onto these axes instead of on a new figure.
+            loop_closure_data: If provided, a LoopClosureData instance whose loop closures are
+                drawn as lines connecting the estimated (non-GT) trajectories in dataList, using
+                each robot's first non-GT PathData entry to interpolate positions. If its
+                ``.results`` (from ``calculate_errors``) is populated, lines are colored by
+                translation error instead of plain white.
+            lc_line_width: Width of the loop closure connector lines.
+            title: Optional plot title.
+            lc_errors_vmax: Upper bound (m) of the translation-error colormap used when
+                ``loop_closure_data.results`` is populated.
             yaw_rotation_deg: Rotates every PathData in dataList about the Z axis passing
                 through the center of their combined axis-aligned bounding box, by this many
                 degrees, before plotting (e.g. to align GT trajectories with a background
@@ -812,8 +821,8 @@ class PathData(SequentialData):
                 _y = dec_arr_to_float_arr(_path.positions[:, 1]).astype(float)
                 pos_cache[_name] = (_ts, _x, _y)
 
-            if lc_errors is not None:
-                trans_errs = np.asarray(lc_errors["translation_errors"], dtype=float)
+            if loop_closure_data.results is not None:
+                trans_errs = np.asarray(loop_closure_data.results.translation_errors, dtype=float)
                 lc_norm = mcolors.Normalize(vmin=0, vmax=lc_errors_vmax, clip=True)
                 lc_cmap = mcolors.LinearSegmentedColormap.from_list(
                     "lc_cmap", ["#1a9641", "#a6611a", "#d7191c"])
@@ -831,11 +840,11 @@ class PathData(SequentialData):
                 _ya = float(np.interp(_ts_a, _ts_arr_a, _y_a))
                 _xb = float(np.interp(_ts_b, _ts_arr_b, _x_b))
                 _yb = float(np.interp(_ts_b, _ts_arr_b, _y_b))
-                _color = lc_cmap(lc_norm(trans_errs[_i])) if lc_errors is not None else (1.0, 1.0, 1.0, 0.6)
+                _color = lc_cmap(lc_norm(trans_errs[_i])) if loop_closure_data.results is not None else (1.0, 1.0, 1.0, 0.6)
                 axs.plot([_xa, _xb], [_ya, _yb], color=_color, linewidth=lc_line_width, zorder=3)
                 axs.plot([_xa, _xb], [_ya, _yb], 'o', color='black', markersize=3, zorder=4)
 
-            if lc_errors is not None:
+            if loop_closure_data.results is not None:
                 _sm = plt.cm.ScalarMappable(norm=lc_norm, cmap=lc_cmap)
                 _sm.set_array([])
                 fig.colorbar(_sm, ax=axs, label="LC Translation Error (m)", shrink=0.8)

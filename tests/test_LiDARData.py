@@ -1,4 +1,5 @@
 from decimal import Decimal
+from io import StringIO
 import numpy as np
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ from robotdataprocess import CoordinateFrame, LiDARData, ROSMsgLibType, Ros2BagW
 import shutil
 import struct
 import unittest
+from unittest.mock import patch
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLiDARData(unittest.TestCase):
@@ -176,7 +178,45 @@ class TestLiDARData(unittest.TestCase):
         _, channels_1 = lidar_data_cropped.get_point_cloud_at_index(1)
         np.testing.assert_array_equal(channels_0, [40, 40, 40, 31, 25, 20])
         np.testing.assert_array_equal(channels_1, [ 9, 15,  0, 16,  8, 65535])
-        
+
+    def test_calculate_point_channels_warns_out_of_range(self):
+        """ Test that a warning is printed when a point's vertical angle falls outside
+        [v_min_angle, v_max_angle] by more than half a channel's spacing. """
+
+        # Three points land almost exactly on the -10/0/10 degree lasers (covering all
+        # 3 channels), plus one point straight up (90 degrees) which is well outside the range.
+        point_cloud = [np.array([[1.0, 0.0, -0.17633],
+                                  [1.0, 0.0,  0.0],
+                                  [1.0, 0.0,  0.17633],
+                                  [0.0, 0.0, 100.0]])]
+        lidar_data = LiDARData("robot", [0], point_cloud, None, CoordinateFrame.FLU)
+
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            lidar_data.calculate_point_channels(3, -10, 10)
+        output = mock_stdout.getvalue()
+
+        self.assertIn("Warning", output)
+        self.assertIn("outside the expected", output)
+        self.assertNotIn("never assigned", output)
+
+    def test_calculate_point_channels_warns_unused_channels(self):
+        """ Test that a warning is printed when one or more channels never get assigned
+        to any point (num_channels/angle range does not match the data). """
+
+        # All points land on the 0 degree laser, so the -10 and 10 degree channels are unused.
+        point_cloud = [np.array([[1.0, 0.0, 0.0],
+                                  [1.0, 0.0, 0.0]])]
+        lidar_data = LiDARData("robot", [0], point_cloud, None, CoordinateFrame.FLU)
+
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            lidar_data.calculate_point_channels(3, -10, 10)
+        output = mock_stdout.getvalue()
+
+        self.assertIn("Warning", output)
+        self.assertIn("never assigned", output)
+        self.assertIn("[0, 2]", output)
+        self.assertNotIn("outside the expected", output)
+
     def test_make_dense(self):
         """ Ensure invalid points (infinities and NaNs are removed) """
 

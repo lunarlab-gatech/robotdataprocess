@@ -527,12 +527,12 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
         for lc_filter in LCFilterMode:
             _, lc_data_inlier = load_LC_data_ROMAN(dataset_prefix, dataset_name, method, [robot0_name, robot1_name],
                                                    lc_filter=lc_filter, names_override=names_override_display)
-            lc_errors_viz = lc_data_inlier.calculate_errors(gt_dict_display)
+            lc_data_inlier.calculate_errors(gt_dict_display)
 
             traj_lc_dir = base_dir / lc_filter.name / 'traj_lc'
             traj_lc_dir.mkdir(parents=True, exist_ok=True)
             PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
-                               loop_closure_data=lc_data_inlier, lc_errors=lc_errors_viz, lc_line_width=2.0, lc_errors_vmax=2.0,
+                               loop_closure_data=lc_data_inlier, lc_line_width=2.0, lc_errors_vmax=2.0,
                                title=f"{method} LC overlaid on trajectory",
                                save_path=str(traj_lc_dir / f'traj_lc_{pair_lbl}_{method}.pdf'))
 
@@ -988,7 +988,7 @@ def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str]
             plt.close(hist_fig)
 
 def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
-                                 errors_list: List[Dict], labels_list: List[str],
+                                 lc_data_list: List[LoopClosureData], labels_list: List[str],
                                  group_indices: List[int],
                                  stats_list: List[Dict],
                                  results: Dict[str, Dict[str, ROMANResults]],
@@ -1016,9 +1016,10 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
         pair: Two robot names identifying this pair (e.g. ``("Husky1", "Drone1")``).
         col: Short pair label used as the table column header and in the filename
             (e.g. ``"H1D1"``).
-        errors_list: Interleaved list of all-LC and inlier-LC error dicts for
-            each run (length ``2 * len(run_names)``).
-        labels_list: Display label for each entry in ``errors_list``.
+        lc_data_list: Interleaved list of all-LC and inlier-LC LoopClosureData for
+            each run (length ``2 * len(run_names)``), each with ``calculate_errors``
+            and ``label_successful`` already called.
+        labels_list: Display label for each entry in ``lc_data_list``.
         group_indices: Group index for each entry, pairing all-LC and inlier-LC
             entries within the same run.  Must follow the pattern
             ``[0, 0, 1, 1, ..., n-1, n-1]``.
@@ -1116,9 +1117,8 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 
     # Scatter in center
     LoopClosureData.visualize_error_scatter(
-        errors_list, labels_list, group_indices=group_indices,
+        lc_data_list, labels_list, group_indices=group_indices,
         max_rotation_frac=1.0, max_translation_frac=1.0,
-        trans_err_in_target=1.0, rot_err_in_target=5.0,
         show_plots=False, ax=ax_center)
 
     # Pair name top-left in golden
@@ -1150,7 +1150,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 def _generate_lc_side_by_side_figure(
     pair: Tuple[str, str],
     col: str,
-    errors_list: List[Dict],
+    lc_data_list: List[LoopClosureData],
     labels_list: List[str],
     group_indices: List[int],
     run_names: List[str],
@@ -1167,10 +1167,11 @@ def _generate_lc_side_by_side_figure(
     Args:
         pair: Two robot names identifying this pair (e.g. ``("Husky1", "Drone1")``).
         col: Short pair label used in the filename (e.g. ``"H1D1"``).
-        errors_list: Interleaved list of all-LC and inlier-LC error dicts for each
-            run (length ``2 * len(run_names)``). Even indices are all-LC; odd are
-            inlier-LC.
-        labels_list: Display label for each entry in ``errors_list``.
+        lc_data_list: Interleaved list of all-LC and inlier-LC LoopClosureData for
+            each run (length ``2 * len(run_names)``), each with ``calculate_errors``
+            and ``label_successful`` already called. Even indices are all-LC; odd
+            are inlier-LC.
+        labels_list: Display label for each entry in ``lc_data_list``.
         group_indices: Group index per entry, following the pattern
             ``[0, 0, 1, 1, ..., n-1, n-1]``.
         run_names: Ordered list of run identifiers.
@@ -1181,11 +1182,11 @@ def _generate_lc_side_by_side_figure(
         f"group_indices must be interleaved pairs [0,0,1,1,...], "
         f"got {group_indices}, expected {expected_group_indices}")
 
-    errors_all    = errors_list[0::2]
-    labels_all    = labels_list[0::2]
-    errors_inlier = errors_list[1::2]
-    labels_inlier = [l.replace(" [Inliers]", "") for l in labels_list[1::2]]
-    inlier_masks  = [np.ones(len(e["translation_errors"]), dtype=bool) for e in errors_inlier]
+    lc_data_all    = lc_data_list[0::2]
+    labels_all     = labels_list[0::2]
+    lc_data_inlier = lc_data_list[1::2]
+    labels_inlier  = [l.replace(" [Inliers]", "") for l in labels_list[1::2]]
+    inlier_masks   = [np.ones(len(lc.results.translation_errors), dtype=bool) for lc in lc_data_inlier]
 
     fig = plt.figure(figsize=(22, 12))
     gs = gridspec.GridSpec(1, 2, figure=fig,
@@ -1196,15 +1197,13 @@ def _generate_lc_side_by_side_figure(
     ax_inlier.set_box_aspect(1)
 
     LoopClosureData.visualize_error_scatter(
-        errors_all, labels_all,
+        lc_data_all, labels_all,
         max_rotation_frac=1.0, max_translation_frac=1.0,
-        trans_err_in_target=1.0, rot_err_in_target=5.0,
         show_plots=False, ax=ax_all)
     LoopClosureData.visualize_error_scatter(
-        errors_inlier, labels_inlier,
+        lc_data_inlier, labels_inlier,
         inlier_masks=inlier_masks,
         max_rotation_frac=1.0, max_translation_frac=1.0,
-        trans_err_in_target=1.0, rot_err_in_target=5.0,
         show_plots=False, ax=ax_inlier)
 
     # Synchronize axis limits so errors are directly comparable
@@ -1383,23 +1382,25 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
             gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
 
             # Calculate LC errors and visualize
-            errors_list: List[Dict] = []
+            lc_data_list: List[LoopClosureData] = []
             labels_list: List[str] = []
             group_indices: List[int] = []
             for i, run_name in enumerate(run_names):
                 merged_lc, merged_lc_inlier = load_LC_data_ROMAN(dataset_prefix, dataset_name, run_name, list(pair), lc_filter=lc_filter)
-                errors_list.extend([merged_lc.calculate_errors(gt_dict), merged_lc_inlier.calculate_errors(gt_dict)])
+                for lc in (merged_lc, merged_lc_inlier):
+                    lc.calculate_errors(gt_dict)
+                    lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+                lc_data_list.extend([merged_lc, merged_lc_inlier])
                 labels_list.extend([run_name, run_name + " [Inliers]"])
                 group_indices.extend([i, i])
 
             _, stats = LoopClosureData.visualize_error_scatter(
-                errors_list, labels_list, group_indices=group_indices,
+                lc_data_list, labels_list, group_indices=group_indices,
                 max_rotation_frac=1.0, max_translation_frac=1.0,
-                trans_err_in_target=1.0, rot_err_in_target=5.0,
                 show_plots=False, save_path=str(subdirs['lc'] / f'lc_{col}.pdf'))
 
             fig_sr = LoopClosureData.visualize_success_rate(
-                errors_list[::2], labels_list[::2], show_plots=False,
+                lc_data_list[::2], labels_list[::2], show_plots=False,
                 max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
             fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{col}_success_rate.pdf'))
             plt.close(fig_sr)
@@ -1408,9 +1409,9 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
                 results[run_name][col].lc_stats_by_mode[lc_filter] = stats[2 * i]
                 results[run_name][col].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
-            _generate_lc_context_figure(pair, col, errors_list, labels_list, group_indices,
+            _generate_lc_context_figure(pair, col, lc_data_list, labels_list, group_indices,
                                         stats, results, run_names, subdirs['lc_with_context'])
-            _generate_lc_side_by_side_figure(pair, col, errors_list, labels_list, group_indices,
+            _generate_lc_side_by_side_figure(pair, col, lc_data_list, labels_list, group_indices,
                                              run_names, subdirs['lc_side_by_side'])
             _generate_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 

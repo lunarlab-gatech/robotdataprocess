@@ -3,7 +3,7 @@ from pathlib import Path
 from robotdataprocess import LoopClosureData, OdometryData, CoordinateFrame
 from typing import List, Union
 
-def calculate_LC_errors_maplab(dataset_name: str, file_path: Union[Path, str], robot_names: List, all_error_dicts: list):
+def calculate_LC_errors_maplab(dataset_name: str, file_path: Union[Path, str], robot_names: List, lc_data_list: list):
 
     # Load Loop Closure data (NOTE: The names override is hardcoded)
     lc_data = LoopClosureData.from_maplab_json(file_path, names_override={"3f67cb5349fea5180b00000000000000": "Husky1", "99a8765349fea5180b00000000000000": "Husky2"})
@@ -22,7 +22,9 @@ def calculate_LC_errors_maplab(dataset_name: str, file_path: Union[Path, str], r
     gt_data_dict: dict[str, OdometryData] = {robot_names[0]: gt_data_robot0, robot_names[1]: gt_data_robot1}
 
     # Calculate the errors for the loop closures
-    all_error_dicts.append(lc_data.calculate_errors(gt_data_dict))
+    lc_data.calculate_errors(gt_data_dict)
+    lc_data.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
+    lc_data_list.append(lc_data)
 
 def main():
     # ====================== ROMAN ===========================
@@ -33,11 +35,11 @@ def main():
     file_path = "/home/dbutterfield3/Downloads/lc.json"
 
     # Calculate lc errors for each run and robot pair for ROMAN
-    errors_list = []
-    calculate_LC_errors_maplab(dataset_name, file_path, robot_names, errors_list)
+    lc_data_list = []
+    calculate_LC_errors_maplab(dataset_name, file_path, robot_names, lc_data_list)
 
     # Visualize the results
-    LoopClosureData.visualize_error_scatter(errors_list, title_names, None, max_rotation_frac=1.0, max_translation_frac=1.0, trans_err_in_target=1.0, show_plots=False, rot_err_in_target=5.0, save_path='/home/dbutterfield3/Research/robotdataprocess/lc_fig.pdf')
+    LoopClosureData.visualize_error_scatter(lc_data_list, title_names, None, max_rotation_frac=1.0, max_translation_frac=1.0, show_plots=False, save_path='/home/dbutterfield3/Research/robotdataprocess/lc_fig.pdf')
 
 if __name__ == "__main__":
     main()

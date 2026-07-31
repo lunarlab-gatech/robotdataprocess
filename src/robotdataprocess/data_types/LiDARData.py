@@ -275,6 +275,7 @@ class LiDARData(SequentialData):
         if self.channels is not None:
             raise RuntimeError("Attempted to calculate channel numbers, but its already calculated!")
         laser_angles = np.linspace(v_min_angle, v_max_angle, num_channels)
+        half_spacing = (v_max_angle - v_min_angle) / (num_channels - 1) / 2.0
 
         # Initialize channels list to match point_clouds indexing
         channels: List[Optional[np.ndarray]] = [None] * len(self.point_clouds)
@@ -286,6 +287,8 @@ class LiDARData(SequentialData):
             original_indices = range(len(self.point_clouds))
 
         # Compute channels
+        num_out_of_range = 0
+        used_channels = np.zeros(num_channels, dtype=bool)
         pbar = tqdm.tqdm(total=self.len(), desc="Calculating Point Channels...", unit=" frames")
         for cropped_i, original_i in enumerate(original_indices):
             # Get point cloud
@@ -307,11 +310,31 @@ class LiDARData(SequentialData):
             # Any point where x, y, or z is NaN gets maximum uint value
             mask_invalid = np.isnan(pc).any(axis=1)
             chan[mask_invalid] = np.iinfo(np.uint16).max
+
+            # Track points whose true angle falls outside the expected [v_min_angle, v_max_angle]
+            # range by more than half a channel's spacing, and which channels get used
+            valid = ~mask_invalid
+            num_out_of_range += np.count_nonzero(
+                (vertical_angle[valid] < v_min_angle - half_spacing) |
+                (vertical_angle[valid] > v_max_angle + half_spacing)
+            )
+            used_channels[np.unique(chan[valid])] = True
+
             channels[original_i] = chan
             pbar.update()
 
         self.channels = channels
         pbar.close()
+
+        if num_out_of_range > 0:
+            print(f"Warning: {num_out_of_range} point(s) had a vertical angle outside the expected "
+                  f"[{v_min_angle}, {v_max_angle}] range (beyond half a channel's spacing). "
+                  "v_min_angle/v_max_angle may not match the sensor's actual FOV.")
+        unused_channels = np.where(~used_channels)[0]
+        if len(unused_channels) > 0:
+            print(f"Warning: Channel(s) {unused_channels.tolist()} were never assigned to any point. "
+                  "num_channels may not match the sensor's actual number of lasers, or "
+                  "v_min_angle/v_max_angle may not match its actual FOV.")
 
     def make_dense(self):
         """ Removes invalid points (infinity and NaNs) to make the point cloud dense. """

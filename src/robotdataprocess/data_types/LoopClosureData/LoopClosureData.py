@@ -4,6 +4,7 @@ from ...utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from ...utils.math_utils import interpolate_poses
 from scipy.spatial.transform import Slerp
 from ..Data import Data
+from .LoopClosureDataResult import LoopClosureDataResult
 from collections import Counter
 from decimal import Decimal
 import itertools
@@ -20,7 +21,7 @@ from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import seaborn as sns
 from typeguard import typechecked
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 class LoopClosureData(Data):
     """
@@ -34,12 +35,11 @@ class LoopClosureData(Data):
     translations: np.ndarray  # (N, 3) translation vectors
     orientations: np.ndarray  # (N, 4) quaternions in xyzw format
     num_loop_closures: int
-    detected_inliers: np.ndarray # (N,) boolean array indicating inlier loop closures
+    results: Optional[LoopClosureDataResult]  # Set by calculate_errors(); None until then.
 
     @typechecked
     def __init__(self, timestamps_a: Union[np.ndarray, list], timestamps_b: Union[np.ndarray, list],
-                 names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list],
-                 detected_inliers: Union[np.ndarray, list, None] = None):
+                 names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list]):
 
         super().__init__(frame_id="")
         self.timestamps_a = col_to_dec_arr(timestamps_a)
@@ -48,8 +48,7 @@ class LoopClosureData(Data):
         self.translations = col_to_dec_arr(translations)
         self.orientations = col_to_dec_arr(orientations)
         self.num_loop_closures = len(self.timestamps_a)
-        if detected_inliers is not None:
-            self.detected_inliers = np.array(detected_inliers, dtype=bool)
+        self.results = None
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -60,7 +59,16 @@ class LoopClosureData(Data):
                   names_override: Union[dict, None] = None) -> LoopClosureData:
         """
         Creates a LoopClosureData instance from a JSON file containing loop
-        closure alignment data.
+        closure alignment data, in the format written by :meth:`to_json`.
+
+        The JSON file is a list of objects, one per loop closure, each with:
+            - ``"seconds"``: ``[sec_a, sec_b]``, integer seconds for each
+              robot's timestamp.
+            - ``"nanoseconds"``: ``[ns_a, ns_b]``, integer nanoseconds for
+              each robot's timestamp (added to ``"seconds"``).
+            - ``"names"``: ``[name_a, name_b]``, robot names for this loop closure.
+            - ``"translation"``: ``[tx, ty, tz]``, estimated relative translation.
+            - ``"rotation"``: ``[qx, qy, qz, qw]``, estimated relative rotation quaternion.
 
         Args:
             json_path: Path to the JSON file.
@@ -104,7 +112,6 @@ class LoopClosureData(Data):
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
-            detected_inliers=None,
         )
 
     @classmethod
@@ -234,7 +241,6 @@ class LoopClosureData(Data):
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
-            detected_inliers=None,
         )
 
     @classmethod
@@ -289,7 +295,6 @@ class LoopClosureData(Data):
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
-            detected_inliers=None,
         )
 
     # =========================================================================
@@ -299,6 +304,9 @@ class LoopClosureData(Data):
     def round_timestamps(self, decimals: int):
         """
         Rounds all timestamps to the specified number of decimal places.
+        Invalidates ``self.results`` (sets it to None), since the rounding
+        shifts the timestamps used to interpolate ground truth poses and
+        could therefore change ``calculate_errors``' output.
 
         Args:
             decimals: Number of decimal places to round to.
@@ -306,6 +314,7 @@ class LoopClosureData(Data):
         quantize_val = Decimal(10) ** -decimals
         self.timestamps_a = np.array([ts.quantize(quantize_val) for ts in self.timestamps_a])
         self.timestamps_b = np.array([ts.quantize(quantize_val) for ts in self.timestamps_b])
+        self.results = None
 
     def _prune_by_mask(self, mask: np.ndarray) -> None:
         self.timestamps_a = self.timestamps_a[mask]
@@ -313,8 +322,11 @@ class LoopClosureData(Data):
         self.names = [name for name, keep in zip(self.names, mask) if keep]
         self.translations = self.translations[mask]
         self.orientations = self.orientations[mask]
-        if hasattr(self, 'detected_inliers'):
-            self.detected_inliers = self.detected_inliers[mask]
+        if self.results is not None:
+            self.results.translation_errors = self.results.translation_errors[mask]
+            self.results.rotation_errors = self.results.rotation_errors[mask]
+            if self.results.successful is not None:
+                self.results.successful = self.results.successful[mask]
         self.num_loop_closures = len(self.timestamps_a)
 
     def prune_intra_robot_loop_closures(self):
@@ -410,11 +422,12 @@ class LoopClosureData(Data):
     # ============================ Error Methods ==============================
     # =========================================================================
 
-    def calculate_errors(self, name_to_path: dict) -> dict:
+    def calculate_errors(self, name_to_path: dict) -> None:
         """
         Calculate translation and rotation errors for each loop closure by
         comparing the estimated relative transform against ground truth computed
-        from PathData trajectories.
+        from PathData trajectories. Sets ``self.results`` to a
+        :class:`LoopClosureDataResult` holding the per-loop-closure errors.
 
         The estimated loop closure provides the pose of the second robot (names[1])
         with respect to the first robot (names[0]), or H_A->B. The GT relative transform is
@@ -422,11 +435,6 @@ class LoopClosureData(Data):
 
         Args:
             name_to_path: Dict mapping robot names to their ground truth PathData.
-
-        Returns:
-            Dict with:
-                "translation_errors": (N,) float64 array of translation magnitude errors in meters.
-                "rotation_errors": (N,) float64 array of rotation angle errors in degrees.
         """
 
         # Arrays to hold the results
@@ -459,10 +467,7 @@ class LoopClosureData(Data):
             R_diff = R_rel_gt.inv() * R_est
             rotation_errors[i] = np.degrees(R_diff.magnitude())
 
-        return {
-            "translation_errors": translation_errors,
-            "rotation_errors": rotation_errors,
-        }
+        self.results = LoopClosureDataResult(translation_errors=translation_errors, rotation_errors=rotation_errors)
 
     def _get_interpolated_pose(self, name: str, timestamp: Decimal,
                                name_to_path: dict,
@@ -499,67 +504,55 @@ class LoopClosureData(Data):
 
         new_pos, new_quat = interpolate_poses(ts_float, pos_float, slerp, target)
         return new_pos[0], new_quat[0]
-    
+
+    def label_successful(self, trans_err_in_target: float, rot_err_in_target: float) -> None:
+        """
+        Labels each loop closure in ``self.results`` as successful. See
+        :meth:`LoopClosureDataResult.label_successful`. ``calculate_errors``
+        must be called first to populate ``self.results``.
+
+        Raises:
+            ValueError: If ``self.results`` is None, i.e. ``calculate_errors``
+                has not been called yet.
+        """
+        if self.results is None:
+            raise ValueError("self.results is None -- call calculate_errors() first.")
+        self.results.label_successful(trans_err_in_target, rot_err_in_target)
+
+    # =========================================================================
+    # ============================ Export Methods ==============================
+    # =========================================================================
+
+    def to_json(self, json_path: Union[Path, str]) -> None:
+        """
+        Writes this LoopClosureData to a JSON file, in the format read by
+        :meth:`from_json`.
+
+        Args:
+            json_path: Destination path for the JSON file.
+        """
+        data = []
+        for i in range(self.num_loop_closures):
+            seconds_a, remainder_a = divmod(self.timestamps_a[i], Decimal(1))
+            seconds_b, remainder_b = divmod(self.timestamps_b[i], Decimal(1))
+            nanoseconds_a = int(remainder_a * Decimal("1000000000"))
+            nanoseconds_b = int(remainder_b * Decimal("1000000000"))
+            name_a, name_b = self.names[i]
+
+            data.append({
+                "seconds": [int(seconds_a), int(seconds_b)],
+                "nanoseconds": [nanoseconds_a, nanoseconds_b],
+                "names": [name_a, name_b],
+                "translation": dec_arr_to_float_arr(self.translations[i]).tolist(),
+                "rotation": dec_arr_to_float_arr(self.orientations[i]).tolist(),
+            })
+
+        with open(str(json_path), 'w') as f:
+            json.dump(data, f, indent=4)
+
     # =========================================================================
     # ===================== Multi LoopClosureData Methods =====================
     # =========================================================================
-
-    def label_inliers_via_other_LoopClosureData(self, other: LoopClosureData) -> None:
-        """
-        Label loop closures as inliers if they are also detected in another
-        LoopClosureData instance. The ``other`` object is assumed to be a
-        subset of ``self`` — every loop closure in ``other`` must have a
-        matching entry in ``self``. A ValueError is raised if any loop closure
-        in ``other`` cannot be matched.
-
-        This modifies the detected_inliers attribute in place.
-
-        Matches are checked by name pairs, timestamps, translations, and
-        orientations. Quaternion sign ambiguity is handled: q and -q are
-        treated as equivalent.
-
-        Note: Swapped name pairs ((A,B) vs (B,A)) are NOT matched. Both
-        LoopClosureData instances must use the same robot1-to-robot2
-        convention for loop closures to be identified as inliers.
-
-        Args:
-            other: Another LoopClosureData instance that is a subset of self;
-                unaffected by this method.
-
-        Raises:
-            ValueError: If any loop closure in ``other`` is not found in
-                ``self``, violating the subset assumption.
-        """
-
-        matched_other_indices = set()
-        inliers = []
-
-        for i in range(self.num_loop_closures):
-            is_inlier = False
-            for j in range(other.num_loop_closures):
-                if (self.names[i] == other.names[j] and
-                    self.timestamps_a[i] == other.timestamps_a[j] and
-                    self.timestamps_b[i] == other.timestamps_b[j] and
-                    np.allclose(dec_arr_to_float_arr(self.translations[i]),
-                                dec_arr_to_float_arr(other.translations[j]),
-                                atol=1e-4)):
-                    q_self = dec_arr_to_float_arr(self.orientations[i])
-                    q_other = dec_arr_to_float_arr(other.orientations[j])
-                    if (np.allclose(q_self, q_other, atol=1e-4) or
-                        np.allclose(q_self, -q_other, atol=1e-4)):
-                        is_inlier = True
-                        matched_other_indices.add(j)
-                        break
-
-            inliers.append(is_inlier)
-
-        self.detected_inliers = np.array(inliers, dtype=bool)
-
-        num_matched = len(matched_other_indices)
-        if num_matched < other.num_loop_closures:
-            raise ValueError(
-                f"Only {num_matched} of {other.num_loop_closures} loop closures in other were found in self (other must be a subset of self)."
-            )
 
     @staticmethod
     def merge(loop_closures: List[LoopClosureData]) -> LoopClosureData:
@@ -582,19 +575,7 @@ class LoopClosureData(Data):
         translations = np.concatenate([lc.translations for lc in loop_closures])
         orientations = np.concatenate([lc.orientations for lc in loop_closures])
 
-        any_inliers = any(hasattr(lc, 'detected_inliers') for lc in loop_closures)
-        if any_inliers:
-            parts = []
-            for lc in loop_closures:
-                if hasattr(lc, 'detected_inliers'):
-                    parts.append(lc.detected_inliers)
-                else:
-                    parts.append(np.zeros(lc.num_loop_closures, dtype=bool))
-            detected_inliers = np.concatenate(parts)
-        else:
-            detected_inliers = None
-
-        return LoopClosureData(timestamps_a, timestamps_b, names, translations, orientations, detected_inliers)
+        return LoopClosureData(timestamps_a, timestamps_b, names, translations, orientations)
 
     # =========================================================================
     # ============================ Visualization ==============================
@@ -602,7 +583,7 @@ class LoopClosureData(Data):
 
     @staticmethod
     def visualize_success_rate(
-        errors: List[dict],
+        lc_data_list: List[LoopClosureData],
         labels: List[str],
         num_thresholds: int = 100,
         show_plots: bool = True,
@@ -623,9 +604,9 @@ class LoopClosureData(Data):
         count, rotation count, and combined count.
 
         Args:
-            errors: List of error dicts, each containing ``"translation_errors"``
-                and ``"rotation_errors"`` arrays.
-            labels: Display name for each error dict.
+            lc_data_list: LoopClosureData instances, each with ``calculate_errors``
+                already called (i.e. ``.results`` populated).
+            labels: Display name for each entry in ``lc_data_list``.
             num_thresholds: Number of evenly-spaced threshold values to evaluate.
             show_plots: If True, display the plots interactively.
             max_translation_frac: Fraction of the maximum translation error to
@@ -642,8 +623,8 @@ class LoopClosureData(Data):
             ValueError: If list lengths do not match or fraction values are out of range.
         """
 
-        if len(labels) != len(errors):
-            raise ValueError("labels must have the same length as errors")
+        if len(labels) != len(lc_data_list):
+            raise ValueError("labels must have the same length as lc_data_list")
 
         if not (0 < max_translation_frac <= 1.0):
             raise ValueError("max_translation_frac must be in (0, 1]")
@@ -661,11 +642,11 @@ class LoopClosureData(Data):
         else:
             fig, (ax3, ax4, ax6) = plt.subplots(1, 3, figsize=(30, 9))
             ax1 = ax2 = ax5 = None
-        palette = sns.color_palette("tab10", len(errors))
+        palette = sns.color_palette("tab10", len(lc_data_list))
 
         # Global maxima (fall back to a default range if there are no loop closures at all)
-        all_trans = np.concatenate([np.asarray(e["translation_errors"]) for e in errors])
-        all_rot = np.concatenate([np.asarray(e["rotation_errors"]) for e in errors])
+        all_trans = np.concatenate([np.asarray(lc.results.translation_errors) for lc in lc_data_list])
+        all_rot = np.concatenate([np.asarray(lc.results.rotation_errors) for lc in lc_data_list])
 
         max_trans = np.max(all_trans) * max_translation_frac if all_trans.size else 1.0
         max_rot = np.max(all_rot) * max_rotation_frac if all_rot.size else 1.0
@@ -673,9 +654,9 @@ class LoopClosureData(Data):
         trans_thresholds = np.linspace(0, max_trans, num_thresholds)
         rot_thresholds = np.linspace(0, max_rot, num_thresholds)
 
-        for err, label, color in zip(errors, labels, palette):
-            trans_err = np.asarray(err["translation_errors"])
-            rot_err = np.asarray(err["rotation_errors"])
+        for lc, label, color in zip(lc_data_list, labels, palette):
+            trans_err = np.asarray(lc.results.translation_errors)
+            rot_err = np.asarray(lc.results.rotation_errors)
             n = len(trans_err)
 
             trans_counts = np.array([np.sum(trans_err <= t) for t in trans_thresholds])
@@ -766,7 +747,7 @@ class LoopClosureData(Data):
     
     @staticmethod
     def visualize_error_scatter(
-        errors: List[dict],
+        lc_data_list: List[LoopClosureData],
         labels: List[str],
         inlier_masks: List[np.ndarray] = None,
         group_indices: List[int] = None,
@@ -774,8 +755,6 @@ class LoopClosureData(Data):
         save_path: str = None,
         max_translation_frac: float = 1.0,
         max_rotation_frac: float = 1.0,
-        trans_err_in_target: float = 1.0,
-        rot_err_in_target: float = 5.0,
         title: str = None,
         color_by_values: List[np.ndarray] = None,
         color_by_label: str = None,
@@ -788,12 +767,15 @@ class LoopClosureData(Data):
         loop closure. Inliers and outliers are shown with different markers.
 
         Args:
-            errors: List of error dicts, each containing ``"translation_errors"``
-                and ``"rotation_errors"`` arrays.
-            labels: Display name for each error dict.
+            lc_data_list: LoopClosureData instances, each with ``calculate_errors``
+                and ``label_successful`` already called (i.e. ``.results`` populated
+                with ``successful`` labels), all using the same
+                ``trans_err_in_target``/``rot_err_in_target``. The highlighted
+                target-box rectangle uses those shared thresholds.
+            labels: Display name for each entry in ``lc_data_list``.
             inlier_masks: Optional list of boolean arrays marking inlier loop
                 closures within each entry. Mutually exclusive with ``group_indices``.
-            group_indices: Optional list of integers (one per entry in ``errors``)
+            group_indices: Optional list of integers (one per entry in ``lc_data_list``)
                 grouping entries into pairs. Within each group, the first occurrence
                 is plotted as X markers (all loop closures) and the second as star
                 markers (inliers). Paired entries share a color. Mutually exclusive
@@ -802,12 +784,10 @@ class LoopClosureData(Data):
             save_path: If provided, save the figure to this path instead of showing.
             max_translation_frac: Fraction of max translation error for axis limit.
             max_rotation_frac: Fraction of max rotation error for axis limit.
-            trans_err_in_target: Translation error threshold for the highlighted region.
-            rot_err_in_target: Rotation error threshold for the highlighted region.
             title: Optional plot title.
             color_by_values: Optional list of per-loop-closure numeric arrays (one per
-                entry in ``errors``). When provided, points are colored by their value
-                using a sequential colormap instead of by label.
+                entry in ``lc_data_list``). When provided, points are colored by their
+                value using a sequential colormap instead of by label.
             color_by_label: Label for the colorbar shown when ``color_by_values`` is set.
             ax: Optional existing ``Axes`` to draw into. When provided the scatter is
                 rendered directly into that axes (which must belong to an already-created
@@ -823,13 +803,14 @@ class LoopClosureData(Data):
         Returns:
             Tuple of (matplotlib Figure, list of stats dicts). Each stats dict contains
             ``"label"``, ``"success_rate"``, ``"num_successful_loop_closures"``, and
-            ``"num_loop_closures"`` for one entry in ``errors``. When ``ax`` is provided
-            the returned Figure is the caller-owned figure that ``ax`` belongs to.
+            ``"num_loop_closures"`` for one entry in ``lc_data_list``. When ``ax`` is
+            provided the returned Figure is the caller-owned figure that ``ax`` belongs to.
 
         Raises:
             ValueError: If list lengths do not match, fraction values are out of range,
-                both ``inlier_masks`` and ``group_indices`` are provided, or ``ax`` is
-                provided alongside ``show_plots`` or ``save_path``.
+                both ``inlier_masks`` and ``group_indices`` are provided, ``ax`` is
+                provided alongside ``show_plots`` or ``save_path``, or the entries in
+                ``lc_data_list`` don't share the same ``trans_err_in_target``/``rot_err_in_target``.
             RuntimeError: If both ``show_plots`` and ``save_path`` are set.
         """
 
@@ -839,14 +820,14 @@ class LoopClosureData(Data):
         if ax is not None and (show_plots or save_path is not None):
             raise ValueError("ax is mutually exclusive with show_plots and save_path — the caller owns the figure")
 
-        if len(labels) != len(errors):
-            raise ValueError("labels must have the same length as errors")
+        if len(labels) != len(lc_data_list):
+            raise ValueError("labels must have the same length as lc_data_list")
 
-        if inlier_masks is not None and len(inlier_masks) != len(errors):
-            raise ValueError("inlier_masks must have the same length as errors")
+        if inlier_masks is not None and len(inlier_masks) != len(lc_data_list):
+            raise ValueError("inlier_masks must have the same length as lc_data_list")
 
-        if group_indices is not None and len(group_indices) != len(errors):
-            raise ValueError("group_indices must have the same length as errors")
+        if group_indices is not None and len(group_indices) != len(lc_data_list):
+            raise ValueError("group_indices must have the same length as lc_data_list")
 
         if group_indices is not None:
             counts = Counter(group_indices)
@@ -854,14 +835,27 @@ class LoopClosureData(Data):
             if over:
                 raise ValueError(f"Each group index may appear at most twice; found >2 occurrences for: {over}")
 
-        if color_by_values is not None and len(color_by_values) != len(errors):
-            raise ValueError("color_by_values must have the same length as errors")
+        if color_by_values is not None and len(color_by_values) != len(lc_data_list):
+            raise ValueError("color_by_values must have the same length as lc_data_list")
 
         if not (0 < max_translation_frac <= 1.0):
             raise ValueError("max_translation_frac must be in (0, 1]")
 
         if not (0 < max_rotation_frac <= 1.0):
             raise ValueError("max_rotation_frac must be in (0, 1]")
+
+        trans_err_in_target: float = lc_data_list[0].results.trans_err_in_target
+        rot_err_in_target: float = lc_data_list[0].results.rot_err_in_target
+        mismatched: List[int] = []
+        for i, lc in enumerate(lc_data_list):
+            if lc.results.trans_err_in_target != trans_err_in_target or lc.results.rot_err_in_target != rot_err_in_target:
+                mismatched.append(i)
+        if mismatched:
+            raise ValueError(
+                f"All entries in lc_data_list must share the same trans_err_in_target/rot_err_in_target "
+                f"(from label_successful); entries at indices {mismatched} don't match entry 0's "
+                f"({trans_err_in_target}, {rot_err_in_target})."
+            )
 
         using_group_indices = group_indices is not None
         if group_indices is not None:
@@ -875,16 +869,16 @@ class LoopClosureData(Data):
             group_occurrence: dict = {}
             is_inlier_entry = []
             inlier_masks = []
-            for err, gi in zip(errors, group_indices):
+            for lc, gi in zip(lc_data_list, group_indices):
                 occ = group_occurrence.get(gi, 0)
                 group_occurrence[gi] = occ + 1
-                n = len(np.asarray(err["translation_errors"]))
+                n = len(np.asarray(lc.results.translation_errors))
                 is_inlier_entry.append(occ >= 1)
                 inlier_masks.append(np.ones(n, dtype=bool) if occ >= 1 else np.zeros(n, dtype=bool))
         else:
-            is_inlier_entry = [False] * len(errors)
+            is_inlier_entry = [False] * len(lc_data_list)
             if inlier_masks is None:
-                inlier_masks = [None] * len(errors)
+                inlier_masks = [None] * len(lc_data_list)
 
         sns.set_theme(style="whitegrid", context="talk", palette="tab10")
         sns.set_context("poster", font_scale=1.0)
@@ -898,11 +892,11 @@ class LoopClosureData(Data):
             group_palette = sns.color_palette("bright", len(seen_groups))
             palette = [group_palette[seen_groups[gi]] for gi in group_indices]
         else:
-            palette = sns.color_palette("bright", len(errors))
+            palette = sns.color_palette("bright", len(lc_data_list))
 
         # Collect all translation and rotation errors
-        all_trans = np.concatenate([np.asarray(e["translation_errors"]) for e in errors])
-        all_rot = np.concatenate([np.asarray(e["rotation_errors"]) for e in errors])
+        all_trans = np.concatenate([np.asarray(lc.results.translation_errors) for lc in lc_data_list])
+        all_rot = np.concatenate([np.asarray(lc.results.rotation_errors) for lc in lc_data_list])
 
         # Apply max fraction
         if all_trans.size > 0:
@@ -932,13 +926,12 @@ class LoopClosureData(Data):
 
         legend_handles = []
         stats_list = []
-        for idx, (err, label, color, inlier_mask) in enumerate(zip(errors, labels, palette, inlier_masks)):
-            trans_err = np.asarray(err["translation_errors"])
-            rot_err = np.asarray(err["rotation_errors"])
+        for idx, (lc, label, color, inlier_mask) in enumerate(zip(lc_data_list, labels, palette, inlier_masks)):
+            trans_err = np.asarray(lc.results.translation_errors)
+            rot_err = np.asarray(lc.results.rotation_errors)
 
             # 1. Calculate how many points fall inside the highlighted square
-            in_box_mask = (trans_err <= trans_err_in_target) & (rot_err <= rot_err_in_target)
-            num_in_box = np.sum(in_box_mask)
+            num_in_box = np.sum(lc.results.successful)
             total_points = len(trans_err)
 
             # Avoid division by zero if a list is empty
@@ -997,8 +990,8 @@ class LoopClosureData(Data):
             #print(f"{tag}{label} ({percent_in_box:.1f}% ({num_in_box}/{total_points}) in target)")
             #if not using_group_indices:
                 #print(f"Number of inliers for {label}: {num_inliers}")
-            if color_by_values is not None and np.any(in_box_mask):
-                cbv_in_box = np.asarray(color_by_values[idx], dtype=float)[in_box_mask]
+            if color_by_values is not None and np.any(lc.results.successful):
+                cbv_in_box = np.asarray(color_by_values[idx], dtype=float)[lc.results.successful]
                 #print(f"Min {color_by_label or 'color_by'} in target box for {label}: {np.nanmin(cbv_in_box)}")
             if color_by_values is None and not is_inlier_entry[idx]:
                 legend_handles.append(Patch(facecolor=color, edgecolor='none', label=label))

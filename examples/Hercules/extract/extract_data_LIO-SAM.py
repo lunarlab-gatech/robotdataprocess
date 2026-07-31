@@ -37,10 +37,13 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.4.F"
+    dataset_num = "SmallTownSequence"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_names = ["Husky1"]
+
+    # Define robot name to index mapping
+    robot_name_to_index = {"Husky1": 0, "Husky2": 1, "Drone1": 2, "Drone2": 3}
 
     # LIO-SAM starts from zero as it desires static initialization
     if dataset_num == "V2.4.C":
@@ -55,19 +58,18 @@ def main():
     elif dataset_num == "V2.4.F":
         robot_crop_start_times = [Decimal('35.05'), Decimal('34.60'), Decimal('27.45'), Decimal('31.50')]
         robot_crop_end_times = [Decimal('575.55'), Decimal('762.35'), Decimal('898.10'), Decimal('906.85')]
+    elif dataset_num == "SmallTownSequence":
+        robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+        robot_crop_end_times = [None, None, None, None]
     else:
         raise ValueError("Crop times not specified for this dataset number.")
 
-    # Check validity of inputs
-    assert len(robot_names) == len(robot_crop_end_times)
-    num_robots = len(robot_names)
-
     # Run extraction for each robot
-    for i in range(num_robots):
+    for i in range(len(robot_names)):
         to_bag(input_dir=input_dir,
                robot_name=robot_names[i],
-               start_time=robot_crop_start_times[i],
-               end_time=robot_crop_end_times[i])
+               start_time=robot_crop_start_times[robot_name_to_index[robot_names[i]]],
+               end_time=robot_crop_end_times[robot_name_to_index[robot_names[i]]])
         
 if __name__ == "__main__":
     main()

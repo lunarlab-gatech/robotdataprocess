@@ -24,13 +24,12 @@ class LoopClosureDataROMAN(LoopClosureData):
     @typechecked
     def __init__(self, timestamps_a: Union[np.ndarray, list], timestamps_b: Union[np.ndarray, list],
                  names: List[Tuple[str, str]], translations: Union[np.ndarray, list], orientations: Union[np.ndarray, list],
-                 detected_inliers: Union[np.ndarray, list, None] = None,
                  clipper_num_associations: Union[np.ndarray, list, None] = None,
                  n_reg_corrs: Union[np.ndarray, list, None] = None,
                  n_syn_corrs: Union[np.ndarray, list, None] = None,
                  n_overlapping_init: Union[np.ndarray, list, None] = None):
 
-        super().__init__(timestamps_a, timestamps_b, names, translations, orientations, detected_inliers)
+        super().__init__(timestamps_a, timestamps_b, names, translations, orientations)
         self.clipper_num_associations = np.array(clipper_num_associations, dtype=np.int64) if clipper_num_associations is not None else None
         self.n_reg_corrs = np.array(n_reg_corrs, dtype=np.int64) if n_reg_corrs is not None else None
         self.n_syn_corrs = np.array(n_syn_corrs, dtype=np.int64) if n_syn_corrs is not None else None
@@ -71,7 +70,6 @@ class LoopClosureDataROMAN(LoopClosureData):
             names=base.names,
             translations=base.translations,
             orientations=base.orientations,
-            detected_inliers=getattr(base, 'detected_inliers', None),
             clipper_num_associations=_opt_arr(clipper_num_associations),
             n_reg_corrs=_opt_arr(n_reg_corrs),
             n_syn_corrs=_opt_arr(n_syn_corrs),
