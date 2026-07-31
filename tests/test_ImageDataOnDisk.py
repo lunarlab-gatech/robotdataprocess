@@ -137,6 +137,20 @@ class TestImageDataOnDisk(unittest.TestCase):
         mono_converted_back = cv2.cvtColor(bgr_from_mono, cv2.COLOR_BGR2GRAY)
         np.testing.assert_array_equal(original_mono_image, mono_converted_back)
 
+        # Test conversion from Mono8 to RGB8
+        mono_image_data_rgb = ImageDataOnDisk.from_image_files(mono_folder, 'optical')
+        self.assertEqual(mono_image_data_rgb.encoding, ImageData.ImageEncoding.Mono8)
+        original_mono_image_rgb = mono_image_data_rgb.images[0]
+
+        mono_image_data_rgb.to_encoding(ImageData.ImageEncoding.RGB8)
+        self.assertEqual(mono_image_data_rgb.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(mono_image_data_rgb.images.transformations), 1)
+
+        rgb_from_mono = mono_image_data_rgb.images[0]
+        self.assertEqual(rgb_from_mono.shape, (100, 100, 3))
+        mono_converted_back_rgb = cv2.cvtColor(rgb_from_mono, cv2.COLOR_RGB2GRAY)
+        np.testing.assert_array_equal(original_mono_image_rgb, mono_converted_back_rgb)
+
     def test_from_npy_files(self):
         """ Test loading 32FC1 npy files from disk matches ImageDataInMemory. """
         folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_npy_files', '32fc1').absolute()
