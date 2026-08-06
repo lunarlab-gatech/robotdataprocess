@@ -120,7 +120,7 @@ class ROMANResults:
         robot0_metrics: Post-optimize trajectory error metrics for the first robot,
             computed by separating the merged aligned trajectory back apart.
         robot1_metrics: Post-optimize trajectory error metrics for the second robot.
-        timing: Runtime breakdown (``{"align": seconds, "offline_rpgo": seconds}``),
+        timing: Runtime breakdown (``{"align": seconds, "mapping": seconds, "offline_rpgo": seconds}``),
             or None if the runtime files were unavailable.
         data_size_mb: Estimated communication data size in decimal MB, or None
             if the data size file was unavailable.
@@ -255,34 +255,38 @@ def load_timing_data_ROMAN(dataset_prefix: str, dataset_name: str, method: str, 
     Load the runtime (s) breakdown for a ROMAN run on a robot pair.
 
     Reads the per-pair alignment runtimes (``align/runtime.txt``, one
-    ``"key: value"`` line per intra-/inter-robot combination) and the offline
-    RPGO optimization runtime (``offline_rpgo/runtime.txt``, a single value on
-    its last non-empty line), kept separate so callers can report or combine
-    them as needed.
+    ``"key: value"`` line per intra-/inter-robot combination), the per-robot
+    mapping runtimes (``map/runtime.txt``, one ``"key: value"`` line per
+    robot), and the offline RPGO optimization runtime
+    (``offline_rpgo/runtime.txt``, a single value on its last non-empty
+    line), kept separate so callers can report or combine them as needed.
 
     Returns:
-        Dict with keys ``"align"`` (sum of the alignment runtimes) and
-        ``"offline_rpgo"``, or ``None`` if either runtime file is missing or
-        empty.
+        Dict with keys ``"align"`` (sum of the alignment runtimes),
+        ``"mapping"`` (sum of the mapping runtimes), and ``"offline_rpgo"``,
+        or ``None`` if any runtime file is missing or empty.
     """
     user = getpass.getuser()
     run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method + '/' + \
                       (robot_names[0] + '_' + robot_names[1]))
 
     align_runtime_path = run_folder / 'align' / 'runtime.txt'
+    mapping_runtime_path = run_folder / 'map' / 'runtime.txt'
     rpgo_runtime_path = run_folder / 'offline_rpgo' / 'runtime.txt'
-    if not align_runtime_path.exists() or not rpgo_runtime_path.exists():
+    if not align_runtime_path.exists() or not mapping_runtime_path.exists() or not rpgo_runtime_path.exists():
         return None
 
     align_lines = [line.strip() for line in align_runtime_path.read_text().splitlines() if line.strip()]
+    mapping_lines = [line.strip() for line in mapping_runtime_path.read_text().splitlines() if ':' in line]
     rpgo_lines = [line.strip() for line in rpgo_runtime_path.read_text().splitlines() if line.strip()]
-    if not align_lines or not rpgo_lines:
+    if not align_lines or not mapping_lines or not rpgo_lines:
         return None
 
     align_total = sum(float(line.split(':')[-1]) for line in align_lines)
+    mapping_total = sum(float(line.split(':')[-1]) for line in mapping_lines)
     rpgo_total = float(rpgo_lines[-1])
 
-    return {"align": align_total, "offline_rpgo": rpgo_total}
+    return {"align": align_total, "mapping": mapping_total, "offline_rpgo": rpgo_total}
 
 
 def load_data_size_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> float:
@@ -675,7 +679,8 @@ def _save_timing_table(run_names: List[str], cols: List[str],
     Build and save the runtime summary PDF table.
 
     Produces one table per run and robot pair for each of the alignment
-    runtime, the offline RPGO runtime, and their per-pair total.
+    runtime, the mapping runtime, the offline RPGO runtime, and their
+    per-pair total.
 
     Args:
         run_names: Ordered list of run identifiers.
@@ -689,19 +694,27 @@ def _save_timing_table(run_names: List[str], cols: List[str],
         result = results[run].get(col)
         entry = result.timing if result is not None else None
         if key == "total":
-            return None if entry is None else entry["align"] + entry["offline_rpgo"]
+            return None if entry is None else entry["align"] + entry["mapping"] + entry["offline_rpgo"]
         return None if entry is None else entry[key]
 
     def make_raw_df(key: str) -> pd.DataFrame:
         def value_fn(run, col):
             v = get_val(run, col, key)
             return float('nan') if v is None else v
-        return _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
+        raw_df = _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
+        raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
+        return raw_df
 
-    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
+    style = TableData.TableStyleName.OVIEDO_HIGH_SCHOOL
+    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
     fmt = TableData.fmt_fixed(1)
+    # The trailing "Average" column is a summary column, not another pair —
+    # set it off from the pair columns with a heavy divider.
+    heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
     dfs = [
+        make_highlighted_table(make_raw_df("mapping"), "Mapping Runtime (s)",
+                       color_fn=color_fn, fmt=fmt, higher_is_better=False),
         make_highlighted_table(make_raw_df("align"), "Alignment Runtime (s)",
                        color_fn=color_fn, fmt=fmt, higher_is_better=False),
         make_highlighted_table(make_raw_df("offline_rpgo"), "Offline RPGO Runtime (s)",
@@ -710,7 +723,8 @@ def _save_timing_table(run_names: List[str], cols: List[str],
                        color_fn=color_fn, fmt=fmt, higher_is_better=False),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=style,
+                      heavy_divider_before=heavy_divider_before)
 
 
 def _save_data_size_table(run_names: List[str], cols: List[str],
@@ -736,15 +750,22 @@ def _save_data_size_table(run_names: List[str], cols: List[str],
             result = results[run].get(col)
             v = result.data_size_mb if result is not None else None
             return float('nan') if v is None else v
-        return _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
+        raw_df = _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
+        raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
+        return raw_df
 
-    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
+    style = TableData.TableStyleName.TONI_KENSA
+    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
     fmt = TableData.fmt_fixed(2)
+    # The trailing "Average" column is a summary column, not another pair —
+    # set it off from the pair columns with a heavy divider.
+    heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
     data_size_table = make_highlighted_table(make_raw_df(), "Estimated Communication Data Size (MB)",
                          color_fn=color_fn, fmt=fmt, higher_is_better=False)
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf([data_size_table], str(save_path), row_height=2.4, h_pad=0.5)
+    TableData.to_pdf([data_size_table], str(save_path), row_height=2.4, h_pad=0.5, style=style,
+                      heavy_divider_before=heavy_divider_before)
     data_size_table.to_latex(str(save_path.with_suffix('.tex')),
                               caption="Estimated Communication Data Size (MB)", label="tab:data_size")
 
@@ -1327,9 +1348,11 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
 
     # Define mapping between run name and display name
     run_display_names = {
-        "ROMAN": "ROMAN",
+        "ROMAN": "ROMAN (HERCULES replication)",
+        "ROMAN_O": "ROMAN",
         "ROMAN_NM": "NM + ROMAN",
-        "MG": "MeronomyGraph",
+        "MG": "MeronomyGraph (No Global MeronomyGraph)",
+        "MG_NONM_O3_GB": "MeronomyGraph"
     }
 
     # Calculate RMS ATE

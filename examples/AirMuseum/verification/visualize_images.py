@@ -7,8 +7,8 @@ from robotdataprocess.data_types.ImageData.ImageData import ImageData
 
 def main():
 
-    scenario: str = "Scenario3"
-    robot_name: str = "drone"
+    scenario: str = "Scenario5"
+    robot_name: str = "robotA"
     frame_skip: int = 5
     bag_path: Path = Path('/media') / getuser() / 'T73' / 'AirMuseum_dataset' / scenario / 'data' / robot_name / 'cam100_imu.bag'
     image_data = ImageDataOnDisk.from_ros1_bag(bag_path, f'/{robot_name}/cam100/image_raw')

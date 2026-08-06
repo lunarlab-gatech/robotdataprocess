@@ -1096,6 +1096,17 @@ class TestPruneIntraRobotLoopClosures(unittest.TestCase):
         self.assertEqual(len(lc.timestamps_a), 0)
         self.assertEqual(len(lc.translations), 0)
 
+    def test_empty_input_is_noop(self):
+        """When there are no loop closures at all, nothing changes (regression: an
+        empty mask defaults to dtype=float64, which can't be used to index)."""
+        lc = self._make_lc([])
+        lc.prune_intra_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 0)
+        self.assertEqual(lc.names, [])
+        self.assertEqual(len(lc.timestamps_a), 0)
+        self.assertEqual(len(lc.translations), 0)
+
 
 class TestPruneInterRobotLoopClosures(unittest.TestCase):
     """Test prune_inter_robot_loop_closures method."""
@@ -1148,6 +1159,17 @@ class TestPruneInterRobotLoopClosures(unittest.TestCase):
     def test_all_inter_robot_gives_empty(self):
         """When all loop closures are inter-robot, the result is empty."""
         lc = self._make_lc([("A", "B"), ("B", "C")])
+        lc.prune_inter_robot_loop_closures()
+
+        self.assertEqual(lc.num_loop_closures, 0)
+        self.assertEqual(lc.names, [])
+        self.assertEqual(len(lc.timestamps_a), 0)
+        self.assertEqual(len(lc.translations), 0)
+
+    def test_empty_input_is_noop(self):
+        """When there are no loop closures at all, nothing changes (regression: an
+        empty mask defaults to dtype=float64, which can't be used to index)."""
+        lc = self._make_lc([])
         lc.prune_inter_robot_loop_closures()
 
         self.assertEqual(lc.num_loop_closures, 0)

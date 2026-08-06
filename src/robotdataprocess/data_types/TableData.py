@@ -94,6 +94,8 @@ class TableData:
         GEORGIA_TECH = "GeorgiaTech"
         BRIGHAM_YOUNG_UNIVERSITY = "BrighamYoungUniversity"
         LATEX = "Latex"
+        TONI_KENSA = "ToniKensa"
+        OVIEDO_HIGH_SCHOOL = "OviedoHighSchool"
 
     @dataclass(frozen=True)
     class TableStyle():
@@ -106,7 +108,7 @@ class TableData:
 
     @staticmethod
     def get_table_style(style: TableData.TableStyleName) -> TableData.TableStyle:
-        """Return the TableStyle for a named style. Only ``GEORGIA_TECH`` is currently supported."""
+        """Return the TableStyle for a named style."""
         if style is TableData.TableStyleName.GEORGIA_TECH:
             return TableData.TableStyle(
                 HeaderColor='#B5A060', HeaderTextColor='#FFFFFF', TextColor='#1A3055', TextFailureColor='#CC2222',
@@ -121,6 +123,16 @@ class TableData:
             return TableData.TableStyle(
                 HeaderColor=None, HeaderTextColor=None, TextColor=None, TextFailureColor='#CC2222',
                 RowColors=None,
+            )
+        elif style is TableData.TableStyleName.TONI_KENSA:
+            return TableData.TableStyle(
+                HeaderColor="#404040", HeaderTextColor='#FFFFFF', TextColor='#1A1A1A', TextFailureColor='#D2001F',
+                RowColors=("#E7E7E7", "#D8D8D8"),
+            )
+        elif style is TableData.TableStyleName.OVIEDO_HIGH_SCHOOL:
+            return TableData.TableStyle(
+                HeaderColor="#C87F36", HeaderTextColor="#FFFFFF", TextColor='#141414', TextFailureColor='#CC2222',
+                RowColors=("#FFEFDC", '#FCE0C0'),
             )
         else:
             raise ValueError(f"Unsupported table style: {style}")

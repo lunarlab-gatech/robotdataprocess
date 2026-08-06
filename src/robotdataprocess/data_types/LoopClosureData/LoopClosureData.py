@@ -21,7 +21,7 @@ from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import seaborn as sns
 from typeguard import typechecked
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 class LoopClosureData(Data):
     """
@@ -49,6 +49,25 @@ class LoopClosureData(Data):
         self.orientations = col_to_dec_arr(orientations)
         self.num_loop_closures = len(self.timestamps_a)
         self.results = None
+
+    @staticmethod
+    def _canonical_lc_key(name_pair: Tuple[str, str], ts_a: Decimal, ts_b: Decimal) -> Tuple[str, str, Decimal, Decimal]:
+        """
+        Builds a key identifying a loop closure by its name pair and timestamp
+        pair, treating swapped pairs as identical -- i.e. ``(A, B, ts_a, ts_b)``
+        and ``(B, A, ts_b, ts_a)`` produce the same key. The pair with the
+        smaller ``(name, timestamp)`` tuple is always placed first.
+
+        Args:
+            name_pair: The ``(name_a, name_b)`` robot names for this loop closure.
+            ts_a: Timestamp for ``name_a``.
+            ts_b: Timestamp for ``name_b``.
+
+        Returns:
+            A canonical ``(name_a, name_b, ts_a, ts_b)`` tuple.
+        """
+        na, nb = name_pair
+        return (na, nb, ts_a, ts_b) if (na, ts_a) <= (nb, ts_b) else (nb, na, ts_b, ts_a)
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -334,7 +353,7 @@ class LoopClosureData(Data):
         Removes loop closures where both names in the pair are the same,
         i.e. intra-robot loop closures. Modifies the instance in place.
         """
-        mask = np.array([name_a != name_b for name_a, name_b in self.names])
+        mask = np.array([name_a != name_b for name_a, name_b in self.names], dtype=bool)
         self._prune_by_mask(mask)
 
     def prune_inter_robot_loop_closures(self):
@@ -342,13 +361,8 @@ class LoopClosureData(Data):
         Removes loop closures where the two names in the pair differ,
         i.e. inter-robot loop closures. Modifies the instance in place.
         """
-        mask = np.array([name_a == name_b for name_a, name_b in self.names])
+        mask = np.array([name_a == name_b for name_a, name_b in self.names], dtype=bool)
         self._prune_by_mask(mask)
-
-    @staticmethod
-    def _canonical_lc_key(name_pair: tuple[str, str], ts_a: Decimal, ts_b: Decimal):
-        na, nb = name_pair
-        return (na, nb, ts_a, ts_b) if (na, ts_a) <= (nb, ts_b) else (nb, na, ts_b, ts_a)
 
     def _lc_transform_in_canonical_order(self, i: int, key: tuple) -> Tuple[np.ndarray, R]:
         t = dec_arr_to_float_arr(self.translations[i])
@@ -359,47 +373,6 @@ class LoopClosureData(Data):
         # in the same direction as the canonical (non-swapped) entries.
         rot_inv = rot.inv()
         return rot_inv.apply(-t), rot_inv
-
-    def print_duplicate_info(self, label: str = "") -> None:
-        """
-        Print the number of duplicate loop closures in this instance. Two loop
-        closures are considered duplicates if they share the same name pair and
-        timestamp pair, treating swapped pairs as identical — i.e.
-        ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same LC. Also
-        prints the average pairwise translation and rotation difference between
-        the transformations of duplicate loop closures (swapped duplicates are
-        inverted first so they're compared in the same direction).
-
-        Args:
-            label: Optional prefix printed before the stats (e.g. the dataset
-                or run name) to distinguish output when called multiple times.
-        """
-        keys = [self._canonical_lc_key(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
-                for i in range(self.num_loop_closures)]
-        counts = Counter(keys)
-        num_dupes = sum(c - 1 for c in counts.values() if c > 1)
-        num_unique = self.num_loop_closures - num_dupes
-
-        groups: dict = {}
-        for i, key in enumerate(keys):
-            groups.setdefault(key, []).append(i)
-
-        translation_diffs = []
-        rotation_diffs = []
-        for key, idxs in groups.items():
-            if len(idxs) < 2:
-                continue
-            transforms = [self._lc_transform_in_canonical_order(i, key) for i in idxs]
-            for (t1, rot1), (t2, rot2) in itertools.combinations(transforms, 2):
-                translation_diffs.append(np.linalg.norm(t1 - t2))
-                rotation_diffs.append(np.degrees((rot1.inv() * rot2).magnitude()))
-
-        prefix = f"{label}: " if label else ""
-        msg = f"{prefix}{self.num_loop_closures} total loop closures, {num_dupes} duplicates ({num_unique} if deduplicated)"
-        if translation_diffs:
-            msg += (f", avg duplicate transform diff: {np.mean(translation_diffs):.4f} m, "
-                    f"{np.mean(rotation_diffs):.4f} deg")
-        print(msg)
 
     def prune_duplicates(self):
         """
@@ -421,6 +394,42 @@ class LoopClosureData(Data):
     # =========================================================================
     # ============================ Error Methods ==============================
     # =========================================================================
+
+    def _get_interpolated_pose(self, name: str, timestamp: Decimal,
+                                name_to_path: dict,
+                                cache: dict) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get an interpolated pose for a robot at a specific timestamp.
+        Uses a cache (keyed by robot name) to avoid redundant conversion of
+        PathData to float arrays and to reuse pre-built Slerp objects across
+        repeated calls for the same robot.
+
+        Returns:
+            pos: (3,) float64 position
+            quat: (4,) float64 quaternion in xyzw
+        """
+        if name not in name_to_path or name_to_path[name] is None:
+            raise ValueError(f"Robot name '{name}' not found in name_to_path dict.")
+
+        # Cache float arrays and pre-built Slerp object per robot
+        if name not in cache:
+            pathData: PathData = name_to_path[name]
+            ts_float = dec_arr_to_float_arr(pathData.timestamps)
+            pos_float = dec_arr_to_float_arr(pathData.positions)
+            quat_float = dec_arr_to_float_arr(pathData.orientations)
+            slerp = Slerp(ts_float, R.from_quat(quat_float))
+            cache[name] = (ts_float, pos_float, slerp)
+
+        ts_float, pos_float, slerp = cache[name]
+
+        # Clip the target timestamp (to be robust when baselines assume submaps start at t=0)
+        target = np.clip(
+            np.array([float(timestamp)], dtype=np.float64),
+            ts_float[0], ts_float[-1],
+        )
+
+        new_pos, new_quat = interpolate_poses(ts_float, pos_float, slerp, target)
+        return new_pos[0], new_quat[0]
 
     def calculate_errors(self, name_to_path: dict) -> None:
         """
@@ -469,42 +478,6 @@ class LoopClosureData(Data):
 
         self.results = LoopClosureDataResult(translation_errors=translation_errors, rotation_errors=rotation_errors)
 
-    def _get_interpolated_pose(self, name: str, timestamp: Decimal,
-                               name_to_path: dict,
-                               cache: dict) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Get an interpolated pose for a robot at a specific timestamp.
-        Uses a cache (keyed by robot name) to avoid redundant conversion of
-        PathData to float arrays and to reuse pre-built Slerp objects across
-        repeated calls for the same robot.
-
-        Returns:
-            pos: (3,) float64 position
-            quat: (4,) float64 quaternion in xyzw
-        """
-        if name not in name_to_path or name_to_path[name] is None:
-            raise ValueError(f"Robot name '{name}' not found in name_to_path dict.")
-
-        # Cache float arrays and pre-built Slerp object per robot
-        if name not in cache:
-            pathData: PathData = name_to_path[name]
-            ts_float = dec_arr_to_float_arr(pathData.timestamps)
-            pos_float = dec_arr_to_float_arr(pathData.positions)
-            quat_float = dec_arr_to_float_arr(pathData.orientations)
-            slerp = Slerp(ts_float, R.from_quat(quat_float))
-            cache[name] = (ts_float, pos_float, slerp)
-
-        ts_float, pos_float, slerp = cache[name]
-
-        # Clip the target timestamp (to be robust when baselines assume submaps start at t=0)
-        target = np.clip(
-            np.array([float(timestamp)], dtype=np.float64),
-            ts_float[0], ts_float[-1],
-        )
-
-        new_pos, new_quat = interpolate_poses(ts_float, pos_float, slerp, target)
-        return new_pos[0], new_quat[0]
-
     def label_successful(self, trans_err_in_target: float, rot_err_in_target: float) -> None:
         """
         Labels each loop closure in ``self.results`` as successful. See
@@ -518,6 +491,114 @@ class LoopClosureData(Data):
         if self.results is None:
             raise ValueError("self.results is None -- call calculate_errors() first.")
         self.results.label_successful(trans_err_in_target, rot_err_in_target)
+
+    # =========================================================================
+    # ========================= Verification Methods ==========================
+    # =========================================================================
+
+    def print_duplicate_info(self, label: str = "") -> None:
+        """
+        Print the number of duplicate loop closures in this instance. Two loop
+        closures are considered duplicates if they share the same name pair and
+        timestamp pair, treating swapped pairs as identical — i.e.
+        ``(A, B, ts_a, ts_b)`` and ``(B, A, ts_b, ts_a)`` are the same LC. Also
+        prints the average pairwise translation and rotation difference between
+        the transformations of duplicate loop closures (swapped duplicates are
+        inverted first so they're compared in the same direction).
+
+        Args:
+            label: Optional prefix printed before the stats (e.g. the dataset
+                or run name) to distinguish output when called multiple times.
+        """
+        keys = [self._canonical_lc_key(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
+                for i in range(self.num_loop_closures)]
+        counts = Counter(keys)
+        num_dupes = sum(c - 1 for c in counts.values() if c > 1)
+        num_unique = self.num_loop_closures - num_dupes
+
+        groups: dict = {}
+        for i, key in enumerate(keys):
+            groups.setdefault(key, []).append(i)
+
+        translation_diffs = []
+        rotation_diffs = []
+        for key, idxs in groups.items():
+            if len(idxs) < 2:
+                continue
+            transforms = [self._lc_transform_in_canonical_order(i, key) for i in idxs]
+            for (t1, rot1), (t2, rot2) in itertools.combinations(transforms, 2):
+                translation_diffs.append(np.linalg.norm(t1 - t2))
+                rotation_diffs.append(np.degrees((rot1.inv() * rot2).magnitude()))
+
+        prefix = f"{label}: " if label else ""
+        msg = f"{prefix}{self.num_loop_closures} total loop closures, {num_dupes} duplicates ({num_unique} if deduplicated)"
+        if translation_diffs:
+            msg += (f", avg duplicate transform diff: {np.mean(translation_diffs):.4f} m, "
+                    f"{np.mean(rotation_diffs):.4f} deg")
+        print(msg)
+
+    def print_successful_lc_diff(self, other: LoopClosureData, self_label: str = "self", other_label: str = "other") -> None:
+        """
+        For each loop closure labeled successful in this instance, checks whether
+        a loop closure with the same name pair and timestamp pair (see
+        :meth:`_canonical_lc_key`) exists in ``other``, and prints why it isn't
+        also successful there: missing entirely, or present but over the
+        translation/rotation error threshold.
+
+        Both this instance and ``other`` must already have ``label_successful``
+        called (i.e. ``self.results.successful`` populated).
+
+        Args:
+            other: The LoopClosureData instance to compare against.
+            self_label: Label for this instance, used in printed messages.
+            other_label: Label for ``other``, used in printed messages.
+
+        Raises:
+            ValueError: If either instance's ``self.results.successful`` is None.
+        """
+        if self.results is None or self.results.successful is None:
+            raise ValueError(f"{self_label}: self.results.successful is None -- call label_successful() first.")
+        if other.results is None or other.results.successful is None:
+            raise ValueError(f"{other_label}: other.results.successful is None -- call label_successful() first.")
+
+        # Build lookup: canonical (name_a, name_b, ts_a, ts_b) key -> other index
+        lc_key_to_other_idx: Dict[Tuple[str, str, Decimal, Decimal], int] = {
+            other._canonical_lc_key(other.names[i], other.timestamps_a[i], other.timestamps_b[i]): i
+            for i in range(other.num_loop_closures)
+        }
+
+        # Iterate through successful LC in self
+        for i in range(self.num_loop_closures):
+            if not self.results.successful[i]:
+                continue
+
+            # Get canonical key and the corresponding LC in other
+            key: Tuple[str, str, Decimal, Decimal] = self._canonical_lc_key(self.names[i], self.timestamps_a[i], self.timestamps_b[i])
+            desc: str = f"{self.names[i][0]}@{self.timestamps_a[i]} <-> {self.names[i][1]}@{self.timestamps_b[i]}"
+            match_idx: Optional[int] = lc_key_to_other_idx.get(key)
+
+            # Detect if LC missing in other
+            if match_idx is None:
+                print(f"{desc}: successful in {self_label}, no corresponding LC found in {other_label}")
+                continue
+
+            # Detect if successful in both
+            if other.results.successful[match_idx]:
+                print(f"{desc}: successful in both {self_label} and {other_label}")
+                continue
+
+            trans_err: float = other.results.translation_errors[match_idx]
+            rot_err: float = other.results.rotation_errors[match_idx]
+            self_trans_err: float = self.results.translation_errors[i]
+            self_rot_err: float = self.results.rotation_errors[i]
+            reasons: List[str] = []
+            if trans_err > other.results.trans_err_in_target:
+                reasons.append(f"trans err {trans_err:.3f}m > {other.results.trans_err_in_target}m")
+            if rot_err > other.results.rot_err_in_target:
+                reasons.append(f"rot err {rot_err:.3f}deg > {other.results.rot_err_in_target}deg")
+            print(f"{desc}: successful in {self_label}, found in {other_label} but not successful ({', '.join(reasons)}) "
+                  f"({self_label} trans err {self_trans_err:.3f}m, rot err {self_rot_err:.3f}deg; "
+                  f"{other_label} trans err {trans_err:.3f}m, rot err {rot_err:.3f}deg)")
 
     # =========================================================================
     # ============================ Export Methods ==============================

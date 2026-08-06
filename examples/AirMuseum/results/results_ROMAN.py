@@ -41,7 +41,7 @@ def main():
     """
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
-    run_names = ["ROMAN_O", "ROMAN_NM", "MG_NONM", "MG"]
+    run_names = ["ROMAN_O", "MG_NONM_O3_GB"] #"ROMAN_NM", , "MG"
     dataset_name = "Scenario5"
 
     # Environment image / robot display config
