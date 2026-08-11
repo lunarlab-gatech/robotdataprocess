@@ -120,9 +120,10 @@ class VideoGenerator:
             raise RuntimeError(f"ffprobe failed to read the duration of {path}:\n{e.stderr}")
 
         # Run ffmpeg, streaming its machine-readable progress (newline-delimited
-        # out_time_ms=... blocks) on stdout to drive a tqdm bar
+        # out_time_ms=... blocks) on stdout to drive a tqdm bar. Popen is used as a
+        # context manager so its stdout/stderr pipes are always closed on exit.
         try:
-            process = subprocess.Popen(
+            process_ctx = subprocess.Popen(
                 ["ffmpeg", "-y", "-i", str(path), "-c:v", "libx264", "-pix_fmt", "yuv420p",
                  "-progress", "pipe:1", "-nostats", str(temp_path)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -130,18 +131,18 @@ class VideoGenerator:
             raise RuntimeError("ffmpeg is required to re-encode to H.264, but was not found on PATH.")
 
         pbar = tqdm.tqdm(total=round(duration_sec, 2), desc="Re-encoding to H.264...", unit=" sec")
-        prev_out_time_sec = 0.0
         try:
-            for line in process.stdout:
-                key, _, value = line.strip().partition('=')
-                if key == "out_time_ms":
-                    out_time_sec = min(int(value) / 1_000_000, duration_sec)
-                    pbar.update(out_time_sec - prev_out_time_sec)
-                    prev_out_time_sec = out_time_sec
+            with process_ctx as process:
+                prev_out_time_sec = 0.0
+                for line in process.stdout:
+                    key, _, value = line.strip().partition('=')
+                    if key == "out_time_ms":
+                        out_time_sec = min(int(value) / 1_000_000, duration_sec)
+                        pbar.update(out_time_sec - prev_out_time_sec)
+                        prev_out_time_sec = out_time_sec
+                stderr_output = process.stderr.read()
         finally:
             pbar.close()
-        stderr_output = process.stderr.read()
-        process.wait()
 
         if process.returncode != 0:
             raise RuntimeError(f"ffmpeg failed to re-encode {path} to H.264:\n{stderr_output}")

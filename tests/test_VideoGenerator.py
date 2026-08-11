@@ -242,11 +242,19 @@ class TestGenerate(unittest.TestCase):
 
     def test_unopenable_writer_raises(self):
         """ Test ValueError when the video writer can't be opened at save_path. """
-        gen = self._make_generator(save_path=os.path.join(tempfile.gettempdir(), "nonexistent_dir_xyz", "out.mp4"))
-        ts = np.array([0.0, 1.0])
-        xy = np.array([[0.0, 0.0], [1.0, 1.0]])
-        with self.assertRaises(ValueError):
-            gen.generate([ts], [xy], [(255, 0, 0)], video_duration_sec=1.0)
+        # save_path's parent directory is auto-created (see open_video_writer), so a
+        # merely-missing directory won't reproduce this -- make the directory
+        # read-only instead, so cv2 can't create a file inside it.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chmod(tmp_dir, 0o500)
+            try:
+                gen = self._make_generator(save_path=os.path.join(tmp_dir, "out.mp4"))
+                ts = np.array([0.0, 1.0])
+                xy = np.array([[0.0, 0.0], [1.0, 1.0]])
+                with self.assertRaises(ValueError):
+                    gen.generate([ts], [xy], [(255, 0, 0)], video_duration_sec=1.0)
+            finally:
+                os.chmod(tmp_dir, 0o700)
 
     @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.waitKey', return_value=-1)
     @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.imshow')
