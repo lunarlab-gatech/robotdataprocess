@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import colorsys
 from ..utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 import copy
 import csv
+import cv2
 from .Data import CoordinateFrame, TransformType
 from .SequentialData import SequentialData
 from decimal import Decimal
@@ -13,8 +13,9 @@ from evo.core.units import Unit
 import math
 from ..utils.math_utils import interpolate_poses
 from ..utils.PathDataAlignResult import PathDataAlignResult, PoseRelationErrors, TrajErrorStatistics
+from ..utils.VideoGenerator import VideoGenerator
+from ..utils import visualization_utils
 import matplotlib.colors as mcolors
-import matplotlib.image as mpimg
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
@@ -757,15 +758,7 @@ class PathData(SequentialData):
             raise ValueError("gt_color_lightness_range_val must be between 0 and 19 inclusive!")
 
         # Convert hex colors to a palette with varying lightness
-        paletteList = []
-        for c in colorList:
-            # Convert base color to HLS
-            rgb = mcolors.to_rgb(c)
-            h, _, s = colorsys.rgb_to_hls(*rgb)
-
-            # Generate similar colors with varying lightness
-            lightnesses = np.linspace(0.0, 1.0, 20)
-            paletteList.append([colorsys.hls_to_rgb(h, li, s) for li in lightnesses])
+        paletteList = visualization_utils.build_color_palette(colorList)
 
         # Create the figure or use the provided axes
         created_fig = False
@@ -784,28 +777,12 @@ class PathData(SequentialData):
 
         # Draw background image
         if background_image_path is not None:
-            img = mpimg.imread(background_image_path)
-            if background_image_x_edge:
-                x_extent_meters = background_image_x_edge
-                h, w = img.shape[0], img.shape[1]
-                y_extent_meters = x_extent_meters / w * h
-                if background_image_extent_offsets is not None:
-                    x_offset, y_offset = background_image_extent_offsets
-                else:
-                    x_offset, y_offset = 0, 0
-                extent = [-x_extent_meters + x_offset, x_extent_meters + x_offset,
-                          -y_extent_meters + y_offset, y_extent_meters + y_offset]
-                axs.imshow(img, extent=extent, origin="upper", alpha=1.0, zorder=0)
-            else:
-                raise ValueError("Extent must be provided with Background image size via background_image_x_edge.")
+            visualization_utils.draw_background_image(axs, background_image_path, background_image_x_edge,
+                                                        background_image_extent_offsets)
 
         # Calculate trajectory bounds
-        all_x = np.concatenate([dec_arr_to_float_arr(path.positions[:,0]) for path in dataList])
-        all_y = np.concatenate([dec_arr_to_float_arr(path.positions[:,1]) for path in dataList])
-        padding_x = (all_x.max() - all_x.min()) * 0.05
-        padding_y = (all_y.max() - all_y.min()) * 0.05
-        x_min, x_max = all_x.min() - padding_x, all_x.max() + padding_x
-        y_min, y_max = all_y.min() - padding_y, all_y.max() + padding_y
+        xy_list = [dec_arr_to_float_arr(path.positions[:, :2]) for path in dataList]
+        (x_min, x_max), (y_min, y_max) = visualization_utils.compute_bounds_and_aspect(xy_list)
 
         # Plot loop closures (drawn before trajectories so they appear underneath)
         if loop_closure_data is not None:
@@ -857,23 +834,6 @@ class PathData(SequentialData):
             axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
                      label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)
     
-        # Calculate the current aspect ratio and make it match the target
-        target_ar = 1.5  
-        current_width = x_max - x_min
-        current_height = y_max - y_min
-        current_ar = current_width / current_height
-
-        if current_ar > target_ar:
-            target_height = current_width / target_ar
-            diff = target_height - current_height
-            y_min -= diff / 2
-            y_max += diff / 2
-        elif current_ar < target_ar:
-            target_width = current_height * target_ar
-            diff = target_width - current_width
-            x_min -= diff / 2
-            x_max += diff / 2
-
         # Set the new limits that respect the aspect ratio
         axs.set_xlim(x_min, x_max)
         axs.set_ylim(y_min, y_max)
@@ -1002,6 +962,111 @@ class PathData(SequentialData):
             plt.close(fig)
 
         return axs
+
+    @staticmethod
+    def visualize_2D_video(dataList: List[PathData], colorList: List[str], nameList: List[str],
+                            video_duration_sec: float, fps: int = 30, save_path: Union[str, None] = None,
+                            background_image_path: str | None = None,
+                            background_image_x_edge: float | None = None,
+                            background_image_extent_offsets: Union[Tuple[float, float], None] = None,
+                            no_border: bool = False, show_grid: bool = False, legend: bool = True,
+                            title: str | None = None,
+                            dot_radius_px: float = 8.0, glow_radius_px: float = 20.0,
+                            fade_trail_decay: float = 0.80, fade_trail_floor: float = 0.0,
+                            constant_trail_width_px: float = 2.0, fade_trail_width_px: float = 2.0,
+                            frame_width_px: int = 1280) -> None:
+        """
+        Renders an animated video of all PathData objects' XY positions over
+        time, on top of an optional background environment image. Each robot
+        leaves two trails behind its current position: a constant trail that
+        never fades (its full path so far) and a fading trail that highlights
+        recent motion, decaying to fade_trail_floor and then holding.
+
+        Args:
+            dataList: All PathData objects to animate.
+            colorList: Colors to assign to each PathData object (as hex strings starting with #).
+            nameList: Robot names corresponding to each PathData object.
+            video_duration_sec: Duration of the output video, in seconds. Every
+                robot's trajectory is time-warped to fit within this duration.
+            fps: Output video frame rate.
+            save_path: If provided, video is encoded and saved to this path (.mp4).
+                Otherwise, played back live in a window.
+            background_image_path: Path to an image to plot in the background; it is
+                assumed that the center of the image corresponds to x=0 & y=0 in the
+                PathData frames, unless background_image_extent_offsets shifts it.
+            background_image_x_edge: The distance in meters from center of image to the x edge.
+            background_image_extent_offsets: XY location where the image center should be placed.
+            no_border: If true, remove the x & y axes from the background render.
+            show_grid: Whether to draw a grid on the background render.
+            legend: If true, draw a color-coded legend of robot names in the top-left corner.
+            title: Optional video title, drawn across the top of every frame.
+            dot_radius_px: Radius of the solid marker at each robot's current position.
+            glow_radius_px: Radius of the blurred glow halo behind each marker.
+            fade_trail_decay: Per-frame multiplicative decay of the fading trail's opacity, in (0, 1).
+            fade_trail_floor: Opacity the fading trail decays to and then holds at, in [0, 1).
+            constant_trail_width_px: Width of the permanent, never-fading trail.
+            fade_trail_width_px: Width of the fading trail.
+            frame_width_px: Output video width in pixels; height is derived from the
+                background's aspect ratio.
+
+        Raises:
+            ValueError: If dataList, colorList, and nameList aren't the same length.
+        """
+        if len(dataList) != len(colorList) or len(dataList) != len(nameList):
+            raise ValueError("Lengths of all Lists must be equal!")
+
+        # Render the static background once with matplotlib, reusing visualize_2D's
+        # background/bounds logic so the map lines up exactly with the static plots.
+        fig, axs = plt.subplots(1, 1)
+        fig.patch.set_facecolor('white')
+        axs.set_facecolor("#F0F0F0")
+        if background_image_path is not None:
+            visualization_utils.draw_background_image(axs, background_image_path, background_image_x_edge,
+                                                        background_image_extent_offsets)
+
+        xy_list = [dec_arr_to_float_arr(path.positions[:, :2]) for path in dataList]
+        xlim, ylim = visualization_utils.compute_bounds_and_aspect(xy_list)
+        axs.set_xlim(*xlim)
+        axs.set_ylim(*ylim)
+        axs.set_aspect('equal', adjustable='box')
+        if show_grid:
+            axs.grid(True, color="gray", linestyle="--", linewidth=0.5, alpha=0.7)
+        else:
+            axs.grid(False)
+        if no_border:
+            axs.set_axis_off()
+
+        # Render the background frame and prepare for OpenCV. The full canvas buffer
+        # includes the figure's margins (axis labels, ticks, padding), which don't
+        # correspond to xlim/ylim, so crop to just the axes' pixel bounding box before
+        # resizing -- otherwise robot positions (mapped via VideoGenerator's
+        # _world_to_pixel, which assumes the background spans exactly xlim/ylim) won't
+        # line up with the background image.
+        frame_height_px = int(round(frame_width_px * (ylim[1] - ylim[0]) / (xlim[1] - xlim[0])))
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        bbox = axs.get_window_extent(renderer)
+        background_rgba = np.asarray(fig.canvas.buffer_rgba())
+        canvas_height_px = background_rgba.shape[0]
+        row0, row1 = canvas_height_px - bbox.y1, canvas_height_px - bbox.y0
+        col0, col1 = bbox.x0, bbox.x1
+        background_rgba = background_rgba[int(round(row0)):int(round(row1)), int(round(col0)):int(round(col1))]
+        background = cv2.cvtColor(background_rgba, cv2.COLOR_RGBA2BGR)
+        background = cv2.resize(background, (frame_width_px, frame_height_px))
+        plt.close(fig)
+
+        # Extract each robot's raw timestamps and colors, and delegate rendering to VideoGenerator
+        timestamps_list = [dec_arr_to_float_arr(path.timestamps).astype(float) for path in dataList]
+        paletteList = visualization_utils.build_color_palette(colorList)
+        colors_bgr = [tuple(int(round(c * 255)) for c in reversed(rgb[9])) for rgb in paletteList]
+
+        generator = VideoGenerator(background, fps, xlim, ylim, save_path=save_path,
+                                    dot_radius_px=dot_radius_px, glow_radius_px=glow_radius_px,
+                                    fade_trail_decay=fade_trail_decay, fade_trail_floor=fade_trail_floor,
+                                    constant_trail_width_px=constant_trail_width_px,
+                                    fade_trail_width_px=fade_trail_width_px)
+        generator.generate(timestamps_list, xy_list, colors_bgr, video_duration_sec,
+                            names=nameList if legend else None, title=title)
 
     def visualize_3D(self, otherList: List[PathData], titles: List[str], axes_length: Union[float, List[float]] = 10.0, axes_interval: Union[int, List[int]] = 1000, save_path: Optional[Union[Path, str]] = None):
         """

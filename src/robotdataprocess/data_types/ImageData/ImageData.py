@@ -15,6 +15,7 @@ from typeguard import typechecked
 from typing import Union, Any, Tuple
 import tqdm
 from rosbags.typesys import Stores, get_typestore
+from ...utils.VideoGenerator import VideoGenerator
 
 @typechecked
 class ImageData(SequentialData):
@@ -141,13 +142,39 @@ class ImageData(SequentialData):
                 return (np.uint16, 1)
             else:
                 raise NotImplementedError(f"This encoding ({encoding}) is missing a mapping to dtype/channels!")
-    
-    _COMPRESSED_MSGTYPE: str = 'sensor_msgs/msg/CompressedImage'
+
+        # ================ Conversion Methods ================
+        @staticmethod
+        def get_encoding_conversion(from_encoding: 'ImageData.ImageEncoding', to_encoding: 'ImageData.ImageEncoding'):
+            """
+            Returns a function that converts a single image array from from_encoding to
+            to_encoding. Currently supports RGB8 -> BGR8, Mono8 -> BGR8, and Mono8 -> RGB8.
+
+            Args:
+                from_encoding: The image's current encoding.
+                to_encoding: The encoding to convert the image to.
+            Returns:
+                Callable[[np.ndarray], np.ndarray]: Converts an image array from from_encoding to to_encoding.
+            Raises:
+                NotImplementedError: If the conversion between the two encodings is not supported.
+            """
+            if from_encoding == to_encoding:
+                return lambda image: image
+            elif from_encoding == ImageData.ImageEncoding.RGB8 and to_encoding == ImageData.ImageEncoding.BGR8:
+                return lambda image: cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            elif from_encoding == ImageData.ImageEncoding.Mono8 and to_encoding == ImageData.ImageEncoding.BGR8:
+                return lambda image: cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            elif from_encoding == ImageData.ImageEncoding.Mono8 and to_encoding == ImageData.ImageEncoding.RGB8:
+                return lambda image: cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            else:
+                raise NotImplementedError(f"Encoding conversion from {from_encoding} to {to_encoding} is not supported.")
 
     height: int
     width: int
     encoding: ImageData.ImageEncoding
     images: Union[np.ndarray, Any] # With Any being a LazyImageArray
+
+    _COMPRESSED_MSGTYPE: str = 'sensor_msgs/msg/CompressedImage'
 
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], height: int,
                  width: int, encoding: ImageData.ImageEncoding, images: Union[np.ndarray, Any]):
@@ -348,8 +375,77 @@ class ImageData(SequentialData):
 
         pbar.close()
 
+    def to_mp4(self, output_path: Union[Path, str], fps: float, video_duration_sec: float,
+               max_frame_time_margin_sec: float = 0.1):
+        """
+        Saves the images in this ImageData instance as an .mp4 video, resampled
+        to fps and video_duration_sec instead of writing every source image --
+        e.g. pass a video_duration_sec shorter than the source's real-time
+        span for a faster-than-real-time video, or longer for a slower one.
+
+        Source timestamps are linearly scaled into [0, video_duration_sec],
+        and only round(fps * video_duration_sec) frames are written, each the
+        nearest-in-time source image to its evenly-spaced output sample. This
+        avoids writing (and immediately throwing away at playback) every
+        source frame just to speed up playback.
+
+        Args:
+            output_path (Path | str): The file path to save the video to.
+            fps (float): The output video's frame rate.
+            video_duration_sec (float): Desired total video duration.
+            max_frame_time_margin_sec (float): Maximum allowed gap, in the
+                scaled video_duration_sec timeline, between an output sample
+                and its nearest source frame before raising -- catches
+                genuine gaps in the source timestamps rather than expected
+                sampling sparsity.
+
+        Raises:
+            NotImplementedError: If self.encoding isn't Mono8, RGB8, or BGR8.
+            ValueError: If self has fewer than 2 timestamps, or some output
+                sample has no source frame within max_frame_time_margin_sec.
+        """
+
+        # Check that the encoding is supported
+        if self.encoding != ImageData.ImageEncoding.Mono8 and self.encoding != ImageData.ImageEncoding.RGB8 \
+                and self.encoding != ImageData.ImageEncoding.BGR8:
+            raise NotImplementedError(f"Only Mono8, RGB8 & BGR8 encoding currently supported for to_mp4, not {self.encoding}")
+        if self.len() < 2:
+            raise ValueError("Cannot resample with fewer than 2 timestamps.")
+
+        # Scale source timestamps into [0, video_duration_sec]
+        source_times = self.timestamps.astype(np.float64)
+        scale = video_duration_sec / (source_times[-1] - source_times[0])
+        scaled_source_times = (source_times - source_times[0]) * scale
+
+        # Build the evenly-spaced output sample times, and find each one's nearest
+        # source frame via searchsorted (scaled_source_times is sorted ascending)
+        num_output_frames = max(int(round(fps * video_duration_sec)), 1)
+        output_times = np.linspace(0.0, video_duration_sec, num_output_frames, endpoint=False)
+        right_idx = np.clip(np.searchsorted(scaled_source_times, output_times), 0, len(scaled_source_times) - 1)
+        left_idx = np.clip(right_idx - 1, 0, len(scaled_source_times) - 1)
+        use_right = np.abs(scaled_source_times[right_idx] - output_times) < np.abs(scaled_source_times[left_idx] - output_times)
+        frame_indices = np.where(use_right, right_idx, left_idx)
+
+        gaps = np.abs(scaled_source_times[frame_indices] - output_times)
+        if np.any(gaps > max_frame_time_margin_sec):
+            worst = int(np.argmax(gaps))
+            raise ValueError(
+                f"No source frame within max_frame_time_margin_sec ({max_frame_time_margin_sec:.4f}s) of output "
+                f"sample at {output_times[worst]:.4f}s (nearest is {gaps[worst]:.4f}s away).")
+
+        # Write each selected image as a video frame (converting it to BGR8 first)
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(self.encoding, ImageData.ImageEncoding.BGR8)
+        pbar = tqdm.tqdm(total=len(frame_indices), desc="Writing Video...", unit=" frames")
+        try:
+            with VideoGenerator.open_video_writer(output_path, fps, (self.width, self.height)) as writer:
+                for i in frame_indices:
+                    writer.write(conversion(self.images[i]))
+                    pbar.update()
+        finally:
+            pbar.close()
+
     # =========================================================================
-    # =========================== Conversion to ROS =========================== 
+    # =========================== Conversion to ROS ===========================
     # ========================================================================= 
 
     @staticmethod

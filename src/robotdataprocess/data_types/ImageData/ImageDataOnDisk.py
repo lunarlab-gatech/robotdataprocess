@@ -202,26 +202,10 @@ class ImageDataOnDisk(ImageData):
             NotImplementedError: If the conversion between the current and
                 target encoding is not supported.
         """
-        if encoding == self.encoding:
-            return
-
-        if self.encoding == ImageData.ImageEncoding.RGB8 and encoding == ImageData.ImageEncoding.BGR8:
-            def rgb_to_bgr(image: np.ndarray) -> np.ndarray:
-                return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            self.images.transformations.append(rgb_to_bgr)
-            self.encoding = ImageData.ImageEncoding.BGR8
-        elif self.encoding == ImageData.ImageEncoding.Mono8 and encoding == ImageData.ImageEncoding.BGR8:
-            def mono_to_bgr(image: np.ndarray) -> np.ndarray:
-                return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            self.images.transformations.append(mono_to_bgr)
-            self.encoding = ImageData.ImageEncoding.BGR8
-        elif self.encoding == ImageData.ImageEncoding.Mono8 and encoding == ImageData.ImageEncoding.RGB8:
-            def mono_to_rgb(image: np.ndarray) -> np.ndarray:
-                return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            self.images.transformations.append(mono_to_rgb)
-            self.encoding = ImageData.ImageEncoding.RGB8
-        else:
-            raise NotImplementedError(f"Encoding conversion from {self.encoding} to {encoding} is not supported.")
+        if encoding == self.encoding: return
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(self.encoding, encoding)
+        self.images.transformations.append(conversion)
+        self.encoding = encoding
 
     # =========================================================================
     # ============================ Class Methods ==============================

@@ -1,3 +1,4 @@
+import cv2
 from decimal import Decimal
 import numpy as np
 import os
@@ -148,6 +149,48 @@ class TestImageDataEncoding(unittest.TestCase):
         """ Test to_dtype_and_channels raises NotImplementedError for invalid encoding. """
         with self.assertRaises(NotImplementedError):
             ImageData.ImageEncoding.to_dtype_and_channels("invalid")
+
+    # ==================== get_encoding_conversion tests ====================
+
+    def test_get_encoding_conversion_identity(self):
+        """ Test get_encoding_conversion returns the image unchanged when from/to encodings match. """
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(
+            ImageData.ImageEncoding.RGB8, ImageData.ImageEncoding.RGB8)
+        image = np.random.randint(0, 255, size=(10, 10, 3), dtype=np.uint8)
+        np.testing.assert_array_equal(conversion(image), image)
+
+    def test_get_encoding_conversion_rgb8_to_bgr8(self):
+        """ Test get_encoding_conversion converts RGB8 to BGR8 by swapping channels. """
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(
+            ImageData.ImageEncoding.RGB8, ImageData.ImageEncoding.BGR8)
+        image = np.zeros((10, 10, 3), dtype=np.uint8)
+        image[:, :] = [200, 50, 10]  # R, G, B
+        converted = conversion(image)
+        np.testing.assert_array_equal(converted[0, 0], [10, 50, 200])  # B, G, R
+
+    def test_get_encoding_conversion_mono8_to_bgr8(self):
+        """ Test get_encoding_conversion converts Mono8 to BGR8 by replicating the channel. """
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(
+            ImageData.ImageEncoding.Mono8, ImageData.ImageEncoding.BGR8)
+        image = np.full((10, 10), 128, dtype=np.uint8)
+        converted = conversion(image)
+        self.assertEqual(converted.shape, (10, 10, 3))
+        np.testing.assert_array_equal(converted[0, 0], [128, 128, 128])
+
+    def test_get_encoding_conversion_mono8_to_rgb8(self):
+        """ Test get_encoding_conversion converts Mono8 to RGB8 by replicating the channel. """
+        conversion = ImageData.ImageEncoding.get_encoding_conversion(
+            ImageData.ImageEncoding.Mono8, ImageData.ImageEncoding.RGB8)
+        image = np.full((10, 10), 64, dtype=np.uint8)
+        converted = conversion(image)
+        self.assertEqual(converted.shape, (10, 10, 3))
+        np.testing.assert_array_equal(converted[0, 0], [64, 64, 64])
+
+    def test_get_encoding_conversion_invalid(self):
+        """ Test get_encoding_conversion raises NotImplementedError for an unsupported conversion. """
+        with self.assertRaises(NotImplementedError):
+            ImageData.ImageEncoding.get_encoding_conversion(
+                ImageData.ImageEncoding.BGR8, ImageData.ImageEncoding.Mono8)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -300,6 +343,110 @@ class TestImageData(unittest.TestCase):
         output = output.absolute()
         with self.assertRaises(NotImplementedError):
             data.to_npy(output)
+
+    # ==================== to_mp4 tests ====================
+
+    @staticmethod
+    def _read_mp4_frames(path):
+        """ Reads back all frames of an .mp4 file (in BGR order) as a list of np.ndarrays. """
+        cap = cv2.VideoCapture(str(path))
+        frames = []
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frames.append(frame)
+        cap.release()
+        return frames
+
+    def test_to_mp4_mono8(self):
+        """ Test to_mp4 with Mono8 encoding produces a BGR video with the channel replicated. """
+        imgs = np.stack([np.full((10, 10), 40, dtype=np.uint8), np.full((10, 10), 220, dtype=np.uint8),
+                          np.full((10, 10), 100, dtype=np.uint8)])
+        data = ImageData('cam', [0.0, 0.1, 0.2], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_mono8.mp4'
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        # fps/video_duration_sec chosen so the two output samples ([0, 0.1]) land exactly
+        # on the first two source timestamps, unambiguously selecting frames 0 and 1.
+        data.to_mp4(output, fps=10.0, video_duration_sec=0.2)
+
+        frames = self._read_mp4_frames(output)
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(frames[0].shape, (10, 10, 3))
+        np.testing.assert_allclose(frames[0][0, 0], [40, 40, 40], atol=20)
+        np.testing.assert_allclose(frames[1][0, 0], [220, 220, 220], atol=20)
+
+    def test_to_mp4_rgb8(self):
+        """ Test to_mp4 with RGB8 encoding swaps channels to BGR in the output video. """
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img[:, :] = [200, 50, 10]  # R, G, B
+        imgs = np.stack([img, img, img])
+        data = ImageData('cam', [0.0, 0.1, 0.2], 10, 10, ImageData.ImageEncoding.RGB8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_rgb8.mp4'
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        data.to_mp4(output, fps=10.0, video_duration_sec=0.2)
+
+        frames = self._read_mp4_frames(output)
+        self.assertEqual(len(frames), 2)
+        np.testing.assert_allclose(frames[0][0, 0], [10, 50, 200], atol=20)  # B, G, R
+
+    def test_to_mp4_bgr8(self):
+        """ Test to_mp4 with BGR8 encoding passes the image through unchanged. """
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img[:, :] = [10, 50, 200]  # B, G, R
+        imgs = np.stack([img, img, img])
+        data = ImageData('cam', [0.0, 0.1, 0.2], 10, 10, ImageData.ImageEncoding.BGR8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_bgr8.mp4'
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        data.to_mp4(output, fps=10.0, video_duration_sec=0.2)
+
+        frames = self._read_mp4_frames(output)
+        self.assertEqual(len(frames), 2)
+        np.testing.assert_allclose(frames[0][0, 0], [10, 50, 200], atol=20)
+
+    def test_to_mp4_unsupported_encoding(self):
+        """ Test that to_mp4 raises NotImplementedError for _32FC1 encoding. """
+        imgs = np.zeros((2, 10, 10), dtype=np.float32)
+        data = ImageData('cam', [0.0, 0.1], 10, 10, ImageData.ImageEncoding._32FC1, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_unsupported.mp4'
+        with self.assertRaises(NotImplementedError):
+            data.to_mp4(output, fps=10.0, video_duration_sec=0.1)
+
+    def test_to_mp4_too_few_timestamps(self):
+        """ Test that to_mp4 raises ValueError with fewer than 2 timestamps. """
+        imgs = np.zeros((1, 10, 10), dtype=np.uint8)
+        data = ImageData('cam', [0.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_too_few.mp4'
+        with self.assertRaises(ValueError):
+            data.to_mp4(output, fps=10.0, video_duration_sec=1.0)
+
+    def test_to_mp4_raises_when_no_frame_within_margin(self):
+        """ Test that to_mp4 raises ValueError when an output sample has no source frame within max_frame_time_margin_sec. """
+        imgs = np.zeros((3, 10, 10), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 0.1, 5.0], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_margin_exceeded.mp4'
+
+        # Sampled at 10fps across the full 5s span, most output samples fall in the
+        # 0.1s-5.0s gap, far outside the default 0.1s max_frame_time_margin_sec.
+        with self.assertRaises(ValueError):
+            data.to_mp4(output, fps=10.0, video_duration_sec=5.0)
+
+    def test_to_mp4_succeeds_with_jittered_timestamps_within_margin(self):
+        """ Test that to_mp4 still resamples successfully when timestamps are only mildly jittered around a nominal rate. """
+        imgs = np.zeros((5, 10, 10), dtype=np.uint8)
+        data = ImageData('cam', [0.0, 0.09, 0.21, 0.28, 0.41], 10, 10, ImageData.ImageEncoding.Mono8, imgs)
+        output = Path('.') / 'tests' / 'temporary_files' / 'test_ImageData' / 'test_to_mp4_jittered.mp4'
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        # At 10fps over the full 0.41s span, every output sample's nearest source frame
+        # is well within the default 0.1s max_frame_time_margin_sec, despite the jitter.
+        data.to_mp4(output, fps=10.0, video_duration_sec=0.41)
+
+        self.assertTrue(output.exists())
+        self.assertEqual(len(self._read_mp4_frames(output)), 4)
 
 
 if __name__ == "__main__":

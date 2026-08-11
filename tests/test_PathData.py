@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 from copy import deepcopy
+import cv2
 from decimal import Decimal
 import numpy as np
 import os
@@ -769,6 +770,105 @@ class TestPathData(unittest.TestCase):
             plt.close(fig2)
         finally:
             os.remove(tmp_img)
+
+    # =========================================================================
+    # ================ visualize_2D_video Tests ================================
+    # =========================================================================
+
+    def test_visualize_2D_video_mismatched_list_lengths(self):
+        """ Test ValueError when input lists have different lengths. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D_video([path], ['#FF0000', '#0000FF'], ['robot'], video_duration_sec=1.0)
+        with self.assertRaises(ValueError):
+            PathData.visualize_2D_video([path], ['#FF0000'], ['robot', 'robot2'], video_duration_sec=1.0)
+
+    def test_visualize_2D_video_save_to_file(self):
+        """ Test that visualize_2D_video saves a non-empty mp4 with two robots. """
+        path1 = PathData(
+            frame_id="robot1",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([0.5, 1.5], dtype=object),
+            positions=np.array([[0.0, 1.0, 0.0], [2.0, 1.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            tmp_path = f.name
+        os.remove(tmp_path)
+        try:
+            PathData.visualize_2D_video(
+                [path1, path2], ['#FF0000', '#0000FF'], ['Robot1', 'Robot2'],
+                video_duration_sec=1.0, fps=4, save_path=tmp_path, title="Test Video")
+            self.assertTrue(os.path.exists(tmp_path))
+            self.assertGreater(os.path.getsize(tmp_path), 0)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_visualize_2D_video_background_image(self):
+        """ Test visualize_2D_video with a background image, and error when x_edge missing. """
+        import matplotlib.image as mpimg_saver
+        img_data = np.random.randint(0, 255, (100, 150, 3), dtype=np.uint8)
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            mpimg_saver.imsave(f.name, img_data)
+            tmp_img = f.name
+
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            tmp_path = f.name
+        os.remove(tmp_path)
+        try:
+            PathData.visualize_2D_video([path], ['#FF0000'], ['Robot'], video_duration_sec=0.5, fps=4,
+                                        save_path=tmp_path, background_image_path=tmp_img,
+                                        background_image_x_edge=10.0)
+            self.assertTrue(os.path.exists(tmp_path))
+            self.assertGreater(os.path.getsize(tmp_path), 0)
+
+            with self.assertRaises(ValueError):
+                PathData.visualize_2D_video([path], ['#FF0000'], ['Robot'], video_duration_sec=0.5,
+                                            background_image_path=tmp_img)
+        finally:
+            os.remove(tmp_img)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2')
+    def test_visualize_2D_video_no_save_path(self, mock_cv2):
+        """ Test the live-playback code path (mocked cv2 window, no save). """
+        mock_cv2.LINE_AA = cv2.LINE_AA
+        mock_cv2.FONT_HERSHEY_SIMPLEX = cv2.FONT_HERSHEY_SIMPLEX
+        mock_cv2.waitKey.return_value = -1
+
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 2.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        PathData.visualize_2D_video([path], ['#00FF00'], ['Robot'], video_duration_sec=0.5, fps=4)
+
+        self.assertEqual(mock_cv2.imshow.call_count, 2)  # 0.5 sec * fps=4
+        mock_cv2.destroyAllWindows.assert_called_once()
+        mock_cv2.VideoWriter.assert_not_called()
 
     # =========================================================================
     # ======= make_start_and_end_times_match error (line 704) =================
