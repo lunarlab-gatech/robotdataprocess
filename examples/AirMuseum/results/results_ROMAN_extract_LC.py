@@ -7,10 +7,12 @@ from typing import Dict
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
-from utils.ROMAN import load_LC_data_ROMAN, LCFilterMode
+from utils.ROMAN import load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
 from results_ROMAN import load_gt_data_ROMAN
 
 def main():
+    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
     dataset_prefix = "airmuseum"
     dataset_name = "Scenario5"
     pair = ["robotA", "robotB"]
@@ -30,7 +32,9 @@ def main():
 
     merged_lc_by_run: Dict[str, LoopClosureData] = {}
     for run_name in run_names:
-        merged_lc, _ = load_LC_data_ROMAN(dataset_prefix, dataset_name, run_name, pair, lc_filter=LCFilterMode.ALL)
+        system_params = load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, run_name)
+        merged_lc, _ = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name, pair,
+                                          critical_invocation_params, lc_filter=LCFilterMode.ALL)
         merged_lc.calculate_errors(gt_dict)
         merged_lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
         merged_lc_by_run[run_name] = merged_lc

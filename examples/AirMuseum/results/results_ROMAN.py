@@ -41,7 +41,7 @@ def main():
     """
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
-    run_names = ["ROMAN_O", "MG_NONM_O3_GB"] #"ROMAN_NM", , "MG"
+    run_names = ["ROMAN_O", "MG"]
     dataset_name = "Scenario5"
 
     # Environment image / robot display config
@@ -64,8 +64,11 @@ def main():
     }
 
     figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
+    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
 
-    run_ROMAN_evaluation("airmuseum", dataset_name, run_names, all_robots, figures_base_dir, load_gt_data_ROMAN, viz_config)
+    run_ROMAN_evaluation(roman_root, "airmuseum", dataset_name, run_names, all_robots, critical_invocation_params,
+                         figures_base_dir, load_gt_data_ROMAN, viz_config)
 
 if __name__ == "__main__":
     main()

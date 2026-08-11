@@ -207,6 +207,55 @@ class ImageDataOnDisk(ImageData):
         self.images.transformations.append(conversion)
         self.encoding = encoding
 
+    def depth_to_rgb(self, max_depth: Union[float, None] = None, color_map: Union[int, None] = cv2.COLORMAP_TURBO,
+                      reverse: bool = False) -> None:
+        """
+        Colorizes _32FC1 depth imagery into a Mono8 or RGB8 visualization.
+        Depth is linearly normalized from [0, max_depth] to [0, 255];
+        depths at or above max_depth are treated as invalid and rendered
+        black. Sets self.encoding to Mono8 if color_map is None, else RGB8.
+
+        Args:
+            max_depth: Depth mapped to the top of the visualization range.
+                Depths at or above this are rendered black. If None, each
+                frame is normalized by its own maximum depth instead of a
+                fixed value, and no pixels are marked invalid.
+            color_map: OpenCV colormap to apply (e.g. cv2.COLORMAP_TURBO).
+                If None, outputs raw normalized grayscale instead.
+            reverse: If True, inverts the normalized depth before applying
+                color_map (or before outputting grayscale if color_map is
+                None), so near depth renders at the opposite end of the
+                colormap/grayscale range. Invalid pixels are still rendered
+                black.
+
+        Raises:
+            NotImplementedError: If self.encoding isn't _32FC1.
+            ValueError: If max_depth is given and isn't positive.
+        """
+        if self.encoding != ImageData.ImageEncoding._32FC1:
+            raise NotImplementedError(f"depth_to_rgb only supports _32FC1 input, not {self.encoding}")
+        if max_depth is not None and max_depth <= 0:
+            raise ValueError(f"max_depth must be positive, got {max_depth}")
+
+        def _convert(depth: np.ndarray, max_depth=max_depth, color_map=color_map, reverse=reverse) -> np.ndarray:
+            if max_depth is not None:
+                frame_max_depth = max_depth
+                invalid_mask = depth >= max_depth
+            else:
+                frame_max_depth = depth.max()
+                invalid_mask = np.zeros_like(depth, dtype=bool)
+
+            vis = ((depth / frame_max_depth).clip(0, 1) * 255).astype(np.uint8)
+            if reverse:
+                vis = 255 - vis
+            if color_map is not None:
+                vis = cv2.applyColorMap(vis, color_map)[..., ::-1]
+            vis[invalid_mask] = 0
+            return vis
+
+        self.images.transformations.append(_convert)
+        self.encoding = ImageData.ImageEncoding.Mono8 if color_map is None else ImageData.ImageEncoding.RGB8
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

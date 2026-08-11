@@ -168,6 +168,152 @@ class TestImageDataOnDisk(unittest.TestCase):
         for i in range(data.len()):
             np.testing.assert_array_equal(data.images[i], mem_data.images[i])
 
+    def _make_depth_npy_folder(self, subfolder: str) -> Path:
+        depth = np.array([[0.0, 50.0], [100.0, 200.0]], dtype=np.float32)
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', subfolder).absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        np.save(folder / "1.000000000.npy", depth)
+        return folder
+
+    def test_depth_to_rgb_with_color_map(self):
+        """ Test depth_to_rgb with a color map produces a colormapped RGB8 image. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_color')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=cv2.COLORMAP_TURBO)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2, 3))
+
+        # Expected result: normalize [0, max_depth] -> [0, 255], colormap, then
+        # zero out pixels at or above max_depth
+        normalized = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+        # Pixels at/above max_depth are rendered black
+        np.testing.assert_array_equal(vis[1, 0], [0, 0, 0])
+        np.testing.assert_array_equal(vis[1, 1], [0, 0, 0])
+
+    def test_depth_to_rgb_with_color_map_reversed(self):
+        """ Test depth_to_rgb with reverse=True inverts normalized depth before colormapping. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_color_reversed')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=cv2.COLORMAP_TURBO, reverse=True)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2, 3))
+
+        # Expected result: normalize [0, max_depth] -> [0, 255], invert, colormap,
+        # then zero out pixels at or above max_depth
+        normalized = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+        # Pixels at/above max_depth are still rendered black
+        np.testing.assert_array_equal(vis[1, 0], [0, 0, 0])
+        np.testing.assert_array_equal(vis[1, 1], [0, 0, 0])
+
+    def test_depth_to_rgb_without_color_map(self):
+        """ Test depth_to_rgb with color_map=None produces a single-channel Mono8 image. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_mono')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=None)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2))
+
+        expected = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+    def _make_multi_frame_depth_npy_folder(self, subfolder: str, depths: list) -> Path:
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', subfolder).absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        for i, depth in enumerate(depths):
+            np.save(folder / f"{i + 1}.000000000.npy", depth)
+        return folder
+
+    def test_depth_to_rgb_frame_dependent_max_with_color_map(self):
+        """ Test depth_to_rgb(max_depth=None) normalizes each frame by its own max, with a color map. """
+        depths = [
+            np.array([[0.0, 50.0], [100.0, 100.0]], dtype=np.float32),
+            np.array([[0.0, 25.0], [50.0, 50.0]], dtype=np.float32),
+        ]
+        folder = self._make_multi_frame_depth_npy_folder('depth_to_rgb_frame_max_color', depths)
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        data.depth_to_rgb(max_depth=None, color_map=cv2.COLORMAP_TURBO)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+
+        for i, original_depth in enumerate(depths):
+            vis = data.images[i]
+            self.assertEqual(vis.shape, (2, 2, 3))
+
+            # Expected: normalize [0, this frame's own max] -> [0, 255], colormap;
+            # nothing is marked invalid since max_depth is frame-dependent
+            normalized = ((original_depth / original_depth.max()).clip(0, 1) * 255).astype(np.uint8)
+            expected = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+            np.testing.assert_array_equal(vis, expected)
+
+        # Both frames' max-depth pixel is normalized to the same top-of-range color,
+        # even though the underlying depth values differ (100.0 vs. 50.0)
+        np.testing.assert_array_equal(data.images[0][1, 0], data.images[1][1, 0])
+
+    def test_depth_to_rgb_frame_dependent_max_without_color_map(self):
+        """ Test depth_to_rgb(max_depth=None) normalizes each frame by its own max, as grayscale. """
+        depths = [
+            np.array([[0.0, 50.0], [100.0, 100.0]], dtype=np.float32),
+            np.array([[0.0, 25.0], [50.0, 50.0]], dtype=np.float32),
+        ]
+        folder = self._make_multi_frame_depth_npy_folder('depth_to_rgb_frame_max_mono', depths)
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        data.depth_to_rgb(max_depth=None, color_map=None)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+
+        for i, original_depth in enumerate(depths):
+            vis = data.images[i]
+            self.assertEqual(vis.shape, (2, 2))
+            expected = ((original_depth / original_depth.max()).clip(0, 1) * 255).astype(np.uint8)
+            np.testing.assert_array_equal(vis, expected)
+
+        np.testing.assert_array_equal(data.images[0], data.images[1])
+
+    def test_depth_to_rgb_nonpositive_max_depth_raises(self):
+        """ Test depth_to_rgb raises if max_depth is given and isn't positive. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_nonpositive')
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        with self.assertRaises(ValueError):
+            data.depth_to_rgb(0.0)
+        with self.assertRaises(ValueError):
+            data.depth_to_rgb(-5.0)
+
+    def test_depth_to_rgb_requires_32fc1(self):
+        """ Test depth_to_rgb raises if the encoding isn't _32FC1. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        image_data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        self.assertEqual(image_data.encoding, ImageData.ImageEncoding.RGB8)
+
+        with self.assertRaises(NotImplementedError):
+            image_data.depth_to_rgb(100.0)
 
     # =========================================================================
     # ====================== crop_images_to_LiDAR_FOV ========================

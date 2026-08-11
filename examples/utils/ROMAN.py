@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from evo.core.units import Unit
-import getpass
 import itertools
 import math
 import matplotlib.colors as mcolors
@@ -16,7 +15,33 @@ import pandas as pd
 import re
 from robotdataprocess import CoordinateFrame, LoopClosureData, OdometryData, PathData, PathDataAlignResult, TableData
 import seaborn as sns
-from typing import Dict, List, Optional, Tuple
+import sys
+from typing import Any, Dict, List, Optional, Tuple
+
+def load_system_params_ROMAN(roman_root: Path, dataset_prefix: str, dataset_name: str, method: str):
+    """
+    Loads the SystemParams for one experiment config, used to reconstruct hash-addressed result
+    directories. Call once per (dataset_prefix, dataset_name, method) and pass into load_*_ROMAN.
+
+    Args:
+        roman_root: Path to the roman repo checkout.
+        dataset_prefix: The dataset used.
+        dataset_name: The dataset version/sequence.
+        method: Run name identifying which experiment config to load.
+
+    Returns:
+        The loaded SystemParams.
+    """
+    roman_root = Path(roman_root)
+    if str(roman_root) not in sys.path:
+        sys.path.insert(0, str(roman_root))
+    from roman.params.data_params import DataParams
+    from roman.params.system_params import SystemParams
+
+    experiment_path = roman_root / "params" / "experiments" / f"{dataset_prefix}_{dataset_name}_{method}.yaml"
+    placeholder_data_params = DataParams(_img_data=None, _depth_data=None, _pose_data=None,
+                                         img_data_params=None, T_camera_flu=np.eye(4))
+    return SystemParams.from_experiment_config(str(experiment_path), {"_placeholder": placeholder_data_params})
 
 def _make_raw_df(run_names: List[str], run_display_names: Dict[str, str],
                  cols_for_run, value_fn) -> pd.DataFrame:
@@ -141,68 +166,56 @@ class ROMANResults:
     lc_stats_by_mode: Dict[LCFilterMode, Dict] = field(default_factory=dict)
     lc_inlier_stats_by_mode: Dict[LCFilterMode, Dict] = field(default_factory=dict)
 
-def load_est_data_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> List[OdometryData]:
+def load_est_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                        robot_names: List, critical_invocation_params: Dict[str, Any]) -> List[OdometryData]:
     """
     Load estimated trajectories for a set of robots from ROMAN offline RPGO output.
-
-    Args:
-        dataset_prefix: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
-            ``"GrAco"``).
 
     Returns:
         List of OdometryData in the same order as robot_names.
     """
-    user = getpass.getuser()
-    run_name = "_".join(robot_names)
+    rpgo_dir = system_params.rpgo_result_dir(Path(roman_root) / "results", dataset_prefix, dataset_name,
+                                             sorted(robot_names), critical_invocation_params)
     return [
         OdometryData.from_csv(
-            '/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method +
-            '/' + run_name + '/offline_rpgo/' + rn + '.csv',
+            str(rpgo_dir / f'{rn}.csv'),
             "map", 'robot' + str(i), CoordinateFrame.NONE, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
         for i, rn in enumerate(robot_names)
     ]
 
-def load_kimera_rpgo_first_stage_est_data_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> List[OdometryData]:
+def load_kimera_rpgo_first_stage_est_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                                                robot_names: List, critical_invocation_params: Dict[str, Any]) -> List[OdometryData]:
     """
-    Load estimated trajectories for a set of robots from ROMAN offline RPGO output.
-
-    Args:
-        dataset_prefix: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
-            ``"GrAco"``).
+    Load pre-optimize (first-stage) estimated trajectories for a set of robots.
 
     Returns:
         List of OdometryData in the same order as robot_names.
     """
-    user = getpass.getuser()
-    run_name = "_".join(robot_names)
-    result_dir = '/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method + '/' + \
-                  run_name + '/offline_rpgo/'
-    names_override = {chr(97 + i): name for i, name in enumerate(robot_names)}
+    sorted_names = sorted(robot_names)
+    rpgo_dir = system_params.rpgo_result_dir(Path(roman_root) / "results", dataset_prefix, dataset_name,
+                                             sorted_names, critical_invocation_params)
+    names_override = {chr(97 + i): name for i, name in enumerate(sorted_names)}
     return [
-        OdometryData.from_g2o(result_dir + 'pre_optimize/result.g2o', result_dir + 'dense/odom_all.time.txt', rn,
+        OdometryData.from_g2o(str(rpgo_dir / 'pre_optimize' / 'result.g2o'), str(rpgo_dir / 'dense' / 'odom_all.time.txt'), rn,
             "map", 'robot' + str(i), CoordinateFrame.NONE, names_override)
         for i, rn in enumerate(robot_names)
     ]
 
-def load_LC_data_ROMAN(dataset_prefix: str, dataset_name: str, run_name: str, robot_names: List,
+def load_LC_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str, robot_names: List,
+                       critical_invocation_params: Dict[str, Any],
                        lc_filter: LCFilterMode = LCFilterMode.ALL, names_override: Dict = None):
     """
-    Load LC data for a ROMAN run.
-
-    Args:
-        dataset_prefix: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
-            ``"GrAco"``). The run folder is resolved as
-            ``ROMAN_DEVEL/results/<dataset_prefix>_<dataset_name>_<run_name>/<robot0>_<robot1>``.
-        names_override: If provided, maps g2o character keys ('a', 'b', ...) to robot names used in
-            the returned LoopClosureData. Defaults to the original robot_names. Pass display-name
-            overrides when LC names must match a visualize_2D nameList.
+    Load LC data for a ROMAN run. names_override, if given, maps g2o character keys ('a', 'b', ...)
+    to robot names used in the returned LoopClosureData (default: the sorted robot_names) -- pass
+    display-name overrides when LC names must match a visualize_2D nameList.
 
     Returns:
         (merged_lc, merged_lc_inlier)
     """
-    user = getpass.getuser()
-    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + run_name + '/' + \
-                      (robot_names[0] + '_' + robot_names[1]))
+    sorted_names = sorted(robot_names)
+    rpgo_dir = system_params.rpgo_result_dir(Path(roman_root) / "results", dataset_prefix, dataset_name,
+                                             sorted_names, critical_invocation_params)
+    letter_by_name = {name: chr(97 + i) for i, name in enumerate(sorted_names)}
 
     if lc_filter == LCFilterMode.ONLY_INTER_LC:
         pair_fn = itertools.combinations
@@ -212,13 +225,13 @@ def load_LC_data_ROMAN(dataset_prefix: str, dataset_name: str, run_name: str, ro
         pair_fn = itertools.combinations_with_replacement
 
     effective_override = names_override if names_override is not None else \
-        {chr(97 + i): name for i, name in enumerate(robot_names)}
+        {chr(97 + i): name for i, name in enumerate(sorted_names)}
 
     # odom_and_lc.g2o already contains all robot pairs — load it once to avoid
     # tripling the count when iterating over combinations_with_replacement.
     merged_lc = LoopClosureData.from_g2o(
-        run_folder / 'offline_rpgo' / 'dense' / 'odom_and_lc.g2o',
-        run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt',
+        rpgo_dir / 'dense' / 'odom_and_lc.g2o',
+        rpgo_dir / 'dense' / 'odom_all.time.txt',
         names_override=effective_override)
     if lc_filter == LCFilterMode.ONLY_INTER_LC:
         merged_lc.prune_intra_robot_loop_closures()
@@ -228,58 +241,67 @@ def load_LC_data_ROMAN(dataset_prefix: str, dataset_name: str, run_name: str, ro
     # Load the per-pair inlier g2o files (these are pair-specific)
     lc_inlier_data_list = []
     for name_a, name_b in pair_fn(robot_names, 2):
-        letter_a = chr(97 + robot_names.index(name_a))
-        letter_b = chr(97 + robot_names.index(name_b))
+        letter_a = letter_by_name[name_a]
+        letter_b = letter_by_name[name_b]
         if name_a == name_b:
             g2o_filename = f'inlier_lc_intra_{letter_a}.g2o'
         else:
             g2o_filename = f'inlier_lc_inter_{letter_a}_{letter_b}.g2o'
-        lc_data_inlier = LoopClosureData.from_g2o(run_folder / 'offline_rpgo' / g2o_filename,
-                                                  run_folder / 'offline_rpgo' / 'dense' / 'odom_all.time.txt',
+        lc_data_inlier = LoopClosureData.from_g2o(rpgo_dir / g2o_filename,
+                                                  rpgo_dir / 'dense' / 'odom_all.time.txt',
                                                   names_override=effective_override)
         lc_inlier_data_list.append(lc_data_inlier)
 
     merged_lc_inlier = LoopClosureData.merge(lc_inlier_data_list)
 
     # Get information on duplicates and then prune them
-    #merged_lc.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} ALL")
-    #merged_lc_inlier.print_duplicate_info(f"{dataset_name} {run_name} {robot_names} Kimera-RPGO Inlier")
+    #merged_lc.print_duplicate_info(f"{dataset_name} {robot_names} ALL")
+    #merged_lc_inlier.print_duplicate_info(f"{dataset_name} {robot_names} Kimera-RPGO Inlier")
 
     merged_lc.prune_duplicates()
     merged_lc_inlier.prune_duplicates()
 
     return merged_lc, merged_lc_inlier
 
-def load_timing_data_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> Dict[str, float]:
+def load_timing_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                           robot_names: List, critical_invocation_params: Dict[str, Any]) -> Dict[str, float]:
     """
     Load the runtime (s) breakdown for a ROMAN run on a robot pair.
 
-    Reads the per-pair alignment runtimes (``align/runtime.txt``, one
-    ``"key: value"`` line per intra-/inter-robot combination), the per-robot
-    mapping runtimes (``map/runtime.txt``, one ``"key: value"`` line per
-    robot), and the offline RPGO optimization runtime
-    (``offline_rpgo/runtime.txt``, a single value on its last non-empty
-    line), kept separate so callers can report or combine them as needed.
+    Reads each combination's own alignment runtime (``<robot_a>_<robot_b>.runtime.txt``, one line,
+    at that combination's own align result dir), each robot's own mapping runtime
+    (``<robot>.runtime.txt``, at its own mapping result dir), and the offline RPGO runtime
+    (``runtime.txt``, a single value on its last non-empty line, at the rpgo result dir).
 
     Returns:
         Dict with keys ``"align"`` (sum of the alignment runtimes),
         ``"mapping"`` (sum of the mapping runtimes), and ``"offline_rpgo"``,
         or ``None`` if any runtime file is missing or empty.
     """
-    user = getpass.getuser()
-    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method + '/' + \
-                      (robot_names[0] + '_' + robot_names[1]))
+    results_root = Path(roman_root) / "results"
 
-    align_runtime_path = run_folder / 'align' / 'runtime.txt'
-    mapping_runtime_path = run_folder / 'map' / 'runtime.txt'
-    rpgo_runtime_path = run_folder / 'offline_rpgo' / 'runtime.txt'
-    if not align_runtime_path.exists() or not mapping_runtime_path.exists() or not rpgo_runtime_path.exists():
+    align_paths = []
+    for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
+        sorted_pair = sorted((name_a, name_b))
+        align_dir = system_params.align_result_dir(results_root, dataset_prefix, dataset_name,
+                                                    sorted_pair[0], sorted_pair[1], critical_invocation_params)
+        align_paths.append(align_dir / f'{sorted_pair[0]}_{sorted_pair[1]}.runtime.txt')
+
+    mapping_paths = [
+        system_params.mapping_result_dir(results_root, dataset_prefix, dataset_name, rn, critical_invocation_params) / f'{rn}.runtime.txt'
+        for rn in robot_names
+    ]
+
+    rpgo_runtime_path = system_params.rpgo_result_dir(results_root, dataset_prefix, dataset_name,
+                                                       sorted(robot_names), critical_invocation_params) / 'runtime.txt'
+
+    if not all(p.exists() for p in align_paths) or not all(p.exists() for p in mapping_paths) or not rpgo_runtime_path.exists():
         return None
 
-    align_lines = [line.strip() for line in align_runtime_path.read_text().splitlines() if line.strip()]
-    mapping_lines = [line.strip() for line in mapping_runtime_path.read_text().splitlines() if ':' in line]
+    align_lines = [p.read_text().strip() for p in align_paths]
+    mapping_lines = [p.read_text().strip() for p in mapping_paths]
     rpgo_lines = [line.strip() for line in rpgo_runtime_path.read_text().splitlines() if line.strip()]
-    if not align_lines or not mapping_lines or not rpgo_lines:
+    if not all(align_lines) or not all(mapping_lines) or not rpgo_lines:
         return None
 
     align_total = sum(float(line.split(':')[-1]) for line in align_lines)
@@ -289,22 +311,21 @@ def load_timing_data_ROMAN(dataset_prefix: str, dataset_name: str, method: str, 
     return {"align": align_total, "mapping": mapping_total, "offline_rpgo": rpgo_total}
 
 
-def load_data_size_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> float:
+def load_data_size_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                         robot_names: List, critical_invocation_params: Dict[str, Any]) -> float:
     """
     Load the estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
     for a ROMAN run on a robot pair.
 
-    Reads ``align/<robot0>_<robot1>/align.data_size.txt``, a single
+    Reads ``align.data_size.txt`` at that pair's align result dir, a single
     ``"Total submap data size (bytes): <value>"`` line.
 
     Returns:
         The data size in decimal MB (not MiB), or ``None`` if the file is missing.
     """
-    user = getpass.getuser()
-    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method + '/' + \
-                      (robot_names[0] + '_' + robot_names[1]))
-
-    data_size_path = run_folder / 'align' / (robot_names[0] + '_' + robot_names[1]) / 'align.data_size.txt'
+    align_dir = system_params.align_result_dir(Path(roman_root) / "results", dataset_prefix, dataset_name,
+                                                robot_names[0], robot_names[1], critical_invocation_params)
+    data_size_path = align_dir / 'align.data_size.txt'
     if not data_size_path.exists():
         return None
 
@@ -313,15 +334,15 @@ def load_data_size_ROMAN(dataset_prefix: str, dataset_name: str, method: str, ro
     return data_size_bytes / 1_000_000
 
 
-def load_mg_match_stats_ROMAN(dataset_prefix: str, dataset_name: str, method: str, robot_names: List) -> Dict:
+def load_mg_match_stats_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                              robot_names: List, critical_invocation_params: Dict[str, Any]) -> Dict:
     """
     Count MG two-stage matcher calls by stage for a robot pair.
 
-    Reads ``align/<robot_a>_<robot_b>/align.mg_match.txt`` for each of the (up
-    to three) intra-/inter-robot combinations under this pair's align folder,
-    and tallies how many calls reached stage 0, 1, or 2. Also collects, across
-    all stage-1/2 calls, the values of ``n_stage1_matches`` and, across all
-    stage-2 calls, ``n_stage2_child_clipper``,
+    Reads ``align.mg_match.txt`` for each of the (up to three) intra-/inter-robot combinations,
+    at each combination's own align result dir, and tallies how many calls reached stage 0, 1, or
+    2. Also collects, across all stage-1/2 calls, the values of ``n_stage1_matches`` and, across
+    all stage-2 calls, ``n_stage2_child_clipper``,
     ``n_stage2_unmatched_children_to_parents_clipper``,
     ``n_stage2_unmatched_children_to_children_clipper``, and
     ``stage2_point_error``. Fields absent from a given line (older log
@@ -334,9 +355,7 @@ def load_mg_match_stats_ROMAN(dataset_prefix: str, dataset_name: str, method: st
         as floats, possibly ``nan``; the rest as ints), or ``None`` if no
         ``align.mg_match.txt`` files were found for this pair.
     """
-    user = getpass.getuser()
-    run_folder = Path('/home/' + user + '/Research/ROMAN_DEVEL/results/' + dataset_prefix + '_' + dataset_name + '_' + method + '/' + \
-                      (robot_names[0] + '_' + robot_names[1]))
+    results_root = Path(roman_root) / "results"
 
     stage1_fields = ["n_stage1_matches"]
     stage2_fields = [
@@ -352,7 +371,9 @@ def load_mg_match_stats_ROMAN(dataset_prefix: str, dataset_name: str, method: st
     field_values = {field: [] for field in stage1_fields + stage2_fields}
     found_any = False
     for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
-        mg_match_path = run_folder / 'align' / f'{name_a}_{name_b}' / 'align.mg_match.txt'
+        align_dir = system_params.align_result_dir(results_root, dataset_prefix, dataset_name,
+                                                    name_a, name_b, critical_invocation_params)
+        mg_match_path = align_dir / 'align.mg_match.txt'
         if not mg_match_path.exists():
             continue
         found_any = True
@@ -372,8 +393,8 @@ def load_mg_match_stats_ROMAN(dataset_prefix: str, dataset_name: str, method: st
     return {"stage_counts": stage_counts, **field_values} if found_any else None
 
 
-def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, robot_names: List,
-                         load_gt_data_fn,
+def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str, method: str, robot_names: List,
+                         critical_invocation_params: Dict[str, Any], load_gt_data_fn,
                          figures_base_dir: Path = None, visualize: bool = False, do_individual_calcs: bool = False,
                          viz_config: Dict = None,
                          rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> ROMANResults:
@@ -386,12 +407,16 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
     and saves trajectory / LC overlay plots.
 
     Args:
+        roman_root: Path to the roman repo checkout.
+        system_params: From load_system_params_ROMAN, for this dataset_prefix/dataset_name/method.
         dataset_prefix: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
             ``"GrAco"``), forwarded to :func:`load_est_data_ROMAN`,
             :func:`load_kimera_rpgo_first_stage_est_data_ROMAN`, and :func:`load_LC_data_ROMAN`.
         dataset_name: Dataset identifier (e.g. ``"V2.3.AC"``).
-        method: Run name used to locate the ROMAN result folder (e.g. ``"ROMAN"``).
+        method: Run name, used for figure/file naming only (system_params already resolves the
+            actual result directories).
         robot_names: Two-element list of robot names (e.g. ``["Husky1", "Drone1"]``).
+        critical_invocation_params: Other data-affecting args from the original run invocation.
         load_gt_data_fn: Callable ``(dataset_name, robot_names) -> List[OdometryData]``,
             dataset-specific.
         figures_base_dir: Directory under which ``<dataset_prefix>/<dataset_name>/traj`` and
@@ -433,7 +458,8 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
     robot0_name = robot_names[0]
     robot1_name = robot_names[1]
 
-    est_data_lst: List[OdometryData] = load_est_data_ROMAN(dataset_prefix, dataset_name, method, robot_names)
+    est_data_lst: List[OdometryData] = load_est_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                           robot_names, critical_invocation_params)
     gt_data_lst: List[OdometryData] = load_gt_data_fn(dataset_name, robot_names)
     est_data_robot0, est_data_robot1 = est_data_lst
     gt_data_robot0, gt_data_robot1 = gt_data_lst
@@ -450,7 +476,8 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
     # Calculate first-stage (pre-optimize) metrics
     first_stage_metrics = None
     try:
-        first_stage_est_lst = load_kimera_rpgo_first_stage_est_data_ROMAN(dataset_prefix, dataset_name, method, robot_names)
+        first_stage_est_lst = load_kimera_rpgo_first_stage_est_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                                          robot_names, critical_invocation_params)
         first_stage_est_lst, first_stage_gt_lst = PathData.make_start_and_end_times_match(first_stage_est_lst, gt_data_lst)
         first_stage_est: PathData = PathData.concatenate_PathData(first_stage_est_lst)
         first_stage_gt: PathData = PathData.concatenate_PathData(first_stage_gt_lst)
@@ -521,15 +548,17 @@ def calculate_merged_ate(dataset_prefix: str, dataset_name: str, method: str, ro
                            yaw_rotation_deg=yaw_rotation_deg,
                            save_path=str(traj_dir / f'traj_{pair_lbl}_{method}_onlyGT.pdf'))
 
-        # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode
-        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate([robot0_name, robot1_name])}
+        # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
+        # Letters are assigned by sorted robot order to match the g2o files' own convention.
+        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate(sorted([robot0_name, robot1_name]))}
         gt_dict_display = {name_map[robot0_name]: gt_data_robot0, name_map[robot1_name]: gt_data_robot1}
         est_dataList =  [est_data_align_robot0,       est_data_align_robot1]
         est_isGTList =  [               False,                        False]
         est_nameList =  [name_map[robot0_name], name_map[robot1_name]]
         est_colorList = [robot_name_to_color[name] for name in est_nameList]
         for lc_filter in LCFilterMode:
-            _, lc_data_inlier = load_LC_data_ROMAN(dataset_prefix, dataset_name, method, [robot0_name, robot1_name],
+            _, lc_data_inlier = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                   [robot0_name, robot1_name], critical_invocation_params,
                                                    lc_filter=lc_filter, names_override=names_override_display)
             lc_data_inlier.calculate_errors(gt_dict_display)
 
@@ -1297,7 +1326,8 @@ def _generate_traj_lc_comb_figure(
     slide_doc.close()
 
 
-def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List[str], all_robots: List[str],
+def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: str, run_names: List[str], all_robots: List[str],
+                        critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path, load_gt_data_fn, viz_config: Dict) -> None:
     """
     Generate all evaluation figures and tables for one dataset.
@@ -1311,11 +1341,13 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
         ATE for each pair (lc_with_context/).
 
     Args:
+        roman_root: Path to the roman repo checkout.
         dataset_prefix: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
             ``"GrAco"``).
         dataset_name: Dataset identifier (e.g. ``"V2.3.AC"``).
         run_names: Ordered list of run/method identifiers to evaluate.
         all_robots: All robot names in the dataset; every pairwise combination is evaluated.
+        critical_invocation_params: Other data-affecting args from the original run invocation.
         figures_base_dir: Directory under which ``figures/<dataset_prefix>/<dataset_name>/`` outputs are saved.
         load_gt_data_fn: Callable ``(dataset_name, robot_names) -> List[OdometryData]``,
             dataset-specific.
@@ -1346,6 +1378,10 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     # Get all robot pairs to evaluation
     robot_pairs = list(itertools.combinations(all_robots, 2))
 
+    # Load each run's SystemParams once, up front, and reuse it across every pair/table below
+    system_params_by_run = {run_name: load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, run_name)
+                            for run_name in run_names}
+
     # Define mapping between run name and display name
     run_display_names = {
         "ROMAN": "ROMAN (HERCULES replication)",
@@ -1356,8 +1392,8 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     }
 
     # Calculate RMS ATE
-    tasks = [(dataset_prefix, dataset_name, run_name, list(pair), load_gt_data_fn,
-             figures_base_dir, True, False, viz_config)
+    tasks = [(roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name, run_name, list(pair),
+             critical_invocation_params, load_gt_data_fn, figures_base_dir, True, False, viz_config)
              for pair in robot_pairs
              for run_name in run_names]
     with Pool() as pool:
@@ -1366,7 +1402,7 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
     # All computed results for this dataset, keyed by run then robot-pair column —
     # the single object threaded through every table/figure function below.
     results: Dict[str, Dict[str, ROMANResults]] = {run: {} for run in run_names}
-    for (_, _, run_name, pair, *_), result in zip(tasks, pool_results):
+    for (_, _, _, _, run_name, pair, *_), result in zip(tasks, pool_results):
         results[run_name][pair_label(*pair)] = result
 
     # Define sequence pair column names
@@ -1376,12 +1412,16 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
 
     # Load per-pair runtime, data size, and MG match stats for every run
     for run_name in run_names:
+        system_params = system_params_by_run[run_name]
         for pair in robot_pairs:
             col = pair_label(*pair)
             result = results[run_name][col]
-            result.timing = load_timing_data_ROMAN(dataset_prefix, dataset_name, run_name, list(pair))
-            result.data_size_mb = load_data_size_ROMAN(dataset_prefix, dataset_name, run_name, list(pair))
-            result.mg_match = load_mg_match_stats_ROMAN(dataset_prefix, dataset_name, run_name, list(pair))
+            result.timing = load_timing_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                    list(pair), critical_invocation_params)
+            result.data_size_mb = load_data_size_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                        list(pair), critical_invocation_params)
+            result.mg_match = load_mg_match_stats_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
+                                                         list(pair), critical_invocation_params)
 
     _save_timing_table(run_names, cols, run_display_names, results, base_dir / 'timing_table.pdf')
     _save_data_size_table(run_names, cols, run_display_names, results, base_dir / 'data_size_table.pdf')
@@ -1409,7 +1449,8 @@ def run_ROMAN_evaluation(dataset_prefix: str, dataset_name: str, run_names: List
             labels_list: List[str] = []
             group_indices: List[int] = []
             for i, run_name in enumerate(run_names):
-                merged_lc, merged_lc_inlier = load_LC_data_ROMAN(dataset_prefix, dataset_name, run_name, list(pair), lc_filter=lc_filter)
+                merged_lc, merged_lc_inlier = load_LC_data_ROMAN(roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name,
+                                                                 list(pair), critical_invocation_params, lc_filter=lc_filter)
                 for lc in (merged_lc, merged_lc_inlier):
                     lc.calculate_errors(gt_dict)
                     lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)

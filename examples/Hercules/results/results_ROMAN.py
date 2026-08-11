@@ -89,9 +89,11 @@ def main():
     }
 
     figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
+    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    run_ROMAN_evaluation("hercules", dataset_name, run_names, all_robots, figures_base_dir,
-                         load_gt_data_ROMAN, viz_config)
+    run_ROMAN_evaluation(roman_root, "hercules", dataset_name, run_names, all_robots, critical_invocation_params,
+                         figures_base_dir, load_gt_data_ROMAN, viz_config)
 
 if __name__ == "__main__":
     main()

@@ -2,7 +2,6 @@ import matplotlib
 matplotlib.use('Agg')
 
 from copy import deepcopy
-import cv2
 from decimal import Decimal
 import numpy as np
 import os
@@ -850,13 +849,12 @@ class TestPathData(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2')
-    def test_visualize_2D_video_no_save_path(self, mock_cv2):
+    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.VideoWriter')
+    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.destroyAllWindows')
+    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.waitKey', return_value=-1)
+    @unittest.mock.patch('robotdataprocess.utils.VideoGenerator.cv2.imshow')
+    def test_visualize_2D_video_no_save_path(self, mock_imshow, mock_waitkey, mock_destroy_all_windows, mock_video_writer):
         """ Test the live-playback code path (mocked cv2 window, no save). """
-        mock_cv2.LINE_AA = cv2.LINE_AA
-        mock_cv2.FONT_HERSHEY_SIMPLEX = cv2.FONT_HERSHEY_SIMPLEX
-        mock_cv2.waitKey.return_value = -1
-
         path = PathData(
             frame_id="robot",
             timestamps=np.array([0.0, 1.0, 2.0], dtype=object),
@@ -866,9 +864,9 @@ class TestPathData(unittest.TestCase):
 
         PathData.visualize_2D_video([path], ['#00FF00'], ['Robot'], video_duration_sec=0.5, fps=4)
 
-        self.assertEqual(mock_cv2.imshow.call_count, 2)  # 0.5 sec * fps=4
-        mock_cv2.destroyAllWindows.assert_called_once()
-        mock_cv2.VideoWriter.assert_not_called()
+        self.assertEqual(mock_imshow.call_count, 2)  # 0.5 sec * fps=4
+        mock_destroy_all_windows.assert_called_once()
+        mock_video_writer.assert_not_called()
 
     # =========================================================================
     # ======= make_start_and_end_times_match error (line 704) =================
