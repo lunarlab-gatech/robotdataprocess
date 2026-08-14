@@ -54,9 +54,9 @@ def main():
 
     See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
-    all_robots = ["Husky1", "Drone1"]
-    run_names = ["MG_NONM", "MG"] # "ROMAN_O"
-    dataset_name = "SmallTownSequence"
+    all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    run_names = ["ROMAN_O", "MG_TS"] # "ROMAN_O"
+    dataset_name = "V2.4.C"
 
     # Environment image / robot display config
     user = getpass.getuser()
@@ -93,7 +93,7 @@ def main():
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
     run_ROMAN_evaluation(roman_root, "hercules", dataset_name, run_names, all_robots, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config)
+                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()

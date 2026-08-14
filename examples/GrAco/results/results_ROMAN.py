@@ -57,7 +57,7 @@ def main():
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
     run_ROMAN_evaluation(roman_root, "graco", dataset_name, run_names, all_robots, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config)
+                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()

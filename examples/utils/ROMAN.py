@@ -38,7 +38,7 @@ def load_system_params_ROMAN(roman_root: Path, dataset_prefix: str, dataset_name
     from roman.params.data_params import DataParams
     from roman.params.system_params import SystemParams
 
-    experiment_path = roman_root / "params" / "experiments" / f"{dataset_prefix}_{dataset_name}_{method}.yaml"
+    experiment_path = roman_root / "params" / "experiments" / dataset_prefix / f"{dataset_name}_{method}.yaml"
     placeholder_data_params = DataParams(_img_data=None, _depth_data=None, _pose_data=None,
                                          img_data_params=None, T_camera_flu=np.eye(4))
     return SystemParams.from_experiment_config(str(experiment_path), {"_placeholder": placeholder_data_params})
@@ -240,7 +240,7 @@ def load_LC_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dat
 
     # Load the per-pair inlier g2o files (these are pair-specific)
     lc_inlier_data_list = []
-    for name_a, name_b in pair_fn(robot_names, 2):
+    for name_a, name_b in pair_fn(sorted_names, 2):
         letter_a = letter_by_name[name_a]
         letter_b = letter_by_name[name_b]
         if name_a == name_b:
@@ -575,7 +575,7 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
 def _save_ate_tables(run_names: List[str], cols: List[str],
                      run_display_names: Dict[str, str],
                      results: Dict[str, Dict[str, ROMANResults]],
-                     save_path: Path) -> None:
+                     save_path: Path, ate_threshold_m: float, rot_threshold_deg: float) -> None:
     """
     Build and save the ATE/RTE summary PDF tables.
 
@@ -583,11 +583,13 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     post-optimize merged RMS ATE, post-optimize merged RMS absolute rotation
     angle error, post-optimize merged RMS RTE, and post-optimize merged RMS
     relative rotation angle error — styled so that cells with no loop
-    closures or a value > 20 are highlighted in red. The pre-optimize table
-    is suppressed for pairs with zero total inter-robot LC; the post-optimize
-    ATE, rotation error, RTE, and relative rotation error tables for pairs
-    with zero inlier inter-robot LC (both via ``results[...].lc_stats_by_mode``/
-    ``lc_inlier_stats_by_mode`` at ``LCFilterMode.ONLY_INTER_LC``).
+    closures, or a value above ate_threshold_m (translation tables) / above
+    rot_threshold_deg (rotation tables), are highlighted in red. The
+    pre-optimize table is suppressed for pairs with zero total inter-robot LC;
+    the post-optimize ATE, rotation error, RTE, and relative rotation error
+    tables for pairs with zero inlier inter-robot LC (both via
+    ``results[...].lc_stats_by_mode``/``lc_inlier_stats_by_mode`` at
+    ``LCFilterMode.ONLY_INTER_LC``).
 
     Each table gets a trailing "Average" column (the row-wise mean across
     the pair columns, ignoring suppressed/NaN pairs), set off from the pair
@@ -599,6 +601,11 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
         run_display_names: Maps each run identifier to its display name in the table.
         results: ``DatasetSequenceResults`` keyed by run then column.
         save_path: Destination PDF path.
+        ate_threshold_m: Red-highlight cutoff (m) for the translation-error tables
+            (ATE pre/post-optimize, RTE). Dataset-specific (e.g. smaller for a
+            smaller-area dataset like AirMuseum than for Hercules).
+        rot_threshold_deg: Red-highlight cutoff (deg) for the rotation-error tables
+            (absolute and relative).
     """
     def make_raw_df(metric_fn, lc_stats_selector) -> pd.DataFrame:
         def value_fn(run, col):
@@ -614,7 +621,8 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     inter_lc = lambda r: r.lc_stats_by_mode.get(LCFilterMode.ONLY_INTER_LC)
     inter_lc_inlier = lambda r: r.lc_inlier_stats_by_mode.get(LCFilterMode.ONLY_INTER_LC)
 
-    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(20)
+    color_fn_m = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m)
+    color_fn_deg = TableData.color_fn_NAVY_RED_missing_or_above(rot_threshold_deg)
     fmt = TableData.fmt_fixed(3)
     # The trailing "Average" column is a summary column, not another pair —
     # set it off from the pair columns with a heavy divider.
@@ -623,29 +631,29 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     first_stage_ate_table = make_highlighted_table(
                    make_raw_df(lambda r: r.first_stage_metrics.APE.translation_part.rmse if r.first_stage_metrics else None, inter_lc),
                    "Merged RMS ATE (m) — Pre-Optimize",
-                   color_fn=color_fn, fmt=fmt, higher_is_better=False)
+                   color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
     ate_table = make_highlighted_table(
                    make_raw_df(lambda r: r.merged_metrics.APE.translation_part.rmse, inter_lc_inlier),
                    "Merged RMS ATE (m)",
-                   color_fn=color_fn, fmt=fmt, higher_is_better=False)
+                   color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
     rot_err_table = make_highlighted_table(
                    make_raw_df(lambda r: r.merged_metrics.APE.rotation_angle_deg.rmse, inter_lc_inlier),
                    "Merged RMS Absolute Rotation Error (deg)",
-                   color_fn=color_fn, fmt=fmt, higher_is_better=False)
+                   color_fn=color_fn_deg, fmt=fmt, higher_is_better=False)
     rte_table = make_highlighted_table(
                    make_raw_df(lambda r: r.merged_metrics.RPE.translation_part.rmse, inter_lc_inlier),
                    "Merged RMS RTE (m) - Δ5m",
-                   color_fn=color_fn, fmt=fmt, higher_is_better=False)
+                   color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
     rel_rot_err_table = make_highlighted_table(
                    make_raw_df(lambda r: r.merged_metrics.RPE.rotation_angle_deg.rmse, inter_lc_inlier),
                    "Merged RMS Relative Rotation Error (deg) - Δ5m",
-                   color_fn=color_fn, fmt=fmt, higher_is_better=False)
+                   color_fn=color_fn_deg, fmt=fmt, higher_is_better=False)
 
     dfs = [first_stage_ate_table, ate_table, rot_err_table, rte_table, rel_rot_err_table]
     save_path.parent.mkdir(parents=True, exist_ok=True)
     TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, heavy_divider_before=heavy_divider_before)
 
-    color_fn_latex = TableData.color_fn_NAVY_RED_missing_or_above(20, style=TableData.TableStyleName.LATEX)
+    color_fn_latex = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m, style=TableData.TableStyleName.LATEX)
     ate_table.format_and_color_cells(color_fn=color_fn_latex, fmt=fmt)
     ate_table.highlight_best_and_worst_results_by_column(higher_is_better=False, rank_styles=[TableData.TextStyle.BOLD])
     ate_table.set_title("Method")
@@ -657,7 +665,7 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
 def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str]],
                           run_display_names: Dict[str, str],
                           results: Dict[str, Dict[str, ROMANResults]],
-                          save_path: Path) -> None:
+                          save_path: Path, ate_threshold_m: float) -> None:
     """
     Build and save the per-robot RMS ATE/RPE split summary PDF tables.
 
@@ -673,6 +681,7 @@ def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str
         run_display_names: Maps each run identifier to its display name in the table.
         results: ``DatasetSequenceResults`` keyed by run then column.
         save_path: Destination PDF path.
+        ate_threshold_m: Red-highlight cutoff (m) for both tables (both are translation-only).
     """
     sub_cols = [f"{pair_label(a, b)}\n{name}" for a, b in robot_pairs for name in (a, b)]
 
@@ -687,7 +696,7 @@ def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str
             return float('nan') if robot_metrics is None else metric_fn(robot_metrics)
         return _make_raw_df(run_names, run_display_names, lambda run: sub_cols, value_fn)
 
-    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(20)
+    color_fn = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m)
     fmt = TableData.fmt_fixed(3)
 
     dfs = [
@@ -734,7 +743,7 @@ def _save_timing_table(run_names: List[str], cols: List[str],
         raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
         return raw_df
 
-    style = TableData.TableStyleName.OVIEDO_HIGH_SCHOOL
+    style = TableData.TableStyleName.GEORGIA_TECH
     color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
     fmt = TableData.fmt_fixed(1)
     # The trailing "Average" column is a summary column, not another pair —
@@ -783,7 +792,7 @@ def _save_data_size_table(run_names: List[str], cols: List[str],
         raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
         return raw_df
 
-    style = TableData.TableStyleName.TONI_KENSA
+    style = TableData.TableStyleName.GEORGIA_TECH
     color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
     fmt = TableData.fmt_fixed(2)
     # The trailing "Average" column is a summary column, not another pair —
@@ -839,7 +848,7 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
 
     percent_fmt = TableData.fmt_fixed(1, suffix='%')
     int_fmt = TableData.fmt_fixed(0)
-    color_fn = TableData.color_fn_NAVY_RED_missing_or_equal(style=TableData.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY)
+    color_fn = TableData.color_fn_NAVY_RED_missing_or_equal(style=TableData.TableStyleName.GEORGIA_TECH)
     latex_color_fn = TableData.color_fn_NAVY_RED_missing_or_equal(style=TableData.TableStyleName.LATEX)
     # The trailing "Average" column on the success rate tables is a summary
     # column, not another pair — set it off from the pair columns with a
@@ -868,7 +877,7 @@ def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
                                 "Inlier LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.BRIGHAM_YOUNG_UNIVERSITY,
+    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.GEORGIA_TECH,
                      heavy_divider_before=heavy_divider_before)
 
     if lc_filter == LCFilterMode.ALL:
@@ -1042,7 +1051,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
                                  group_indices: List[int],
                                  stats_list: List[Dict],
                                  results: Dict[str, Dict[str, ROMANResults]],
-                                 run_names: List[str], save_dir: Path) -> None:
+                                 run_names: List[str], save_dir: Path, ate_threshold_m: float) -> None:
     """
     Generate and save a composite 16:9 slide figure for one robot pair.
 
@@ -1082,6 +1091,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
             :func:`_save_ate_tables`.
         run_names: Ordered list of run identifiers.
         save_dir: Directory in which to save ``lc_context_<col>.pdf``.
+        ate_threshold_m: Red-highlight cutoff (m) for the ATE table, matching :func:`_save_ate_tables`.
     """
     expected_group_indices = [i for i in range(len(run_names)) for _ in range(2)]
     assert group_indices == expected_group_indices, (
@@ -1163,7 +1173,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 
     table_ate = make_highlighted_table(
         pd.DataFrame({COL_ATE: ate_raw}), "Method",
-        color_fn=TableData.color_fn_NAVY_RED_missing_or_above(20), fmt=TableData.fmt_fixed(2), higher_is_better=False)
+        color_fn=TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m), fmt=TableData.fmt_fixed(2), higher_is_better=False)
 
     # Scatter in center
     LoopClosureData.visualize_error_scatter(
@@ -1328,7 +1338,8 @@ def _generate_traj_lc_comb_figure(
 
 def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: str, run_names: List[str], all_robots: List[str],
                         critical_invocation_params: Dict[str, Any],
-                        figures_base_dir: Path, load_gt_data_fn, viz_config: Dict) -> None:
+                        figures_base_dir: Path, load_gt_data_fn, viz_config: Dict,
+                        ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
     """
     Generate all evaluation figures and tables for one dataset.
 
@@ -1352,6 +1363,11 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
         load_gt_data_fn: Callable ``(dataset_name, robot_names) -> List[OdometryData]``,
             dataset-specific.
         viz_config: Dict forwarded to :func:`calculate_merged_ate` (see its docstring).
+        ate_threshold_m: Red-highlight cutoff (m) for every translation-error table
+            (ATE pre/post-optimize, individual ATE/RPE, RTE). Dataset-specific -- e.g.
+            a smaller-area dataset like AirMuseum should use a smaller value than Hercules.
+        rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table
+            (absolute and relative). Defaults to 10 degrees for all datasets.
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/``:
       - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
@@ -1387,8 +1403,8 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
         "ROMAN": "ROMAN (HERCULES replication)",
         "ROMAN_O": "ROMAN",
         "ROMAN_NM": "NM + ROMAN",
-        "MG": "MeronomyGraph (No Global MeronomyGraph)",
-        "MG_NONM_O3_GB": "MeronomyGraph"
+        "MG": "MeronomyGraph (Holonym Matching Only)",
+        "MG_TS": "MeronomyGraph"
     }
 
     # Calculate RMS ATE
@@ -1474,7 +1490,7 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
                 results[run_name][col].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
             _generate_lc_context_figure(pair, col, lc_data_list, labels_list, group_indices,
-                                        stats, results, run_names, subdirs['lc_with_context'])
+                                        stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
             _generate_lc_side_by_side_figure(pair, col, lc_data_list, labels_list, group_indices,
                                              run_names, subdirs['lc_side_by_side'])
             _generate_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
@@ -1484,8 +1500,9 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
     # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
     # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
     # connect the pair's pose graph — intra-robot closures don't merge the two robots' trajectories.
-    _save_ate_tables(run_names, cols, run_display_names, results, base_dir / 'metrics_table.pdf')
+    _save_ate_tables(run_names, cols, run_display_names, results, base_dir / 'metrics_table.pdf',
+                     ate_threshold_m, rot_threshold_deg)
 
     # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
     _save_ate_split_table(run_names, robot_pairs, run_display_names, results,
-                          base_dir / 'ate_split_table.pdf')
+                          base_dir / 'ate_split_table.pdf', ate_threshold_m)

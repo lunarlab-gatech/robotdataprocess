@@ -41,7 +41,7 @@ def main():
     """
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
-    run_names = ["ROMAN_O", "MG"]
+    run_names = ["ROMAN_O", "MG_TS"]
     dataset_name = "Scenario5"
 
     # Environment image / robot display config
@@ -68,7 +68,7 @@ def main():
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
 
     run_ROMAN_evaluation(roman_root, "airmuseum", dataset_name, run_names, all_robots, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config)
+                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
 
 if __name__ == "__main__":
     main()
