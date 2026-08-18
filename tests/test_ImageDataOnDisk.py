@@ -316,6 +316,80 @@ class TestImageDataOnDisk(unittest.TestCase):
             image_data.depth_to_rgb(100.0)
 
     # =========================================================================
+    # ================================ resize =================================
+    # =========================================================================
+
+    def test_resize_upscale(self):
+        """ Test resize to larger dimensions upscales pixel content via nearest-neighbor. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        orig_width, orig_height = img_data.width, img_data.height
+        original_image = img_data.images[0]
+        new_width, new_height = orig_width * 2, orig_height * 2
+
+        self.assertEqual(len(img_data.images.transformations), 0)
+        img_data.resize(new_height, new_width)
+        self.assertEqual(len(img_data.images.transformations), 1)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+
+        resized_image = img_data.images[0]
+        expected = cv2.resize(original_image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+        self.assertEqual(resized_image.shape[:2], (new_height, new_width))
+        np.testing.assert_array_equal(resized_image, expected)
+
+    def test_resize_downscale(self):
+        """ Test resize to smaller dimensions downscales dimensions. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        orig_width, orig_height = img_data.width, img_data.height
+        new_width, new_height = orig_width // 2, orig_height // 2
+
+        img_data.resize(new_height, new_width)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+        self.assertEqual(img_data.images[0].shape[:2], (new_height, new_width))
+
+    def test_resize_320x480_to_512x640(self):
+        """ Test resizing a 320(w)x480(h) image to 512(w)x640(h) via nearest-neighbor. """
+        width, height = 320, 480
+        rng = np.random.RandomState(0)
+        image = rng.randint(0, 256, size=(height, width, 3), dtype=np.uint8)
+
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', 'resize_320x480').absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(image).save(str(folder / "1.000000000.png"))
+
+        img_data = ImageDataOnDisk.from_image_files(folder, 'cam')
+        self.assertEqual(img_data.width, width)
+        self.assertEqual(img_data.height, height)
+
+        new_width, new_height = 640, 512
+        img_data.resize(new_height, new_width)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+
+        resized_image = img_data.images[0]
+        expected = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+        self.assertEqual(resized_image.shape[:2], (new_height, new_width))
+        np.testing.assert_array_equal(resized_image, expected)
+
+    def test_resize_nonpositive_dimensions_raises(self):
+        """ Test resize raises if new_height or new_width isn't positive. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+
+        with self.assertRaises(ValueError):
+            img_data.resize(0, img_data.width)
+        with self.assertRaises(ValueError):
+            img_data.resize(img_data.height, 0)
+        with self.assertRaises(ValueError):
+            img_data.resize(-1, -1)
+
+    # =========================================================================
     # ====================== crop_images_to_LiDAR_FOV ========================
     # =========================================================================
 

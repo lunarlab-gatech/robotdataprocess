@@ -257,6 +257,35 @@ class ImageDataOnDisk(ImageData):
         self.encoding = ImageData.ImageEncoding.Mono8 if color_map is None else ImageData.ImageEncoding.RGB8
 
     # =========================================================================
+    # =========================== Manipulation Methods =========================
+    # =========================================================================
+
+    def resize(self, new_height: int, new_width: int) -> None:
+        """
+        Resize every image to (new_height, new_width) using nearest-neighbor
+        interpolation.
+
+        The resize is applied lazily via the transformation pipeline, so no
+        images are read from disk until accessed.
+
+        Args:
+            new_height: Target height in pixels. Must be > 0.
+            new_width: Target width in pixels. Must be > 0.
+
+        Raises:
+            ValueError: If new_height or new_width is not positive.
+        """
+        if new_height <= 0 or new_width <= 0:
+            raise ValueError(f"new_height and new_width must be positive, got ({new_height}, {new_width})")
+
+        def _resize(image: np.ndarray, new_width=new_width, new_height=new_height) -> np.ndarray:
+            return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+
+        self.images.transformations.append(_resize)
+        self.width = new_width
+        self.height = new_height
+
+    # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================
 
