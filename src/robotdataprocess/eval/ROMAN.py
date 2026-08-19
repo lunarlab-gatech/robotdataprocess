@@ -3,6 +3,7 @@ from enum import Enum
 from evo.core.units import Unit
 import itertools
 import math
+import matplotlib
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -106,14 +107,20 @@ def group_label(names) -> str:
     singleton for self-alignment, a pair, or a larger group), joining each
     robot's abbreviation with '-' (e.g. ``("Husky1", "Drone1") -> "H1-D1"``).
     """
+    def initials(core):
+        # Word initials (split on non-alphanumeric separators, e.g. "_") disambiguate
+        # multi-word names sharing a leading letter (e.g. "acl_jackal" -> "AJ" vs "apis" -> "A").
+        segments = [seg for seg in re.split(r'[^A-Za-z0-9]+', core) if seg]
+        return ''.join(seg[0] for seg in segments).upper() if segments else core[0].upper()
+
     def abbrev(n):
-        m = re.match(r'([A-Za-z]+)(\d+)', n)
+        m = re.search(r'(\d+)$', n)
         if m:
-            return m.group(1)[0].upper() + m.group(2)
-        # No trailing number (e.g. "drone", "robotA"): abbreviate to the
-        # first letter, keeping a trailing capital if present to distinguish
-        # same-base-name robots (e.g. "robotA"/"robotB" -> "RA"/"RB").
-        first = n[0].upper()
+            return initials(n[:m.start()]) + m.group(1)
+        # No trailing number (e.g. "drone", "robotA"): abbreviate to word initials,
+        # keeping a trailing capital if present to distinguish same-base-name robots
+        # (e.g. "robotA"/"robotB" -> "RA"/"RB").
+        first = initials(n)
         if len(n) > 1 and n[-1].isupper():
             return first + n[-1]
         return first
@@ -592,7 +599,7 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
     return ROMANResults(first_stage_metrics, metrics_dictionary, robot_metrics)
 
 
-def _save_ate_tables(run_names: List[str], cols: List[str],
+def _save_ate_tables(run_names: List[str], cols: List[str], multi_robot_cols: set,
                      run_display_names: Dict[str, str],
                      results: Dict[str, Dict[str, ROMANResults]],
                      save_path: Path, ate_threshold_m: float, rot_threshold_deg: float) -> None:
@@ -605,11 +612,13 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     relative rotation angle error — styled so that cells with no loop
     closures, or a value above ate_threshold_m (translation tables) / above
     rot_threshold_deg (rotation tables), are highlighted in red. The
-    pre-optimize table is suppressed for pairs with zero total inter-robot LC;
-    the post-optimize ATE, rotation error, RTE, and relative rotation error
-    tables for pairs with zero inlier inter-robot LC (both via
-    ``results[...].lc_stats_by_mode``/``lc_inlier_stats_by_mode`` at
-    ``LCFilterMode.ONLY_INTER_LC``).
+    pre-optimize table is suppressed for multi-robot groups with zero total
+    inter-robot LC; the post-optimize ATE, rotation error, RTE, and relative
+    rotation error tables for multi-robot groups with zero inlier inter-robot
+    LC (both via ``results[...].lc_stats_by_mode``/``lc_inlier_stats_by_mode``
+    at ``LCFilterMode.ONLY_INTER_LC``). Single-robot (self-alignment) groups
+    are never suppressed on LC grounds, since they have no inter-robot LC by
+    definition.
 
     Each table gets a trailing "Average" column (the row-wise mean across
     the pair columns, ignoring suppressed/NaN pairs), set off from the pair
@@ -618,6 +627,8 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     Args:
         run_names: Ordered list of run identifiers (e.g. ``["ROMAN", "MG_TS"]``).
         cols: Ordered list of robot-pair column labels (e.g. ``["H1H2", "H1D1"]``).
+        multi_robot_cols: Subset of ``cols`` whose group has more than one robot --
+            only these are eligible for the zero-inter-robot-LC suppression.
         run_display_names: Maps each run identifier to its display name in the table.
         results: ``DatasetSequenceResults`` keyed by run then column.
         save_path: Destination PDF path.
@@ -630,9 +641,20 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
     def make_raw_df(metric_fn, lc_stats_selector) -> pd.DataFrame:
         def value_fn(run, col):
             result = results[run].get(col)
-            val = metric_fn(result) if result is not None else None
-            lc_stats = lc_stats_selector(result) if result is not None else None
-            suppressed = val is None or (lc_stats or {}).get('num_loop_closures', -1) == 0
+            if result is None:
+                raise ValueError(
+                    f"Missing results for run={run!r}, col={col!r} -- every (run, col) pair in "
+                    "run_names/cols is expected to already be populated in results by this point.")
+            val = metric_fn(result)
+            no_inter_lc = False
+            if col in multi_robot_cols:
+                lc_stats = lc_stats_selector(result)
+                if lc_stats is None:
+                    raise ValueError(
+                        f"Missing {LCFilterMode.ONLY_INTER_LC.name} LC stats for run={run!r}, col={col!r} -- "
+                        "expected to always be populated by the LC-filter loop before this table is built.")
+                no_inter_lc = lc_stats['num_loop_closures'] == 0
+            suppressed = val is None or no_inter_lc
             return float('nan') if suppressed else val
         raw_df = _make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
         raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
@@ -1415,6 +1437,24 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
       - ``traj_lc_comb/``      — per-group 2x2 combination of the per-method traj_lc slides
     """
 
+    # results[run_name] is keyed by group_label(group) below; two different groups that
+    # abbreviate to the same label would silently collide and overwrite each other's results
+    # (e.g. "acl_jackal" and "acl_jackal2" both -> "A" before group_label's trailing-digit fix).
+    # Fail loudly here instead of losing a column silently.
+    cols_by_label: Dict[str, List[Tuple[str, ...]]] = {}
+    for group in robot_groups:
+        cols_by_label.setdefault(group_label(group), []).append(group)
+    collisions = {label: groups for label, groups in cols_by_label.items() if len(groups) > 1}
+    if collisions:
+        raise ValueError(f"group_label collisions for {dataset_name}: {collisions}")
+
+    # calculate_merged_ate below plots via multiprocessing.Pool worker processes; interactive
+    # backends (Tk/Qt) aren't fork-safe and can freeze the whole desktop when several workers
+    # try to touch the display at once. Force Agg regardless of whatever backend an earlier
+    # import may have already selected -- safe here since this function never shows interactive
+    # figures (every plot is saved via save_path).
+    matplotlib.use("Agg", force=True)
+
     # Load each run's SystemParams once, up front, and reuse it across every group/table below
     system_params_by_run = {run_name: load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, run_name)
                             for run_name in run_names}
@@ -1521,7 +1561,9 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
     # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
     # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
     # connect the group's pose graph — intra-robot closures don't merge separate robots' trajectories.
-    _save_ate_tables(run_names, cols, run_display_names, results, base_dir / 'metrics_table.pdf',
+    # Single-robot groups have no inter-robot LC by definition, so they're excluded from suppression.
+    multi_robot_cols = {group_label(g) for g in robot_groups if len(g) > 1}
+    _save_ate_tables(run_names, cols, multi_robot_cols, run_display_names, results, base_dir / 'metrics_table.pdf',
                      ate_threshold_m, rot_threshold_deg)
 
     # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
