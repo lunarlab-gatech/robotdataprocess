@@ -21,7 +21,9 @@ class TestCoordinateFrame(unittest.TestCase):
         self.assertEqual(CoordinateFrame.ENU.value, 2)
         self.assertEqual(CoordinateFrame.FUR.value, 3)
         self.assertEqual(CoordinateFrame.UFL.value, 4)
-        self.assertEqual(CoordinateFrame.NONE.value, 5)
+        self.assertEqual(CoordinateFrame.LDB.value, 5)
+        self.assertEqual(CoordinateFrame.RDF.value, 6)
+        self.assertEqual(CoordinateFrame.NONE.value, 7)
 
     def test_get_rotation_ned_to_flu_matches_path_data(self):
         """ Test get_rotation(NED, FLU) matches the hardcoded matrix in PathData.to_coordinate_frame. """
@@ -30,6 +32,22 @@ class TestCoordinateFrame(unittest.TestCase):
                              [0,  0, -1]])
 
         np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.NED, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_ldb_to_flu(self):
+        """ Test get_rotation(LDB, FLU) -- LDB's X/Y/Z axes point Left/Down/Back in FLU. """
+        R_frame = np.array([[0,  0, -1],
+                             [1,  0,  0],
+                             [0, -1,  0]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.LDB, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_rdf_to_flu(self):
+        """ Test get_rotation(RDF, FLU) -- RDF's (optical) X/Y/Z axes point Right/Down/Forward in FLU. """
+        R_frame = np.array([[0,  0,  1],
+                             [-1, 0,  0],
+                             [0, -1,  0]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.RDF, CoordinateFrame.FLU), R_frame)
 
     def test_get_rotation_ned_to_flu_matches_scipy_euler(self):
         """ Test get_rotation(NED, FLU) matches R.from_euler('x', 180, degrees=True), as used in TransformationData.to_coordinate_frame. """

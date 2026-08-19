@@ -196,6 +196,15 @@ class CameraData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in CameraData. """
         pass
 
+    def get_R(self) -> NDArray:
+        """
+        Returns a copy of this camera's rectification matrix ``R``.
+
+        Useful for saving off the pre-rectification value before
+        ``ImageDataOnDisk.undistort_imagery_stereo`` resets ``R`` to identity.
+        """
+        return self.R.copy()
+
     # =========================================================================
     # ========================= Manipulation Methods ==========================
     # =========================================================================

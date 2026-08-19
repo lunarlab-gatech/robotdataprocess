@@ -98,10 +98,18 @@ class PathData(SequentialData):
             end: The latest timestamp to keep. If None, keeps all data from ``start`` onward.
         """
 
-        # Create boolean mask of data to keep
+        # Create boolean mask of data to keep, then apply it
         mask = ((self.timestamps >= start) & (self.timestamps <= end)) if end is not None else (self.timestamps >= start)
+        self.crop_data_by_mask(mask)
 
-        # Apply mask
+    def crop_data_by_mask(self, mask: np.ndarray):
+        """
+        Will crop the data so only rows where ``mask`` is True are kept.
+
+        Args:
+            mask: Boolean mask over ``self.timestamps`` (and the other per-row arrays) marking which rows to keep.
+        """
+
         self.timestamps = self.timestamps[mask]
         self.positions = self.positions[mask]
         self.orientations = self.orientations[mask]
@@ -202,7 +210,7 @@ class PathData(SequentialData):
             print(f"Data already in {target_frame.name} coordinate frame, returning...")
             return
 
-        if self.frame == CoordinateFrame.NED and target_frame == CoordinateFrame.FLU:
+        if target_frame == CoordinateFrame.FLU and self.frame in (CoordinateFrame.NED, CoordinateFrame.LDB):
             R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
 
             if transform_type == TransformType.CHANGE_OF_BASIS:
@@ -1414,24 +1422,46 @@ class PathData(SequentialData):
         return PathData(frame_id, all_timestamps, all_positions, all_orientations, frame)
     
     @staticmethod
-    def seperate_PathData(original_PathDatas: list[PathData], merged_PathData: PathData) -> list[PathData]:
+    def seperate_PathData(original_PathDatas: list[PathData], merged_PathData: PathData,
+                          merged_PathData_paired: Union[PathData, None] = None
+                          ) -> Union[list[PathData], Tuple[list[PathData], list[PathData]]]:
         """
         Inverse of concatenate_PathData(); needs the original objects to know the timestamps
         that each trajectory is found on.
+
+        If merged_PathData_paired is given, it must be row-aligned with merged_PathData
+        (index i in one corresponds to index i in the other) but need not share exact
+        timestamp values per row -- e.g. the gt/est outputs of align_and_calculate_traj_errors,
+        where associate_trajectories only matches within a tolerance and can produce duplicate
+        timestamps. Each segment is then cropped by one shared row mask (computed from
+        merged_PathData's timestamps, applied via crop_data_by_mask) to both sides, rather
+        than cropping each side independently by its own timestamps -- the latter can select
+        a different number of rows on either side of a segment boundary and desync the pair
+        (calculate_traj_errors then fails: "trajectories must have same number of poses").
 
         Args:
             original_PathDatas: The original PathData objects used during concatenation,
                 needed to determine timestamp boundaries.
             merged_PathData: The single merged PathData to split apart.
+            merged_PathData_paired: Optional second merged PathData, row-aligned with
+                merged_PathData, to split apart in lockstep using the same row mask.
 
         Returns:
-            list[PathData]: One PathData per original trajectory, cropped from the merged data.
+            One PathData per original trajectory, cropped from the merged data; or, if
+            merged_PathData_paired is given, a ``(list, paired_list)`` tuple split in lockstep.
+
+        Raises:
+            ValueError: If merged_PathData_paired is given but isn't the same length as
+                merged_PathData (i.e. not row-aligned).
         """
+
+        if merged_PathData_paired is not None and len(merged_PathData.timestamps) != len(merged_PathData_paired.timestamps):
+            raise ValueError("merged_PathData and merged_PathData_paired must be row-aligned (same length)!")
 
         # Calculate the start and end times for the beginning of each robots data
         start_times: list[float] = []
         end_times: list[float] = []
-        for i in range(len(original_PathDatas)): 
+        for i in range(len(original_PathDatas)):
             pd: PathData = original_PathDatas[i]
             if i == 0:
                 start_times.append(pd.timestamps[0])
@@ -1440,16 +1470,24 @@ class PathData(SequentialData):
                 start_times.append(end_times[-1] + 1)
                 end_times.append(pd.timestamps[-1] - pd.timestamps[0] + end_times[-1] + 1)
 
-        # Make deep copies of trajectories
-        merged_PathData_copies: list[PathData] = [copy.deepcopy(merged_PathData) for _ in range(len(original_PathDatas))]
-
-        # Reduce trajectories to the specific time that covers each robot, then restore original timestamps
-        for i, pd in enumerate(merged_PathData_copies):
-            pd.crop_data(Decimal(start_times[i]), Decimal(end_times[i]))
-            if i > 0:
-                offset = Decimal(start_times[i]) - original_PathDatas[i].timestamps[0]
+        # Reduce trajectories to the time range that covers each robot, using one mask (from
+        # merged_PathData) applied to both sides when paired, then restore original timestamps
+        out_list: list[PathData] = []
+        out_list_paired: list[PathData] = []
+        for i in range(len(original_PathDatas)):
+            mask: np.ndarray = (merged_PathData.timestamps >= Decimal(start_times[i])) & (merged_PathData.timestamps <= Decimal(end_times[i]))
+            offset: Decimal = Decimal(start_times[i]) - original_PathDatas[i].timestamps[0] if i > 0 else Decimal(0)
+            for merged, lst in ((merged_PathData, out_list), (merged_PathData_paired, out_list_paired)):
+                merged: Union[PathData, None]
+                lst: list[PathData]
+                if merged is None:
+                    continue
+                pd: PathData = copy.deepcopy(merged)
+                pd.crop_data_by_mask(mask)
                 pd.timestamps = pd.timestamps - offset
-        return merged_PathData_copies
+                lst.append(pd)
+
+        return (out_list, out_list_paired) if merged_PathData_paired is not None else out_list
     
     @staticmethod
     def align(gt_path: PathData, est_path: PathData, max_diff: float) -> Tuple[PathData, PathData]:

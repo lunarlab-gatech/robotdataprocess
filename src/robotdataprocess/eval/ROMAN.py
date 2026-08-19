@@ -449,9 +449,10 @@ def compute_merged_trajectory_metrics(robot_names: List[str], est_data_lst: List
         gt_data, est_data, max_diff=0.1, visualize=False, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
 
     # Split the aligned trajectories back into their single-robot forms, and compute
-    # each robot's individual post-optimize RMS ATE from its already-aligned pair.
-    gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
-    est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
+    # each robot's individual post-optimize RMS ATE from its already-aligned pair. gt_data_lst
+    # and est_data_lst share boundary timestamps after make_start_and_end_times_match, so
+    # either works as the boundary source.
+    gt_data_align_list, est_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align, est_data_align)
 
     robot_metrics = [
         PathData.calculate_traj_errors(gt_align, est_align, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)

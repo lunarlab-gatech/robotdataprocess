@@ -208,6 +208,53 @@ class TestOdometryData(unittest.TestCase):
                 expected_cob, decimal=8
             )
 
+    def test_to_coordinate_frame_LDB(self):
+        """
+        Makes sure that the conversion from LDB (X left, Y down, Z back -- ORB-SLAM3's world
+        frame on the AirMuseum dataset) to FLU functions properly via to_coordinate_frame.
+        """
+
+        # Hand-derived R such that v_flu = R @ v_ldb, independent of CoordinateFrame.get_rotation
+        # (the mechanism under test): LDB's +X/+Y/+Z axes point Left/Down/Back in FLU.
+        R_LDB_TO_FLU = np.array([[0, 0, -1],
+                                 [1, 0, 0],
+                                 [0, -1, 0]])
+
+        odom_data = OdometryData(
+            frame_id='world', child_frame_id='robot',
+            timestamps=np.array([0.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)]], dtype=object),
+            frame=CoordinateFrame.LDB)
+
+        original_position = odom_data.positions[0].astype(np.float64)
+        original_orientation = R.from_quat(odom_data.orientations[0].astype(np.float64))
+
+        odom_data.to_coordinate_frame(CoordinateFrame.FLU)
+
+        self.assertEqual(odom_data.frame, CoordinateFrame.FLU)
+
+        expected_position = R_LDB_TO_FLU @ original_position
+        np.testing.assert_array_almost_equal(odom_data.positions[0].astype(np.float64), expected_position, decimal=8)
+
+        R_frame = R.from_matrix(R_LDB_TO_FLU)
+        expected_orientation = (R_frame * original_orientation * R_frame.inv()).as_quat()
+        np.testing.assert_array_almost_equal(odom_data.orientations[0].astype(np.float64), expected_orientation, decimal=8)
+
+        # Decimal dtype must be preserved after frame conversion
+        self.assertIsInstance(odom_data.positions[0][0], Decimal)
+        self.assertIsInstance(odom_data.orientations[0][0], Decimal)
+
+        # Unsupported conversion (some other frame -> LDB) still raises
+        odom_data2 = OdometryData(
+            frame_id='world', child_frame_id='robot',
+            timestamps=np.array([0.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
+            frame=CoordinateFrame.NED)
+        with np.testing.assert_raises(NotImplementedError):
+            odom_data2.to_coordinate_frame(CoordinateFrame.LDB)
+
     def test_shift_to_start_at_identity(self):
         """
         Tests that we can properly shift a sequence of odometry data to start at the origin.

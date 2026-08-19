@@ -29,7 +29,7 @@ def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryDat
     for rn in robot_names:
         data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_name + '/data/'
                               + rn + '/body_stamped_groundtruth.txt', 'world', 'robot',
-                              CoordinateFrame.FLU, True, [0, 1, 2, 3, 7, 4, 5, 6])
+                              CoordinateFrame.NONE, True, [0, 1, 2, 3, 7, 4, 5, 6])
         data.redefine_local_axes(NAME_TO_FRAME_MAP[rn], CoordinateFrame.FLU)
         gt_data.append(data)
     return gt_data

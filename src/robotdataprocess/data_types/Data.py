@@ -9,11 +9,13 @@ class CoordinateFrame(Enum):
     Enum for different coordinate frames used in robotics.
 
     Attributes:
-        FLU:               X forward,            Y left,    Z up := RHS
-        NED (FRD): X forward (north),    Y right (east),  Z down := RHS
-        ENU (RFU):      right (east), Y forward (north),    Z up := RHS
-        FUR:               X forward,              Y up, Z right := RHS
-        UFL:                    X up,         Y forward,  Z left := RHS
+        FLU:               X forward,            Y left,      Z up := RHS
+        NED (FRD): X forward (north),    Y right (east),    Z down := RHS
+        ENU (RFU):      right (east), Y forward (north),      Z up := RHS
+        FUR:               X forward,              Y up,   Z right := RHS
+        UFL:                    X up,         Y forward,    Z left := RHS
+        LDB:                  X left,            Y down,    Z back := RHS
+        RDF (optical):       X right,            Y down, Z forward := RHS
         NONE: No defined coordinate frame.
     """
 
@@ -22,7 +24,9 @@ class CoordinateFrame(Enum):
     ENU = 2
     FUR = 3
     UFL = 4
-    NONE = 5
+    LDB = 5
+    RDF = 6
+    NONE = 7
 
     @staticmethod
     def _axis_vector(letter: str) -> list:
@@ -58,7 +62,9 @@ class CoordinateFrame(Enum):
             dst_frame: The coordinate frame the output should be expressed in.
 
         Returns:
-            3x3 rotation matrix R such that v_dst = R @ v_src.
+            3x3 rotation matrix R such that v_dst = R @ v_src -- i.e., following this
+            repository's TransformationData convention (T_A_B / H_A_to_B such that
+            p_A = T_A_B @ p_B), R is T_dst_src (would be named H_dst_to_src), not T_src_dst.
         """
         if src_frame == CoordinateFrame.NONE or dst_frame == CoordinateFrame.NONE:
             raise ValueError("Cannot compute a rotation to/from CoordinateFrame.NONE.")

@@ -481,6 +481,48 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(path.positions.astype(float),
                                       [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
 
+    def test_crop_data_by_mask(self):
+        """ Test crop_data_by_mask keeps only the rows marked True in an arbitrary mask. """
+        path = PathData(
+            frame_id="robot",
+            timestamps=np.array([0.5, 1.0, 1.5, 2.0, 2.5], dtype=object),
+            positions=np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1],
+                                   [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU
+        )
+        mask = np.array([True, False, True, False, True])
+        path.crop_data_by_mask(mask)
+        self.assertEqual(path.len(), 3)
+        np.testing.assert_array_equal(path.timestamps.astype(float), [0.5, 1.5, 2.5])
+        np.testing.assert_array_equal(path.positions.astype(float),
+                                      [[0, 0, 0], [2, 2, 2], [4, 4, 4]])
+        np.testing.assert_array_equal(path.orientations.astype(float),
+                                      [[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]])
+
+    def test_crop_data_matches_crop_data_by_mask(self):
+        """ Test that crop_data's [start, end] window is equivalent to crop_data_by_mask given
+        the same boolean mask, since crop_data now delegates to crop_data_by_mask. """
+        timestamps = np.array([0.5, 1.0, 1.5, 2.0, 2.5], dtype=object)
+        positions = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4]], dtype=object)
+        orientations = np.array([[0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1],
+                                 [0, 0, 0, 1], [0, 0, 0, 1]], dtype=object)
+
+        path_via_window = PathData(frame_id="robot", timestamps=timestamps.copy(),
+                                   positions=positions.copy(), orientations=orientations.copy(),
+                                   frame=CoordinateFrame.FLU)
+        path_via_mask = PathData(frame_id="robot", timestamps=timestamps.copy(),
+                                 positions=positions.copy(), orientations=orientations.copy(),
+                                 frame=CoordinateFrame.FLU)
+
+        path_via_window.crop_data(Decimal('1.0'), Decimal('2.0'))
+        mask = (path_via_mask.timestamps >= Decimal('1.0')) & (path_via_mask.timestamps <= Decimal('2.0'))
+        path_via_mask.crop_data_by_mask(mask)
+
+        np.testing.assert_array_equal(path_via_window.timestamps, path_via_mask.timestamps)
+        np.testing.assert_array_equal(path_via_window.positions, path_via_mask.positions)
+        np.testing.assert_array_equal(path_via_window.orientations, path_via_mask.orientations)
+
     def test_crop_to_matched_raises(self):
         """ crop_to_matched raises NotImplementedError. """
         path1 = PathData(
@@ -963,6 +1005,126 @@ class TestPathData(unittest.TestCase):
         self.assertEqual(len(separated), 1)
         self.assertEqual(separated[0], path1)
 
+    def test_seperate_PathData_paired(self):
+        """ Test that seperate_PathData, given merged_PathData_paired, splits both merged
+        objects in lockstep and returns a (list, paired_list) tuple. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([1.1, 2.1, 4.1], dtype=object),
+            positions=np.array([[3.0, 4.0, 6.8], [4.0, 4.0, 6.8], [5.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 1, 0, 0], [0, 1, 0, 0], [1, 0, 0, 0]], dtype=object),
+            frame=CoordinateFrame.ENU)
+
+        concatenated = PathData.concatenate_PathData([path1, path2])
+        # A second "paired" merged object, row-aligned with concatenated but otherwise arbitrary.
+        concatenated_paired = deepcopy(concatenated)
+        concatenated_paired.positions = concatenated_paired.positions + Decimal('100.0')
+
+        gt_list, paired_list = PathData.seperate_PathData([path1, path2], concatenated, concatenated_paired)
+
+        self.assertEqual(len(gt_list), 2)
+        self.assertEqual(len(paired_list), 2)
+        for i, original in enumerate((path1, path2)):
+            self.assertEqual(gt_list[i].len(), original.len())
+            self.assertEqual(paired_list[i].len(), original.len())
+            np.testing.assert_array_equal(gt_list[i].timestamps, original.timestamps)
+            np.testing.assert_array_equal(paired_list[i].timestamps, original.timestamps)
+            np.testing.assert_array_equal(gt_list[i].positions, original.positions)
+            np.testing.assert_array_equal(paired_list[i].positions, original.positions + Decimal('100.0'))
+
+    def test_seperate_PathData_paired_length_mismatch_raises(self):
+        """ Test that seperate_PathData raises if merged_PathData_paired isn't row-aligned
+        (same length) with merged_PathData. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        mismatched_paired = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        with self.assertRaises(ValueError):
+            PathData.seperate_PathData([path1], path1, mismatched_paired)
+
+    # =========================================================================
+    # === Regression: independent per-side seperate_PathData desyncs poses ====
+    # =========================================================================
+
+    def _make_boundary_mismatch_aligned_trajectories(self):
+        """ Helper: builds a 2-robot gt/est scenario where align()'s internal
+        associate_trajectories (evo's sync.associate_trajectories) genuinely produces a
+        duplicated timestamp near a robot boundary -- one side's associated trajectory ends
+        up with 3 rows very close to the boundary (2 of them duplicate values), the other
+        side with 3 distinct rows, only one of which coincides with the duplicate value. Splitting each side independently by its own [start, end] window (the old
+        seperate_PathData behavior) then keeps a different number of those rows on each
+        side of the boundary, desyncing the per-robot pose counts.
+
+        Returns:
+            (gt_lst, est_lst, gt_synced, est_align): the post-match per-robot lists (used as
+            seperate_PathData's boundary source) and the merged, associated/aligned pair.
+        """
+        def mk(ts):
+            n = len(ts)
+            positions = np.array([[float(i), float(i % 3), float((i * 7) % 5)] for i in range(n)], dtype=object)
+            orientations = np.array([[0, 0, 0, 1]] * n, dtype=object)
+            return PathData('robot', np.array(ts, dtype=object), positions, orientations, CoordinateFrame.FLU)
+
+        # Robot A: gt has two points (1.99, 2.06) straddling the robot-boundary (2.05) that
+        # both fall within max_diff=0.1 of est's single nearby point (2.05, also the shared
+        # boundary value) and of no other est point -- so both nearest-match to it.
+        gtA = mk([0.0, 1.0, 1.99, 2.06, 2.05])
+        estA = mk([0.0, 1.0, 2.05])
+        # Robot B: filler, chosen so gt has fewer points overall than est (est ends up the
+        # "longer" trajectory in evo's sync.associate_trajectories, which is where duplicate
+        # timestamps can appear).
+        gtB = mk([10.0, 11.0])
+        estB = mk([10.0, 11.0, 11.5, 12.0, 12.5, 13.0])
+
+        est_lst, gt_lst = PathData.make_start_and_end_times_match([estA, estB], [gtA, gtB])
+        gt_merged = PathData.concatenate_PathData(gt_lst)
+        est_merged = PathData.concatenate_PathData(est_lst)
+        est_align, gt_synced = PathData.align(gt_merged, est_merged, max_diff=0.1)
+        return gt_lst, est_lst, gt_synced, est_align
+
+    def test_independent_seperate_PathData_calls_desync_pose_counts(self):
+        """ Regression test for the original bug: splitting an align()-produced gt/est pair
+        via two independent seperate_PathData calls (one per side) can select a different
+        number of rows for the same robot, which calculate_traj_errors then rejects. """
+        from evo.core.metrics import MetricsException
+
+        gt_lst, est_lst, gt_synced, est_align = self._make_boundary_mismatch_aligned_trajectories()
+
+        gt_list = PathData.seperate_PathData(gt_lst, gt_synced)
+        est_list = PathData.seperate_PathData(est_lst, est_align)
+
+        # The desync is already visible in the per-robot pose counts...
+        self.assertNotEqual(gt_list[0].len(), est_list[0].len())
+        # ...and calculate_traj_errors refuses to compute errors between mismatched trajectories.
+        with self.assertRaises(MetricsException):
+            PathData.calculate_traj_errors(gt_list[0], est_list[0])
+
+    def test_paired_seperate_PathData_keeps_pose_counts_in_sync(self):
+        """ Same scenario as test_independent_seperate_PathData_calls_desync_pose_counts, but
+        using seperate_PathData's paired form (one shared row mask for both sides) -- the
+        per-robot pose counts stay in sync and calculate_traj_errors succeeds. """
+        gt_lst, est_lst, gt_synced, est_align = self._make_boundary_mismatch_aligned_trajectories()
+
+        gt_list, est_list = PathData.seperate_PathData(gt_lst, gt_synced, est_align)
+
+        self.assertEqual(gt_list[0].len(), est_list[0].len())
+        result = PathData.calculate_traj_errors(gt_list[0], est_list[0])
+        self.assertIsNotNone(result.APE)
 
     # =========================================================================
     # =================== to_txt_file / to_tum Tests ==========================
