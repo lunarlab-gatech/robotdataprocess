@@ -35,8 +35,8 @@ def load_system_params_ROMAN(roman_root: Path, dataset_prefix: str, dataset_name
     roman_root = Path(roman_root)
     if str(roman_root) not in sys.path:
         sys.path.insert(0, str(roman_root))
-    from roman.params.data_params import DataParams
-    from roman.params.system_params import SystemParams
+    from MeronomyGraph.params.data_params import DataParams
+    from MeronomyGraph.params.system_params import SystemParams
 
     experiment_path = roman_root / "params" / "experiments" / dataset_prefix / f"{dataset_name}_{method}.yaml"
     placeholder_data_params = DataParams(_img_data=None, _depth_data=None, _pose_data=None,
@@ -100,7 +100,12 @@ def _style_combined_columns(raw_df_a: pd.DataFrame, raw_df_b: pd.DataFrame, titl
     return merged
 
 
-def pair_label(name_a: str, name_b: str) -> str:
+def group_label(names) -> str:
+    """
+    Build a short column label for an arbitrary-size group of robots (a
+    singleton for self-alignment, a pair, or a larger group), joining each
+    robot's abbreviation with '-' (e.g. ``("Husky1", "Drone1") -> "H1-D1"``).
+    """
     def abbrev(n):
         m = re.match(r'([A-Za-z]+)(\d+)', n)
         if m:
@@ -112,7 +117,7 @@ def pair_label(name_a: str, name_b: str) -> str:
         if len(n) > 1 and n[-1].isupper():
             return first + n[-1]
         return first
-    return abbrev(name_a) + '-' + abbrev(name_b)
+    return '-'.join(abbrev(n) for n in names)
 
 class LCFilterMode(Enum):
     """
@@ -131,20 +136,20 @@ class LCFilterMode(Enum):
 @dataclass
 class ROMANResults:
     """
-    All computed results for one run (method) on one robot pair within a dataset.
+    All computed results for one run (method) on one robot group within a dataset.
 
-    Populated incrementally: :func:`calculate_merged_ate` fills in the four
+    Populated incrementally: :func:`calculate_merged_ate` fills in the
     trajectory-error fields; ``timing``/``data_size_mb``/``mg_match`` and the
     per-``LCFilterMode`` loop-closure stats are set afterward as each is
     computed in :func:`run_ROMAN_evaluation`.
 
     Attributes:
         first_stage_metrics: Pre-optimize trajectory error metrics on the merged
-            (both-robot) trajectory, or None if the pre-optimize file was unavailable.
+            (all-robot) trajectory, or None if the pre-optimize file was unavailable.
         merged_metrics: Post-optimize trajectory error metrics on the merged trajectory.
-        robot0_metrics: Post-optimize trajectory error metrics for the first robot,
-            computed by separating the merged aligned trajectory back apart.
-        robot1_metrics: Post-optimize trajectory error metrics for the second robot.
+        robot_metrics: Post-optimize trajectory error metrics for each robot in the
+            group, in the same order as the group's robot names, computed by
+            separating the merged aligned trajectory back apart.
         timing: Runtime breakdown (``{"align": seconds, "mapping": seconds, "offline_rpgo": seconds}``),
             or None if the runtime files were unavailable.
         data_size_mb: Estimated communication data size in decimal MB, or None
@@ -158,8 +163,7 @@ class ROMANResults:
     """
     first_stage_metrics: Optional[PathDataAlignResult]
     merged_metrics: PathDataAlignResult
-    robot0_metrics: PathDataAlignResult
-    robot1_metrics: PathDataAlignResult
+    robot_metrics: List[PathDataAlignResult]
     timing: Optional[Dict[str, float]] = None
     data_size_mb: Optional[float] = None
     mg_match: Optional[Dict] = None
@@ -312,26 +316,35 @@ def load_timing_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str,
 
 
 def load_data_size_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
-                         robot_names: List, critical_invocation_params: Dict[str, Any]) -> float:
+                         robot_names: List, critical_invocation_params: Dict[str, Any]) -> Optional[float]:
     """
-    Load the estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
-    for a ROMAN run on a robot pair.
+    Load the total estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
+    for a ROMAN run across a group of robots.
 
-    Reads ``align.data_size.txt`` at that pair's align result dir, a single
-    ``"Total submap data size (bytes): <value>"`` line.
+    Sums ``align.data_size.txt`` (a single ``"Total submap data size (bytes): <value>"``
+    line) across every inter-robot combination within the group -- unlike
+    :func:`load_timing_data_ROMAN`'s pairing, self-pairs are excluded, since a robot
+    doesn't send itself any data. Robot names within each pair are passed to
+    ``align_result_dir`` in sorted (canonical) order, since ``align_result_dir`` is
+    not order-invariant (see its docstring).
 
     Returns:
-        The data size in decimal MB (not MiB), or ``None`` if the file is missing.
+        The total data size in decimal MB (not MiB), or ``None`` if any combination's
+        data size file is missing.
     """
-    align_dir = system_params.align_result_dir(Path(roman_root) / "results", dataset_prefix, dataset_name,
-                                                robot_names[0], robot_names[1], critical_invocation_params)
-    data_size_path = align_dir / 'align.data_size.txt'
-    if not data_size_path.exists():
+    results_root = Path(roman_root) / "results"
+
+    data_size_paths = []
+    for name_a, name_b in itertools.combinations(sorted(robot_names), 2):
+        align_dir = system_params.align_result_dir(results_root, dataset_prefix, dataset_name,
+                                                    name_a, name_b, critical_invocation_params)
+        data_size_paths.append(align_dir / 'align.data_size.txt')
+
+    if not all(p.exists() for p in data_size_paths):
         return None
 
-    line = data_size_path.read_text().strip()
-    data_size_bytes = float(line.split(':')[-1])
-    return data_size_bytes / 1_000_000
+    total_bytes = sum(float(p.read_text().strip().split(':')[-1]) for p in data_size_paths)
+    return total_bytes / 1_000_000
 
 
 def load_mg_match_stats_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
@@ -347,7 +360,9 @@ def load_mg_match_stats_ROMAN(roman_root: Path, system_params, dataset_prefix: s
     ``n_stage2_unmatched_children_to_children_clipper``, and
     ``stage2_point_error``. Fields absent from a given line (older log
     formats don't include all fields) are skipped for that line rather than
-    raising. Files that don't exist (e.g. non-MG methods) are skipped.
+    raising. Files that don't exist (e.g. non-MG methods) are skipped. Robot names within
+    each pair are passed to ``align_result_dir`` in sorted (canonical) order, since
+    ``align_result_dir`` is not order-invariant (see its docstring).
 
     Returns:
         Dict with ``"stage_counts"`` (stage -> occurrence count) and one
@@ -370,7 +385,7 @@ def load_mg_match_stats_ROMAN(roman_root: Path, system_params, dataset_prefix: s
     stage_counts = {0: 0, 1: 0, 2: 0}
     field_values = {field: [] for field in stage1_fields + stage2_fields}
     found_any = False
-    for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
+    for name_a, name_b in itertools.combinations_with_replacement(sorted(robot_names), 2):
         align_dir = system_params.align_result_dir(results_root, dataset_prefix, dataset_name,
                                                     name_a, name_b, critical_invocation_params)
         mg_match_path = align_dir / 'align.mg_match.txt'
@@ -393,16 +408,64 @@ def load_mg_match_stats_ROMAN(roman_root: Path, system_params, dataset_prefix: s
     return {"stage_counts": stage_counts, **field_values} if found_any else None
 
 
-def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str, method: str, robot_names: List,
+def compute_merged_trajectory_metrics(robot_names: List[str], est_data_lst: List[OdometryData], gt_data_lst: List[OdometryData],
+                                      rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters
+                                      ) -> Tuple[PathDataAlignResult, List[PathDataAlignResult], List[PathData], List[PathData]]:
+    """
+    Pure computational core of :func:`calculate_merged_ate`: given already-loaded
+    per-robot estimated/ground-truth trajectories for a group of any size
+    (including a single robot, i.e. self-alignment), merges and aligns them
+    and computes the merged and per-robot post-optimize trajectory error metrics.
+
+    Args:
+        robot_names: Robot names in this group, in the same order as
+            ``est_data_lst``/``gt_data_lst``.
+        est_data_lst: Per-robot estimated trajectories, in ``robot_names`` order.
+        gt_data_lst: Per-robot ground-truth trajectories, in ``robot_names`` order.
+        rpe_delta: Step size between the pose pairs used for RPE. Does not affect ATE.
+        rpe_delta_unit: Unit of ``rpe_delta``.
+
+    Returns:
+        Tuple ``(merged_metrics, robot_metrics, est_data_align_list, gt_data_align_list)``:
+        ``merged_metrics`` is the :class:`PathDataAlignResult` on the merged (all-robot)
+        trajectory; ``robot_metrics`` is each robot's individual post-optimize
+        :class:`PathDataAlignResult`, in ``robot_names`` order; ``est_data_align_list``/
+        ``gt_data_align_list`` are the per-robot aligned trajectories (same order).
+    """
+    # Make the timestamps match and then merge (a single robot passes through as-is)
+    est_data_lst, gt_data_lst = PathData.make_start_and_end_times_match(est_data_lst, gt_data_lst)
+    est_data: PathData = PathData.concatenate_PathData(est_data_lst)
+    gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
+
+    # Calculate RMS ATE, among other metrics
+    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(
+        gt_data, est_data, max_diff=0.1, visualize=False, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+
+    # Split the aligned trajectories back into their single-robot forms, and compute
+    # each robot's individual post-optimize RMS ATE from its already-aligned pair.
+    gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
+    est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
+
+    robot_metrics = [
+        PathData.calculate_traj_errors(gt_align, est_align, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
+        for gt_align, est_align in zip(gt_data_align_list, est_data_align_list)
+    ]
+
+    return metrics_dictionary, robot_metrics, est_data_align_list, gt_data_align_list
+
+
+def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str, method: str, robot_names: List[str],
                          critical_invocation_params: Dict[str, Any], load_gt_data_fn,
-                         figures_base_dir: Path = None, visualize: bool = False, do_individual_calcs: bool = False,
-                         viz_config: Dict = None,
+                         figures_base_dir: Optional[Path] = None, visualize: bool = False,
+                         viz_config: Optional[Dict] = None,
                          rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> ROMANResults:
     """
-    Compute the merged RMS ATE for a robot pair after ROMAN offline RPGO.
+    Compute the merged RMS ATE for a group of robots after ROMAN offline RPGO.
 
-    Concatenates the estimated and ground-truth trajectories for both robots
-    (after aligning their time windows), then computes ATE on the combined
+    Merges the estimated and ground-truth trajectories for every robot in the
+    group (after aligning their time windows), then computes ATE on the
+    combined trajectory. A single-robot group is a self-alignment case: no
+    merging happens, and the "merged" trajectory is just that robot's own
     trajectory. Optionally also computes the pre-optimize (first-stage) ATE
     and saves trajectory / LC overlay plots.
 
@@ -415,7 +478,8 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
         dataset_name: Dataset identifier (e.g. ``"V2.3.AC"``).
         method: Run name, used for figure/file naming only (system_params already resolves the
             actual result directories).
-        robot_names: Two-element list of robot names (e.g. ``["Husky1", "Drone1"]``).
+        robot_names: Robot names in this group (e.g. ``["Husky1", "Drone1"]``) -- a single
+            entry for self-alignment, or any number for a larger group.
         critical_invocation_params: Other data-affecting args from the original run invocation.
         load_gt_data_fn: Callable ``(dataset_name, robot_names) -> List[OdometryData]``,
             dataset-specific.
@@ -424,54 +488,31 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
             Required when ``visualize`` is True.
         visualize: If True, generate and save 2D trajectory and LC overlay PDFs. Requires
             ``figures_base_dir`` and ``viz_config``.
-        do_individual_calcs: If True, also print per-robot ATE before the merged calc.
         viz_config: Dict with keys ``"image_path"``, ``"x_edge"``, ``"robot_name_to_color"``
             (keyed by display name), and optionally ``"name_map"`` (robot name -> display name;
             defaults to identity) and ``"yaw_rotation_deg"`` (rotates trajectories about the
             center of their combined bounding box before plotting against the background
             image; defaults to 0). Required when ``visualize`` is True.
         rpe_delta: Step size between the pose pairs used for all RPE calculations in
-            this function (first-stage, merged, and individual). Does not affect ATE.
+            this function (first-stage, merged, and per-robot). Does not affect ATE.
             Defaults to ``5.0``.
         rpe_delta_unit: Unit of ``rpe_delta``. Defaults to ``Unit.meters``, matching
             the fixed-distance RPE convention used by GrAco.
 
     Returns:
-        A :class:`DatasetSequenceResults` with ``first_stage_metrics``,
-        ``merged_metrics``, ``robot0_metrics``, and ``robot1_metrics`` filled in
-        (all other fields default and are filled in later by the caller).
-        ``first_stage_metrics`` is the pre-optimize :class:`PathDataAlignResult`
-        (``None`` if the pre-optimize file is unavailable); ``merged_metrics`` is the
-        :class:`PathDataAlignResult` computed on the merged (both-robot),
-        post-optimize trajectory (e.g. ``merged_metrics.APE.translation_part.rmse``
-        for RMS ATE); ``robot0_metrics``/``robot1_metrics`` are each robot's
-        post-optimize :class:`PathDataAlignResult`, computed by separating the
-        merged aligned trajectories back into per-robot trajectories (via
-        :meth:`PathData.seperate_PathData`) and calling
-        :meth:`PathData.calculate_traj_errors` on each robot's already-aligned pair.
-
-    Raises:
-        ValueError: If ``robot_names`` does not have exactly two entries.
+        A :class:`ROMANResults` with ``first_stage_metrics``, ``merged_metrics``, and
+        ``robot_metrics`` filled in (all other fields default and are filled in later
+        by the caller). ``first_stage_metrics`` is the pre-optimize
+        :class:`PathDataAlignResult` (``None`` if the pre-optimize file is unavailable);
+        ``merged_metrics`` is the :class:`PathDataAlignResult` computed on the merged
+        (all-robot), post-optimize trajectory (e.g. ``merged_metrics.APE.translation_part.rmse``
+        for RMS ATE); ``robot_metrics`` is each robot's post-optimize
+        :class:`PathDataAlignResult`, in ``robot_names`` order (see
+        :func:`compute_merged_trajectory_metrics`).
     """
-    if len(robot_names) != 2:
-        raise ValueError(f"robot_names must have exactly two entries, got {len(robot_names)}: {robot_names}")
-    robot0_name = robot_names[0]
-    robot1_name = robot_names[1]
-
     est_data_lst: List[OdometryData] = load_est_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
                                                            robot_names, critical_invocation_params)
     gt_data_lst: List[OdometryData] = load_gt_data_fn(dataset_name, robot_names)
-    est_data_robot0, est_data_robot1 = est_data_lst
-    gt_data_robot0, gt_data_robot1 = gt_data_lst
-
-    # Calculate individual RMS ATE without aligning
-    if do_individual_calcs:
-        # TODO: Need to make start and end times match before individual RMS ATE as well;
-        # if we ever use those results in a paper.
-        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False,
-                                                                                rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot1, est_data_robot1, max_diff=0.1, visualize=False,
-                                                                                rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
 
     # Calculate first-stage (pre-optimize) metrics
     first_stage_metrics = None
@@ -487,30 +528,9 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
     except Exception as e:
         print(f"Warning: Could not compute first-stage metrics for {dataset_name} {method}: {e}")
 
-    # Make the timestamps match and then concatenate
-    est_data_lst, gt_data_lst = PathData.make_start_and_end_times_match(est_data_lst, gt_data_lst)
-    est_data: OdometryData = PathData.concatenate_PathData(est_data_lst).to_OdometryData('odom', 'base_link')
-    gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
-
-    # Calculate RMS ATE, among other metrics
-    #print("\n========== Merged Trajectories for dataset: ", dataset_name, method, "_".join(robot_names), "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False,
-                                                                                                     rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-
-    # Seperate the aligned trajectories into their single-robot forms, and compute
-    # each robot's individual post-optimize RMS ATE from its already-aligned pair.
-    gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
-    gt_data_align_robot0 = gt_data_align_list[0]
-    gt_data_align_robot1 = gt_data_align_list[1]
-
-    est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
-    est_data_align_robot0 = est_data_align_list[0]
-    est_data_align_robot1 = est_data_align_list[1]
-
-    robot0_metrics, robot1_metrics = [
-        PathData.calculate_traj_errors(gt_align, est_align, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        for gt_align, est_align in zip(gt_data_align_list, est_data_align_list)
-    ]
+    # Delegate the merge/align/split/per-robot-metrics computation to the pure core
+    metrics_dictionary, robot_metrics, est_data_align_list, gt_data_align_list = \
+        compute_merged_trajectory_metrics(robot_names, est_data_lst, gt_data_lst, rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
 
     if visualize:
         image_path = viz_config["image_path"]
@@ -520,45 +540,45 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
         image_extent_offsets = viz_config.get("background_image_extent_offsets")
         yaw_rotation_deg = viz_config.get("yaw_rotation_deg", 0.0)
 
-        pair_lbl = pair_label(robot0_name, robot1_name)
+        group_lbl = group_label(robot_names)
         base_dir = Path(figures_base_dir) / dataset_prefix / dataset_name
         traj_dir = base_dir / 'traj'
         traj_dir.mkdir(parents=True, exist_ok=True)
 
         # Plot the results in 2D (Configuration for Figure 10) — LC-independent, saved once
-        dataList =  [est_data_align_robot0, gt_data_align_robot0,  est_data_align_robot1,  gt_data_align_robot1]
-        isGTList =  [                False,                 True,                  False,                  True]
-        nameList =  [name_map[robot0_name], name_map[robot0_name], name_map[robot1_name], name_map[robot1_name]]
+        dataList  = [d for est, gt in zip(est_data_align_list, gt_data_align_list) for d in (est, gt)]
+        isGTList  = [b for _ in robot_names for b in (False, True)]
+        nameList  = [name_map[rn] for rn in robot_names for _ in range(2)]
         colorList = [robot_name_to_color[name] for name in nameList]
         PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True,
                            background_image_path=image_path, background_image_x_edge=x_edge,
                            background_image_extent_offsets=image_extent_offsets,
                            yaw_rotation_deg=yaw_rotation_deg,
-                           save_path=str(traj_dir / f'traj_{pair_lbl}_{method}.pdf'))
+                           save_path=str(traj_dir / f'traj_{group_lbl}_{method}.pdf'))
 
         # Plot only GT in 2D
-        dataList =  [gt_data_align_robot0,  gt_data_align_robot1]
-        isGTList =  [                True,                  True]
-        nameList =  [name_map[robot0_name], name_map[robot1_name]]
+        dataList  = gt_data_align_list
+        isGTList  = [True] * len(robot_names)
+        nameList  = [name_map[rn] for rn in robot_names]
         colorList = [robot_name_to_color[name] for name in nameList]
         PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=False,
                            background_image_path=image_path, background_image_x_edge=x_edge,
                            background_image_extent_offsets=image_extent_offsets,
                            gt_color_lightness_range_val=8,
                            yaw_rotation_deg=yaw_rotation_deg,
-                           save_path=str(traj_dir / f'traj_{pair_lbl}_{method}_onlyGT.pdf'))
+                           save_path=str(traj_dir / f'traj_{group_lbl}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
         # Letters are assigned by sorted robot order to match the g2o files' own convention.
-        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate(sorted([robot0_name, robot1_name]))}
-        gt_dict_display = {name_map[robot0_name]: gt_data_robot0, name_map[robot1_name]: gt_data_robot1}
-        est_dataList =  [est_data_align_robot0,       est_data_align_robot1]
-        est_isGTList =  [               False,                        False]
-        est_nameList =  [name_map[robot0_name], name_map[robot1_name]]
+        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate(sorted(robot_names))}
+        gt_dict_display = {name_map[rn]: gt for rn, gt in zip(robot_names, gt_data_lst)}
+        est_dataList  = est_data_align_list
+        est_isGTList  = [False] * len(robot_names)
+        est_nameList  = [name_map[rn] for rn in robot_names]
         est_colorList = [robot_name_to_color[name] for name in est_nameList]
         for lc_filter in LCFilterMode:
             _, lc_data_inlier = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
-                                                   [robot0_name, robot1_name], critical_invocation_params,
+                                                   robot_names, critical_invocation_params,
                                                    lc_filter=lc_filter, names_override=names_override_display)
             lc_data_inlier.calculate_errors(gt_dict_display)
 
@@ -567,9 +587,9 @@ def calculate_merged_ate(roman_root: Path, system_params, dataset_prefix: str, d
             PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
                                loop_closure_data=lc_data_inlier, lc_line_width=2.0, lc_errors_vmax=2.0,
                                title=f"{method} LC overlaid on trajectory",
-                               save_path=str(traj_lc_dir / f'traj_lc_{pair_lbl}_{method}.pdf'))
+                               save_path=str(traj_lc_dir / f'traj_lc_{group_lbl}_{method}.pdf'))
 
-    return ROMANResults(first_stage_metrics, metrics_dictionary, robot0_metrics, robot1_metrics)
+    return ROMANResults(first_stage_metrics, metrics_dictionary, robot_metrics)
 
 
 def _save_ate_tables(run_names: List[str], cols: List[str],
@@ -662,37 +682,37 @@ def _save_ate_tables(run_names: List[str], cols: List[str],
         label="tab:merged_rms_ate")
 
 
-def _save_ate_split_table(run_names: List[str], robot_pairs: List[Tuple[str, str]],
+def _save_ate_split_table(run_names: List[str], robot_groups: List[Tuple[str, ...]],
                           run_display_names: Dict[str, str],
                           results: Dict[str, Dict[str, ROMANResults]],
                           save_path: Path, ate_threshold_m: float) -> None:
     """
     Build and save the per-robot RMS ATE/RPE split summary PDF tables.
 
-    For each robot pair, produces two adjacent columns (one per robot) holding
-    that robot's individual post-optimize RMS ATE/RPE, computed by separating
-    the merged aligned trajectory back into per-robot trajectories (see
+    For each robot group, produces one column per robot holding that robot's
+    individual post-optimize RMS ATE/RPE, computed by separating the merged
+    aligned trajectory back into per-robot trajectories (see
     :func:`calculate_merged_ate`).
 
     Args:
         run_names: Ordered list of run identifiers.
-        robot_pairs: Ordered list of two-robot-name tuples, matching the pair
-            order used to build ``results``.
+        robot_groups: Ordered list of robot-name groups (each an arbitrary-length
+            tuple/list), matching the group order used to build ``results``.
         run_display_names: Maps each run identifier to its display name in the table.
         results: ``DatasetSequenceResults`` keyed by run then column.
         save_path: Destination PDF path.
         ate_threshold_m: Red-highlight cutoff (m) for both tables (both are translation-only).
     """
-    sub_cols = [f"{pair_label(a, b)}\n{name}" for a, b in robot_pairs for name in (a, b)]
+    sub_cols = [f"{group_label(grp)}\n{name}" for grp in robot_groups for name in grp]
 
-    subcol_pair_idx = {f"{pair_label(a, b)}\n{name}": (pair_label(a, b), i)
-                      for a, b in robot_pairs for i, name in enumerate((a, b))}
+    subcol_group_idx = {f"{group_label(grp)}\n{name}": (group_label(grp), i)
+                        for grp in robot_groups for i, name in enumerate(grp)}
 
     def make_raw_df(metric_fn) -> pd.DataFrame:
         def value_fn(run, subcol):
-            pair, i = subcol_pair_idx[subcol]
-            result = results[run].get(pair)
-            robot_metrics = (result.robot1_metrics if i == 1 else result.robot0_metrics) if result is not None else None
+            group_lbl, i = subcol_group_idx[subcol]
+            result = results[run].get(group_lbl)
+            robot_metrics = result.robot_metrics[i] if result is not None else None
             return float('nan') if robot_metrics is None else metric_fn(robot_metrics)
         return _make_raw_df(run_names, run_display_names, lambda run: sub_cols, value_fn)
 
@@ -1046,14 +1066,14 @@ def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str]
             pp.savefig(hist_fig, bbox_inches='tight')
             plt.close(hist_fig)
 
-def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
+def _generate_lc_context_figure(group: Tuple[str, ...], col: str,
                                  lc_data_list: List[LoopClosureData], labels_list: List[str],
                                  group_indices: List[int],
                                  stats_list: List[Dict],
                                  results: Dict[str, Dict[str, ROMANResults]],
                                  run_names: List[str], save_dir: Path, ate_threshold_m: float) -> None:
     """
-    Generate and save a composite 16:9 slide figure for one robot pair.
+    Generate and save a composite 16:9 slide figure for one robot group.
 
     The figure is laid out as a PowerPoint-sized (13.33 × 7.5 in) slide with
     three styled tables (gold headers, alternating rows, bold/italic+underline
@@ -1072,8 +1092,8 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
     :func:`_save_lc_tables`.
 
     Args:
-        pair: Two robot names identifying this pair (e.g. ``("Husky1", "Drone1")``).
-        col: Short pair label used as the table column header and in the filename
+        group: Robot names identifying this group (e.g. ``("Husky1", "Drone1")``).
+        col: Short group label used as the table column header and in the filename
             (e.g. ``"H1D1"``).
         lc_data_list: Interleaved list of all-LC and inlier-LC LoopClosureData for
             each run (length ``2 * len(run_names)``), each with ``calculate_errors``
@@ -1181,8 +1201,8 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
         max_rotation_frac=1.0, max_translation_frac=1.0,
         show_plots=False, ax=ax_center)
 
-    # Pair name top-left in golden
-    fig.text(0.01, 0.97, f"{pair[0]} / {pair[1]}",
+    # Group name top-left in golden
+    fig.text(0.01, 0.97, " / ".join(group),
              fontsize=40, fontweight='bold', va='top', color=TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).HeaderColor)
 
     # bbox=[x0, y0, width, height] in axes coordinates; height fraction limits row height.
@@ -1208,7 +1228,7 @@ def _generate_lc_context_figure(pair: Tuple[str, str], col: str,
 
 
 def _generate_lc_side_by_side_figure(
-    pair: Tuple[str, str],
+    group: Tuple[str, ...],
     col: str,
     lc_data_list: List[LoopClosureData],
     labels_list: List[str],
@@ -1216,17 +1236,17 @@ def _generate_lc_side_by_side_figure(
     run_names: List[str],
     save_dir: Path,
 ) -> None:
-    """Generate a side-by-side LC scatter slide for one robot pair.
+    """Generate a side-by-side LC scatter slide for one robot group.
 
     Produces a 22×12 inch figure with two equal scatter plots:
     - Left:  all loop closures plotted with X markers.
     - Right: inlier loop closures plotted with star markers.
     Both axes are forced square and share synchronized axis limits so errors
-    are directly comparable. The pair name is shown in the top-left corner.
+    are directly comparable. The group name is shown in the top-left corner.
 
     Args:
-        pair: Two robot names identifying this pair (e.g. ``("Husky1", "Drone1")``).
-        col: Short pair label used in the filename (e.g. ``"H1D1"``).
+        group: Robot names identifying this group (e.g. ``("Husky1", "Drone1")``).
+        col: Short group label used in the filename (e.g. ``"H1D1"``).
         lc_data_list: Interleaved list of all-LC and inlier-LC LoopClosureData for
             each run (length ``2 * len(run_names)``), each with ``calculate_errors``
             and ``label_successful`` already called. Even indices are all-LC; odd
@@ -1278,7 +1298,7 @@ def _generate_lc_side_by_side_figure(
     ax_all.set_title("All Loop Closures", fontsize=16, fontweight='bold')
     ax_inlier.set_title("Inlier Loop Closures", fontsize=16, fontweight='bold')
 
-    fig.text(0.01, 0.97, f"{pair[0]} / {pair[1]}",
+    fig.text(0.01, 0.97, " / ".join(group),
              fontsize=40, fontweight='bold', va='top', color=TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).HeaderColor)
 
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -1336,20 +1356,21 @@ def _generate_traj_lc_comb_figure(
     slide_doc.close()
 
 
-def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: str, run_names: List[str], all_robots: List[str],
+def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: str, run_names: List[str],
+                        robot_groups: List[Tuple[str, ...]],
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path, load_gt_data_fn, viz_config: Dict,
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
     """
     Generate all evaluation figures and tables for one dataset.
 
-    For each robot pair across all run names:
+    For each robot group across all run names:
       - Computes merged RMS ATE (pre- and post-optimize) in parallel.
       - For each ``LCFilterMode``, loads loop closure data under that filter,
-        saves per-pair LC error scatter plots (lc/) and success-rate plots
+        saves per-group LC error scatter plots (lc/) and success-rate plots
         (lc_success_rate/).
       - Saves a context figure combining the LC scatter with per-run stats and
-        ATE for each pair (lc_with_context/).
+        ATE for each group (lc_with_context/).
 
     Args:
         roman_root: Path to the roman repo checkout.
@@ -1357,7 +1378,10 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
             ``"GrAco"``).
         dataset_name: Dataset identifier (e.g. ``"V2.3.AC"``).
         run_names: Ordered list of run/method identifiers to evaluate.
-        all_robots: All robot names in the dataset; every pairwise combination is evaluated.
+        robot_groups: Explicit list of robot-name groups to evaluate, each an arbitrary-length
+            tuple/list of names -- a singleton for self-alignment, a pair, a triplet, or the
+            full robot set. Callers decide exactly what to plot (e.g.
+            ``list(itertools.combinations(all_robots, 2))`` for every pairwise combination).
         critical_invocation_params: Other data-affecting args from the original run invocation.
         figures_base_dir: Directory under which ``figures/<dataset_prefix>/<dataset_name>/`` outputs are saved.
         load_gt_data_fn: Callable ``(dataset_name, robot_names) -> List[OdometryData]``,
@@ -1371,30 +1395,27 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/``:
       - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
-      - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, two columns per
-        robot pair
+      - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, one column per
+        robot in each group
       - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
       - ``data_size_table.pdf``, ``data_size_table.tex`` — estimated communication data size (MB) summary table
       - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
-      - ``traj/``              — per-pair estimated vs. GT trajectory plots
+      - ``traj/``              — per-group estimated vs. GT trajectory plots
 
     Outputs saved under ``figures/<dataset_prefix>/<dataset_name>/<LCFilterMode.name>/``, once per LC filter mode:
       - ``lc_tables.pdf``      — LC success rate and count summary tables
       - ``lc_success_rate_table.tex``, ``lc_successful_total_table.tex`` — under
         ``LCFilterMode.ALL`` only, standalone LaTeX versions of the all-LC
         success rate and successful/total tables
-      - ``lc/<pair>.pdf``      — per-pair LC error scatter plots
-      - ``lc_success_rate/``   — per-pair LC success rate plots
-      - ``lc_with_context/``   — per-pair composite slide figures
-      - ``lc_side_by_side/``   — per-pair all-LC vs inlier-LC side-by-side scatter slides
-      - ``traj_lc/``           — per-pair estimated trajectory with LC overlay
-      - ``traj_lc_comb/``      — per-pair 2x2 combination of the per-method traj_lc slides
+      - ``lc/<group>.pdf``     — per-group LC error scatter plots
+      - ``lc_success_rate/``   — per-group LC success rate plots
+      - ``lc_with_context/``   — per-group composite slide figures
+      - ``lc_side_by_side/``   — per-group all-LC vs inlier-LC side-by-side scatter slides
+      - ``traj_lc/``           — per-group estimated trajectory with LC overlay
+      - ``traj_lc_comb/``      — per-group 2x2 combination of the per-method traj_lc slides
     """
 
-    # Get all robot pairs to evaluation
-    robot_pairs = list(itertools.combinations(all_robots, 2))
-
-    # Load each run's SystemParams once, up front, and reuse it across every pair/table below
+    # Load each run's SystemParams once, up front, and reuse it across every group/table below
     system_params_by_run = {run_name: load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, run_name)
                             for run_name in run_names}
 
@@ -1408,36 +1429,36 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
     }
 
     # Calculate RMS ATE
-    tasks = [(roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name, run_name, list(pair),
-             critical_invocation_params, load_gt_data_fn, figures_base_dir, True, False, viz_config)
-             for pair in robot_pairs
+    tasks = [(roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name, run_name, list(group),
+             critical_invocation_params, load_gt_data_fn, figures_base_dir, True, viz_config)
+             for group in robot_groups
              for run_name in run_names]
     with Pool() as pool:
         pool_results = pool.starmap(calculate_merged_ate, tasks)
 
-    # All computed results for this dataset, keyed by run then robot-pair column —
+    # All computed results for this dataset, keyed by run then robot-group column —
     # the single object threaded through every table/figure function below.
     results: Dict[str, Dict[str, ROMANResults]] = {run: {} for run in run_names}
-    for (_, _, _, _, run_name, pair, *_), result in zip(tasks, pool_results):
-        results[run_name][pair_label(*pair)] = result
+    for (_, _, _, _, run_name, group, *_), result in zip(tasks, pool_results):
+        results[run_name][group_label(group)] = result
 
-    # Define sequence pair column names
-    cols = [pair_label(*p) for p in robot_pairs]
+    # Define sequence group column names
+    cols = [group_label(g) for g in robot_groups]
 
     base_dir = Path(figures_base_dir) / dataset_prefix / dataset_name
 
-    # Load per-pair runtime, data size, and MG match stats for every run
+    # Load per-group runtime, data size, and MG match stats for every run
     for run_name in run_names:
         system_params = system_params_by_run[run_name]
-        for pair in robot_pairs:
-            col = pair_label(*pair)
+        for group in robot_groups:
+            col = group_label(group)
             result = results[run_name][col]
             result.timing = load_timing_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
-                                                    list(pair), critical_invocation_params)
+                                                    list(group), critical_invocation_params)
             result.data_size_mb = load_data_size_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
-                                                        list(pair), critical_invocation_params)
+                                                        list(group), critical_invocation_params)
             result.mg_match = load_mg_match_stats_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
-                                                         list(pair), critical_invocation_params)
+                                                         list(group), critical_invocation_params)
 
     _save_timing_table(run_names, cols, run_display_names, results, base_dir / 'timing_table.pdf')
     _save_data_size_table(run_names, cols, run_display_names, results, base_dir / 'data_size_table.pdf')
@@ -1453,12 +1474,12 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
         for subdir in subdirs.values():
             subdir.mkdir(parents=True, exist_ok=True)
 
-        # For each pair...
-        for pair in robot_pairs:
+        # For each group...
+        for group in robot_groups:
             # Load GT Data
-            col = pair_label(*pair)
-            gt_list = load_gt_data_fn(dataset_name, list(pair))
-            gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
+            col = group_label(group)
+            gt_list = load_gt_data_fn(dataset_name, list(group))
+            gt_dict = {name: gt for name, gt in zip(group, gt_list)}
 
             # Calculate LC errors and visualize
             lc_data_list: List[LoopClosureData] = []
@@ -1466,7 +1487,7 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
             group_indices: List[int] = []
             for i, run_name in enumerate(run_names):
                 merged_lc, merged_lc_inlier = load_LC_data_ROMAN(roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name,
-                                                                 list(pair), critical_invocation_params, lc_filter=lc_filter)
+                                                                 list(group), critical_invocation_params, lc_filter=lc_filter)
                 for lc in (merged_lc, merged_lc_inlier):
                     lc.calculate_errors(gt_dict)
                     lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
@@ -1489,9 +1510,9 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
                 results[run_name][col].lc_stats_by_mode[lc_filter] = stats[2 * i]
                 results[run_name][col].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
-            _generate_lc_context_figure(pair, col, lc_data_list, labels_list, group_indices,
+            _generate_lc_context_figure(group, col, lc_data_list, labels_list, group_indices,
                                         stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
-            _generate_lc_side_by_side_figure(pair, col, lc_data_list, labels_list, group_indices,
+            _generate_lc_side_by_side_figure(group, col, lc_data_list, labels_list, group_indices,
                                              run_names, subdirs['lc_side_by_side'])
             _generate_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
@@ -1499,10 +1520,10 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
 
     # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
     # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
-    # connect the pair's pose graph — intra-robot closures don't merge the two robots' trajectories.
+    # connect the group's pose graph — intra-robot closures don't merge separate robots' trajectories.
     _save_ate_tables(run_names, cols, run_display_names, results, base_dir / 'metrics_table.pdf',
                      ate_threshold_m, rot_threshold_deg)
 
     # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
-    _save_ate_split_table(run_names, robot_pairs, run_display_names, results,
+    _save_ate_split_table(run_names, robot_groups, run_display_names, results,
                           base_dir / 'ate_split_table.pdf', ate_threshold_m)

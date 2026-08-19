@@ -306,12 +306,14 @@ class TestPathData(unittest.TestCase):
                                    [1.0, 0.0, 0.0, 0.0]], dtype=object),
             frame=CoordinateFrame.ENU)
         
-        # Make sure concatenation fails when not enough PathData objects are given
+        # Make sure concatenation fails on an empty list
         with self.assertRaises(ValueError):
             PathData.concatenate_PathData([])
-        with self.assertRaises(ValueError):
-            PathData.concatenate_PathData([path1])
-        
+
+        # A single-element list has nothing to join end-to-end, so the same
+        # object is returned directly (not a copy)
+        self.assertIs(PathData.concatenate_PathData([path1]), path1)
+
         # Concatenate the PathData objects
         concatenated_path = PathData.concatenate_PathData([path1, path2])
 
@@ -944,6 +946,22 @@ class TestPathData(unittest.TestCase):
         np.testing.assert_array_equal(separated[0].timestamps, path1.timestamps)
         # path2 timestamps must be restored to original — NOT the shifted values from concatenation
         np.testing.assert_array_equal(separated[1].timestamps, path2.timestamps)
+
+    def test_seperate_PathData_single_element(self):
+        """ Test that seperate_PathData with a single original PathData (the self-alignment/
+        non-concatenated case) returns a one-element list identical to the input, since there's
+        nothing to split apart. """
+        path1 = PathData(
+            frame_id="robot",
+            timestamps=np.array([10.1, 11.1, 12.1], dtype=object),
+            positions=np.array([[0.0, 4.0, 6.8], [1.0, 4.0, 6.8], [2.0, 4.0, 6.8]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, 0, 1, 0]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        separated = PathData.seperate_PathData([path1], path1)
+
+        self.assertEqual(len(separated), 1)
+        self.assertEqual(separated[0], path1)
 
 
     # =========================================================================

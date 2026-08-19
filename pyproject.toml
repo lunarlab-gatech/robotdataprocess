@@ -27,6 +27,7 @@ dependencies = ["coverage",
                 "pymupdf",
                 "rosbags",
                 "scipy",
+                "seaborn",
                 "snakeviz",
                 "tqdm",
 

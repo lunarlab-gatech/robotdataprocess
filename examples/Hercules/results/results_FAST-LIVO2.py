@@ -7,10 +7,10 @@ from scipy.spatial.transform import Rotation as R
 def main():
     # Load the GT and estimated path data
     robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    dataset_version = "SmallTownSequence"
+    dataset_version = "V2.3.AP"
     file_name = dataset_version + '.txt'
 
-    skip_robots = ["Husky1", "Husky2", "Drone2"]
+    skip_robots = [] #["Husky1", "Husky2", "Drone2"]
 
     for robot_name in robot_names:
         if robot_name in skip_robots:

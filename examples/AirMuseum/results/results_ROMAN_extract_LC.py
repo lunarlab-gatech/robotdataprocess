@@ -7,7 +7,7 @@ from typing import Dict
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
-from utils.ROMAN import load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
+from robotdataprocess.eval.ROMAN import load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
 from results_ROMAN import load_gt_data_ROMAN
 
 def main():

@@ -1373,19 +1373,20 @@ class PathData(SequentialData):
         Mimics the behavior found in ROMAN's (https://github.com/lunarlab-gatech/roman) evaluation scripts.
 
         Args:
-            path_data_objs: List of PathData objects to concatenate.
+            path_data_objs: List of PathData objects to concatenate. A single-element
+                list is returned directly (nothing to join end-to-end).
 
         Returns:
             PathData: A single PathData with all trajectories joined end-to-end.
 
         Raises:
-            ValueError: If the list is empty or has only one element.
+            ValueError: If the list is empty.
         """
 
         if len(path_data_objs) == 0:
             raise ValueError("path_data_objs list is empty!")
         if len(path_data_objs) == 1:
-            raise ValueError("path_data_objs list has only one element; no need to concatenate!")
+            return path_data_objs[0]
 
         # NOTE: Assumes the frame_id and frame of the first object
         frame_id = path_data_objs[0].frame_id

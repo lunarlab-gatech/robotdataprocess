@@ -48,7 +48,7 @@ class PoseRelationErrors:
         rotation_angle_deg: Rotational error, in degrees.
         rotation_angle_rad: Rotational error, in radians.
         point_distance: Point distance error, in meters.
-        point_distance_error_ratio: TODO.
+        point_distance_error_ratio: Explanation TODO.
     """
 
     full_transformation: TrajErrorStatistics

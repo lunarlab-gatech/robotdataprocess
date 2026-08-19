@@ -1,4 +1,5 @@
 import getpass
+import itertools
 import sys
 from pathlib import Path
 from robotdataprocess import OdometryData, CoordinateFrame
@@ -6,7 +7,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
 
 NAME_TO_FRAME_MAP: dict = {
     "drone": CoordinateFrame.FLU,
@@ -41,6 +42,7 @@ def main():
     """
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
+    robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O", "MG_TS"]
     dataset_name = "Scenario5"
 
@@ -67,7 +69,7 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
 
-    run_ROMAN_evaluation(roman_root, "airmuseum", dataset_name, run_names, all_robots, critical_invocation_params,
+    run_ROMAN_evaluation(roman_root, "airmuseum", dataset_name, run_names, robot_groups, critical_invocation_params,
                          figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
 
 if __name__ == "__main__":

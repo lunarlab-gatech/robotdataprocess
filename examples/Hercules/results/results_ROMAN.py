@@ -1,5 +1,6 @@
 from decimal import Decimal
 import getpass
+import itertools
 import sys
 from pathlib import Path
 from robotdataprocess import OdometryData, CoordinateFrame
@@ -7,7 +8,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
 
 def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
     """
@@ -55,6 +56,7 @@ def main():
     See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
     all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O", "MG_TS"] # "ROMAN_O"
     dataset_name = "V2.4.C"
 
@@ -92,7 +94,7 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    run_ROMAN_evaluation(roman_root, "hercules", dataset_name, run_names, all_robots, critical_invocation_params,
+    run_ROMAN_evaluation(roman_root, "hercules", dataset_name, run_names, robot_groups, critical_invocation_params,
                          figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
