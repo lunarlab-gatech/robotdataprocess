@@ -188,6 +188,28 @@ class ImageData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImageData. """
         pass
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.height != other.height or self.width != other.width:
+            print(f"  [__eq__] height/width: ({self.height}, {self.width}) != ({other.height}, {other.width})")
+            return False
+        if self.encoding != other.encoding:
+            print(f"  [__eq__] encoding: {self.encoding} != {other.encoding}")
+            return False
+        if len(self.images) != len(other.images):
+            print(f"  [__eq__] images length: {len(self.images)} != {len(other.images)}")
+            return False
+        # Compare frame by frame, since `images` may be an in-memory array or a lazily
+        # loaded on-disk array -- indexing works uniformly for both, but is only cheap for
+        # the former.
+        for i in range(len(self.images)):
+            if not np.array_equal(self.images[i], other.images[i]):
+                print(f"  [__eq__] images first diff at idx {i}")
+                return False
+        return True
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

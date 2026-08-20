@@ -35,6 +35,24 @@ class TransformationData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in TransformationData. """
         pass
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.child_frame_id != other.child_frame_id:
+            print(f"  [__eq__] child_frame_id: {self.child_frame_id!r} != {other.child_frame_id!r}")
+            return False
+        if not np.array_equal(self.translation, other.translation):
+            print(f"  [__eq__] translation: {self.translation} != {other.translation}")
+            return False
+        if not np.array_equal(self.orientation, other.orientation):
+            print(f"  [__eq__] orientation: {self.orientation} != {other.orientation}")
+            return False
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        return True
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

@@ -121,6 +121,40 @@ class TestImuData(unittest.TestCase):
                 initial_ori=np.array([0, 0, 0, 1], dtype=float),
                 use_ang_vel=False)
 
+    def test_eq(self):
+        """ Test __eq__ compares frame, lin_acc, ang_vel, and orientations, not just frame_id/timestamps. """
+        timestamps = [Decimal('0.1'), Decimal('0.2')]
+        lin_acc = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        ang_vel = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        orientations = np.array([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]])
+
+        imu = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, orientations)
+
+        # Identical values should be equal
+        imu_same = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, orientations)
+        self.assertEqual(imu, imu_same)
+
+        # Different frame should not be equal
+        imu_diff_frame = ImuData('imu', CoordinateFrame.NED, timestamps, lin_acc, ang_vel, orientations)
+        self.assertNotEqual(imu, imu_diff_frame)
+
+        # Different lin_acc should not be equal
+        imu_diff_lin_acc = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc + 1.0, ang_vel, orientations)
+        self.assertNotEqual(imu, imu_diff_lin_acc)
+
+        # Different ang_vel should not be equal
+        imu_diff_ang_vel = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel + 1.0, orientations)
+        self.assertNotEqual(imu, imu_diff_ang_vel)
+
+        # None vs non-None orientations should not be equal
+        imu_no_orientations = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, None)
+        self.assertNotEqual(imu, imu_no_orientations)
+
+        # Different orientations should not be equal
+        imu_diff_orientations = ImuData('imu', CoordinateFrame.FLU, timestamps, lin_acc, ang_vel,
+                                         np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 1.0, 0.0]]))
+        self.assertNotEqual(imu, imu_diff_orientations)
+
     def test_to_PathData_unsupported_frame_raises(self):
         """ Test error when frame is unsupported for to_PathData. """
         file_path = Path(Path('.'), 'tests', 'files', 'test_ImuData', 'test_from_txt_file', 'imu.txt').absolute()

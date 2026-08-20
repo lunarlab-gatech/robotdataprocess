@@ -196,6 +196,36 @@ class CameraData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in CameraData. """
         pass
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.width != other.width or self.height != other.height:
+            print(f"  [__eq__] width/height: ({self.width}, {self.height}) != ({other.width}, {other.height})")
+            return False
+        if self.distortion_model != other.distortion_model:
+            print(f"  [__eq__] distortion_model: {self.distortion_model} != {other.distortion_model}")
+            return False
+        if self.camera_model != other.camera_model:
+            print(f"  [__eq__] camera_model: {self.camera_model} != {other.camera_model}")
+            return False
+        if self.timeshift_cam_imu != other.timeshift_cam_imu:
+            print(f"  [__eq__] timeshift_cam_imu: {self.timeshift_cam_imu} != {other.timeshift_cam_imu}")
+            return False
+        if not np.array_equal(self.K, other.K):
+            print(f"  [__eq__] K not equal")
+            return False
+        if not np.array_equal(self.D, other.D):
+            print(f"  [__eq__] D not equal")
+            return False
+        if not np.array_equal(self.R, other.R):
+            print(f"  [__eq__] R not equal")
+            return False
+        if not np.array_equal(self.P, other.P):
+            print(f"  [__eq__] P not equal")
+            return False
+        return True
+
     def get_R(self) -> NDArray:
         """
         Returns a copy of this camera's rectification matrix ``R``.

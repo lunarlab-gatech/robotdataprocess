@@ -432,6 +432,34 @@ class TestCameraData(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             CameraData.crop_to_matched(cam1, cam2, Decimal("0.01"))
 
+    def test_eq(self):
+        """ Test __eq__ compares width/height, models, timeshift, and K/D/R/P, not just frame_id. """
+        cam = self._make_camera(D=self.D, timeshift_cam_imu=0.1)
+
+        # Identical values should be equal
+        cam_same = self._make_camera(D=self.D, timeshift_cam_imu=0.1)
+        self.assertEqual(cam, cam_same)
+
+        # Different distortion coefficients (and thus D) should not be equal
+        cam_diff_D = self._make_camera(D=[0.2, -0.1, 0.0, 0.0, 0.0], timeshift_cam_imu=0.1)
+        self.assertNotEqual(cam, cam_diff_D)
+
+        # Different timeshift_cam_imu should not be equal
+        cam_diff_timeshift = self._make_camera(D=self.D, timeshift_cam_imu=0.2)
+        self.assertNotEqual(cam, cam_diff_timeshift)
+
+        # Different width/height should not be equal
+        cam_diff_size = CameraData.from_user_mono(
+            frame_id=self.FRAME_ID, width=self.WIDTH + 1, height=self.HEIGHT,
+            fx=self.FX, fy=self.FY, cx=self.CX, cy=self.CY, timeshift_cam_imu=0.1, D=self.D)
+        self.assertNotEqual(cam, cam_diff_size)
+
+        # Different K (via different fx) should not be equal
+        cam_diff_K = CameraData.from_user_mono(
+            frame_id=self.FRAME_ID, width=self.WIDTH, height=self.HEIGHT,
+            fx=self.FX + 10, fy=self.FY, cx=self.CX, cy=self.CY, timeshift_cam_imu=0.1, D=self.D)
+        self.assertNotEqual(cam, cam_diff_K)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,6 +64,27 @@ class ImuData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImuData. """
         pass
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        if not np.array_equal(self.lin_acc, other.lin_acc):
+            print(f"  [__eq__] lin_acc not equal")
+            return False
+        if not np.array_equal(self.ang_vel, other.ang_vel):
+            print(f"  [__eq__] ang_vel not equal")
+            return False
+        if (self.orientations is None) != (other.orientations is None):
+            print(f"  [__eq__] orientations: {self.orientations} != {other.orientations}")
+            return False
+        if self.orientations is not None and not np.array_equal(self.orientations, other.orientations):
+            print(f"  [__eq__] orientations not equal")
+            return False
+        return True
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

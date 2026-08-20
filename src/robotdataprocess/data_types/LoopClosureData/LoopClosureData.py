@@ -50,6 +50,14 @@ class LoopClosureData(Data):
         self.num_loop_closures = len(self.timestamps_a)
         self.results = None
 
+    def __eq__(self, other) -> bool:
+        # A loop closure is identical regardless of which robot's name/timestamp is expressed
+        # first (see _canonical_lc_key), but that canonicalization isn't consistently applied
+        # to translations/orientations yet. Until that's locked down, refuse to compare rather
+        # than silently give a wrong answer.
+        raise NotImplementedError("LoopClosureData.__eq__ is not yet implemented -- "
+                                   "canonicalization of swapped (a, b) pairs is not fully supported.")
+
     @staticmethod
     def _canonical_lc_key(name_pair: Tuple[str, str], ts_a: Decimal, ts_b: Decimal) -> Tuple[str, str, Decimal, Decimal]:
         """

@@ -385,6 +385,36 @@ class TestLiDARData(unittest.TestCase):
             LiDARData.crop_to_matched(lidar1, lidar2, Decimal("0.01"))
 
 
+    def test_eq(self):
+        """ Test __eq__ compares frame, point_clouds, and channels, not just frame_id/timestamps. """
+        timestamps = [Decimal("0.1"), Decimal("0.2")]
+        point_clouds = [np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 1.0, 1.0]])]
+        channels = [np.array([0], dtype=np.uint16), np.array([1], dtype=np.uint16)]
+
+        lidar = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.FLU)
+
+        # Identical values should be equal
+        lidar_same = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.FLU)
+        self.assertEqual(lidar, lidar_same)
+
+        # Different frame should not be equal
+        lidar_diff_frame = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.NED)
+        self.assertNotEqual(lidar, lidar_diff_frame)
+
+        # Different point_clouds should not be equal
+        point_clouds_diff = [np.array([[0.0, 0.0, 0.0]]), np.array([[9.0, 9.0, 9.0]])]
+        lidar_diff_pc = LiDARData("robot", timestamps, point_clouds_diff, channels, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_diff_pc)
+
+        # None vs non-None channels should not be equal
+        lidar_no_channels = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_no_channels)
+
+        # Different channels should not be equal
+        channels_diff = [np.array([0], dtype=np.uint16), np.array([2], dtype=np.uint16)]
+        lidar_diff_channels = LiDARData("robot", timestamps, point_clouds, channels_diff, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_diff_channels)
+
     def test_calculate_point_channels_already_exists(self):
         """ Test that RuntimeError is raised when channels already calculated. """
         pc = [np.array([[1.0, 2.0, 3.0]])]

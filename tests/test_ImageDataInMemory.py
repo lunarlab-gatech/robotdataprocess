@@ -331,6 +331,35 @@ class TestImageDataInMemory(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             data.downscale_by_factor(2)
 
+    def test_eq(self):
+        """ Test __eq__ compares height/width/encoding and per-frame images, not just frame_id/timestamps. """
+        imgs = np.arange(2 * 10 * 10, dtype=np.uint8).reshape(2, 10, 10)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs.copy())
+
+        # Identical values should be equal
+        data_same = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs.copy())
+        self.assertEqual(data, data_same)
+
+        # Different height/width should not be equal
+        small_imgs = np.zeros((2, 5, 5), dtype=np.uint8)
+        data_diff_size = ImageDataInMemory('cam', [0.0, 1.0], 5, 5, ImageDataInMemory.ImageEncoding.Mono8, small_imgs)
+        self.assertNotEqual(data, data_diff_size)
+
+        # Different encoding should not be equal
+        rgb_imgs = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        data_diff_encoding = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.RGB8, rgb_imgs)
+        self.assertNotEqual(data, data_diff_encoding)
+
+        # Different pixel values should not be equal
+        imgs_diff = imgs.copy()
+        imgs_diff[1, 0, 0] += 1
+        data_diff_pixels = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs_diff)
+        self.assertNotEqual(data, data_diff_pixels)
+
+        # Different number of frames should not be equal
+        data_diff_len = ImageDataInMemory('cam', [0.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs[:1].copy())
+        self.assertNotEqual(data, data_diff_len)
+
 
 
 

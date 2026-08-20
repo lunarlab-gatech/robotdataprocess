@@ -586,6 +586,43 @@ class TestTransformationData(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             TransformationData.crop_to_matched(tf1, tf2, Decimal('0.01'))
 
+    def test_eq(self):
+        """ Test __eq__ compares child_frame_id, translation, orientation, and frame, not just frame_id/timestamps. """
+        matrix = np.array([
+            [0.0, -1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 0.0, 1.0, 3.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        tf = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.FLU)
+
+        # Identical values should be equal
+        tf_same = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.FLU)
+        self.assertEqual(tf, tf_same)
+
+        # Different child_frame_id (same frame_id/timestamps) should not be equal
+        tf_diff_child = TransformationData.from_matrix("world", "other_sensor", matrix, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_child)
+
+        # Different translation should not be equal
+        matrix_diff_translation = matrix.copy()
+        matrix_diff_translation[0:3, 3] = [10.0, 20.0, 30.0]
+        tf_diff_translation = TransformationData.from_matrix("world", "sensor", matrix_diff_translation, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_translation)
+
+        # Different orientation should not be equal
+        matrix_diff_orientation = np.identity(4)
+        matrix_diff_orientation[0:3, 3] = matrix[0:3, 3]
+        tf_diff_orientation = TransformationData.from_matrix("world", "sensor", matrix_diff_orientation, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_orientation)
+
+        # Different frame should not be equal
+        tf_diff_frame = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.NED)
+        self.assertNotEqual(tf, tf_diff_frame)
+
+        # Different type should not be equal
+        self.assertNotEqual(tf, "not a TransformationData")
+
 
 if __name__ == "__main__":
     unittest.main()

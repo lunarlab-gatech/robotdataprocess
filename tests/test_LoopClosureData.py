@@ -89,6 +89,26 @@ class TestInterpolatePoses(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataEq(unittest.TestCase):
+    """ Test __eq__. """
+
+    def test_eq_raises(self):
+        """ __eq__ is not yet implemented -- canonicalization of swapped (a, b) pairs isn't
+        consistently applied to translations/orientations, so comparison is refused rather
+        than risk a silently wrong answer. """
+        timestamps_a = [Decimal("0.1")]
+        timestamps_b = [Decimal("0.2")]
+        names = [("Husky1", "Husky2")]
+        translations = np.array([[1.0, 2.0, 3.0]])
+        orientations = np.array([[0.0, 0.0, 0.0, 1.0]])
+
+        lc1 = LoopClosureData(timestamps_a, timestamps_b, names, translations, orientations)
+        lc2 = LoopClosureData(timestamps_a, timestamps_b, names, translations, orientations)
+        with self.assertRaises(NotImplementedError):
+            lc1 == lc2
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataFromJson(unittest.TestCase):
     """Test from_json loading."""
 

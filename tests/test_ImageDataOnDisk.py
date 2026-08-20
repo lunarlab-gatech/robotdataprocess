@@ -820,6 +820,23 @@ class TestImageDataOnDisk(unittest.TestCase):
             np.testing.assert_array_equal(data.images[1], images_written[2])  # blue  (header 2.0s)
             np.testing.assert_array_equal(data.images[2], images_written[0])  # red   (header 3.0s)
 
+    def test_eq(self):
+        """ Test __eq__ works on lazily loaded imagery, comparing frame-by-frame via LazyImageArray indexing. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+
+        # Two independently loaded instances of the same data should be equal
+        data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        data_same = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        self.assertEqual(data, data_same)
+
+        # Different frame_id should not be equal (inherited from Data)
+        data_diff_frame_id = ImageDataOnDisk.from_image_files(folder_path, 'other_optical')
+        self.assertNotEqual(data, data_diff_frame_id)
+
+        # A different type holding equal pixel data should not be equal (type check in Data.__eq__)
+        data_mem = ImageDataInMemory.from_image_files(folder_path, 'optical')
+        self.assertNotEqual(data, data_mem)
+
 
 if __name__ == "__main__":
     unittest.main()

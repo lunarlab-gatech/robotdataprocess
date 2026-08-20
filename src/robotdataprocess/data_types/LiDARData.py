@@ -60,6 +60,26 @@ class LiDARData(SequentialData):
         """ Hook for subclasses to clear cached data after mutations. No-op in LiDARData. """
         pass
 
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        if len(self.point_clouds) != len(other.point_clouds) \
+                or not all(np.array_equal(a, b) for a, b in zip(self.point_clouds, other.point_clouds)):
+            print(f"  [__eq__] point_clouds not equal")
+            return False
+        if (self.channels is None) != (other.channels is None):
+            print(f"  [__eq__] channels: {self.channels} != {other.channels}")
+            return False
+        if self.channels is not None and (len(self.channels) != len(other.channels)
+                or not all(np.array_equal(a, b) for a, b in zip(self.channels, other.channels))):
+            print(f"  [__eq__] channels not equal")
+            return False
+        return True
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================
