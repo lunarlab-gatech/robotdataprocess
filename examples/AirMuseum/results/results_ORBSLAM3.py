@@ -15,7 +15,7 @@ from results_ROMAN import load_gt_data_ROMAN, NAME_TO_FRAME_MAP
 def main():
     robot_names: List[str] = ["drone", "robotA", "robotB", "robotC"]
     dataset_seq: str = "Scenario5"
-    skip_robots: List = ["drone"]
+    skip_robots: List = ["robotA", "robotB", "robotC"]
 
     # Define camera constants
     robot_left_cam_map: dict = {

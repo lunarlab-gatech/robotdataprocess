@@ -57,8 +57,8 @@ def main():
     """
     all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
     robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O", "MG_TS"] # "ROMAN_O"
-    dataset_name = "V2.4.C"
+    run_names = ["ROMAN_O", "MG_TS", "MG"] # "ROMAN_O"
+    dataset_name = "V2.4.F"
 
     # Environment image / robot display config
     user = getpass.getuser()

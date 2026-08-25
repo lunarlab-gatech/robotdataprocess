@@ -8,7 +8,7 @@ import matplotlib.lines as mlines
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import RendererBase
 from matplotlib.font_manager import FontProperties
-from matplotlib.table import Table
+from matplotlib.table import Cell, Table
 from matplotlib.text import Text
 from matplotlib.transforms import Bbox
 import pandas as pd
@@ -433,9 +433,6 @@ class TableData:
         # Create a matplotlib Table with text aligned in center
         tbl: Table = ax.table(cellText=cell_text, colLabels=col_labels,
                               bbox=tbl_bbox, cellLoc='center')
-        tbl.auto_set_column_width(col=list(range(n_cols)))
-
-        # Set the font sizes
         tbl.auto_set_font_size(False)
         tbl.set_fontsize(font_size)
         if data_font_size is not None:
@@ -443,12 +440,7 @@ class TableData:
                 for j in range(1, n_cols):
                     tbl[i, j].get_text().set_fontsize(data_font_size)
 
-        # Halve the first column width
-        for row_i in range(n_rows + 1):
-            cell = tbl[row_i, 0]
-            cell.set_width(cell.get_width() * 0.5)
-
-        # Set the Header styling
+        # Set the Header styling (including fontweight)
         for j in range(n_cols):
             cell = tbl[0, j]
             cell.set_facecolor(resolved_style.HeaderColor)
@@ -492,18 +484,16 @@ class TableData:
                     tbl[it, jt].get_text().set_text('')
                     post_render_cells.append((it, jt, segments))
 
-        # Post-render decorations: multi-segment cell text, column dividers, and
-        # underlines all need a renderer to measure/position against.
+        # First draw: get a renderer to measure/position everything below
         fig.canvas.draw()
         renderer: RendererBase = fig.canvas.get_renderer()
 
-        # Draw more complicated TextSegments into cells
-        underline_texts: List[Text] = []
+        # Multi-segment cells are wiped to '' above, so matplotlib's own (deferred)
+        # auto_set_column_width would measure them as empty and size their column off
+        # its header alone -- compute their true width from their segments instead
+        pad_factor: float = 1.0 + 2 * Cell.PAD
+        segment_widths: Dict[Tuple[int, int], List[float]] = {}
         for it, jt, segments in post_render_cells:
-
-            # Get the bounding box of the relevant cell
-            cell = tbl[it, jt]
-            bb: Bbox = cell.get_window_extent(renderer=renderer)
 
             # Get widths of the text segmetns
             widths: List[float] = []
@@ -516,6 +506,46 @@ class TableData:
                 # Get and store the width of this text segment
                 w, _, _ = renderer.get_text_width_height_descent(seg.text, fp, ismath=False)
                 widths.append(w)
+            segment_widths[(it, jt)] = widths
+
+        # Set each column to its widest cell, matching auto_set_column_width's own logic
+        # segment_widths are display pixels, so convert to axes-fraction like get_required_width does
+        for col in range(n_cols):
+            required_width: float = max(
+                Bbox.from_bounds(0, 0, sum(segment_widths[(row, col)]), 0)
+                    .transformed(tbl[row, col].get_data_transform().inverted()).width * pad_factor
+                if (row, col) in segment_widths
+                else tbl[row, col].get_required_width(renderer)
+                for row in range(n_rows + 1)
+            )
+            for row in range(n_rows + 1):
+                tbl[row, col].set_width(required_width)
+
+        # Re-draw so the widths above actually take effect (matplotlib re-applies
+        # Table.scale() to fit the bbox on every draw) before reading geometry below
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+
+        # Detect if any cell's text crowds its columns
+        min_width_fraction: float = 1.0 - 2 * Cell.PAD
+        max_width_ratio: float = max([
+            tbl[row, col].get_text().get_window_extent(renderer=renderer).width
+                / (tbl[row, col].get_window_extent(renderer=renderer).width * min_width_fraction)
+            for row in range(n_rows + 1) for col in range(n_cols)
+            if tbl[row, col].get_text().get_text()
+        ], default=0.0)
+        for (it, jt), widths in segment_widths.items():
+            bb: Bbox = tbl[it, jt].get_window_extent(renderer=renderer)
+            max_width_ratio = max(max_width_ratio, sum(widths) / (bb.width * min_width_fraction))
+
+        # Draw more complicated TextSegments into cells
+        underline_texts: List[Text] = []
+        for it, jt, segments in post_render_cells:
+            widths = segment_widths[(it, jt)]
+
+            # Get the bounding box of the relevant cell
+            cell = tbl[it, jt]
+            bb: Bbox = cell.get_window_extent(renderer=renderer)
 
             # Get initial x_cursor position for writing text
             cx: float = (bb.x0 + bb.x1) / 2
@@ -564,8 +594,14 @@ class TableData:
                     linewidth=0.8, clip_on=False
                 ))
 
+        if max_width_ratio > 1.0:
+            print(f"Warning: table \"{df.attrs.get('title', '')}\" has cell text crowding its column "
+                  f"at the current font size(s) -- needs roughly {max_width_ratio:.2f}x its current width. "
+                  "Reduce font_size/data_font_size or increase figsize.")
+
     @staticmethod
-    def to_pdf(tables: List[TableData], save_path: str, row_height: float = 2.4, h_pad: float = 1.2,
+    def to_pdf(tables: List[TableData], save_path: str, width: float = 12.0, row_height: float = 2.4,
+        h_pad: float = 1.2, font_size: int = 11, data_font_size: Optional[int] = None,
         heavy_divider_before: Callable[[int], bool] = lambda _: False,
         style: TableData.TableStyleName = TableStyleName.GEORGIA_TECH) -> None:
         """
@@ -577,9 +613,13 @@ class TableData:
                 ``highlight_best_and_worst_results_by_column``/``merge_TableData``), with
                 the table's title in ``df.attrs["title"]``.
             save_path: Output file path (PDF or PNG).
+            width: Figure width in inches. Widen this (or shrink font_size/data_font_size
+                on the individual tables) if render_onto_ax warns about crowded cell text.
             row_height: Figure height per table in inches.
             h_pad: Vertical padding between subplots passed to tight_layout. The outer
                 figure pad is fixed at 0.1 font-size units to minimise top/bottom margins.
+            font_size: Header/data font size, forwarded to ``render_onto_ax`` for every table.
+            data_font_size: Overrides just the data font size, forwarded to ``render_onto_ax``.
             heavy_divider_before: callable(col_idx: int) -> bool; forwarded to
                 ``render_onto_ax`` for every table (e.g. to set off a
                 trailing summary column). Defaults to no heavy dividers.
@@ -587,7 +627,7 @@ class TableData:
         """
 
         # Generate a figure with subplots equal to the number of tables
-        fig, axes = plt.subplots(len(tables), 1, figsize=(12, row_height * len(tables)))
+        fig, axes = plt.subplots(len(tables), 1, figsize=(width, row_height * len(tables)))
         axes: List[Axes] = [axes] if len(tables) == 1 else list(axes)
 
         # Disable matplotlib axis edges
@@ -597,7 +637,8 @@ class TableData:
 
         # Render the tables onto the figure we just made
         for ax, table in zip(axes, tables):
-            table.render_onto_ax(fig, ax, heavy_divider_before=heavy_divider_before, style=style)
+            table.render_onto_ax(fig, ax, font_size=font_size, data_font_size=data_font_size,
+                                 heavy_divider_before=heavy_divider_before, style=style)
 
         # Save the figure
         fig.savefig(save_path, bbox_inches='tight')

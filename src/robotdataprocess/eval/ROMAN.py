@@ -749,7 +749,7 @@ def _save_ate_split_table(run_names: List[str], robot_groups: List[Tuple[str, ..
                        color_fn=color_fn, fmt=fmt, higher_is_better=False),
     ]
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+    TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, font_size=8, data_font_size=10)
 
 
 def _save_timing_table(run_names: List[str], cols: List[str],

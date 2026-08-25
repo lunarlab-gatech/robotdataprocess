@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 import dataclasses
+from io import StringIO
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
@@ -577,6 +578,85 @@ class TestRenderOntoAx(unittest.TestCase):
         table = self._make_table()
         table.render_onto_ax(self.fig, self.ax, tbl_bbox=[0, 0.3, 0.75, 0.3])
 
+    def test_long_title_warns_instead_of_overflowing_silently(self):
+        """Regression test: a long ``df.attrs["title"]`` (column 0's header) can
+        make the table's natural content wider than its bbox.
+
+        matplotlib's Table auto-sizes each column to its own content, but when
+        those natural widths sum to more than the table's bbox, ``Table.scale()``
+        uniformly shrinks every column's box to fit -- without shrinking the font
+        size to match -- so short columns' text ends up wider than its (now
+        squeezed) box and overlaps. font_size/data_font_size are caller-chosen
+        (or hardcoded) values, so render_onto_ax must print a warning about this
+        rather than silently override them."""
+        table = self._make_table(
+            values={'A': {'r1': 95.0, 'r2': 100.0}, 'B': {'r1': 80.0, 'r2': 90.0}, 'C': {'r1': 77.0, 'r2': 88.0}},
+            title="A Really Extremely Very Long Table Title That Takes Up A Lot Of Space %",
+        )
+        with unittest.mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            table.render_onto_ax(self.fig, self.ax)
+        self.assertIn("Warning", mock_stdout.getvalue())
+
+    def test_bolded_winner_cell_warns_instead_of_overflowing_silently(self):
+        """Regression test: a data cell bolded by highlight_best_and_worst_results_by_column
+        (e.g. the best value in a column) can by itself make a narrow column's text crowd its
+        box, even with a short title/header -- bold glyphs render wider than regular ones, and
+        that bolding happens after the initial column auto-sizing."""
+        df = pd.DataFrame({'A': {'r1': 95.5, 'r2': 100.0}, 'B': {'r1': 80.25, 'r2': 90.75},
+                            'C': {'r1': 77.125, 'r2': 88.875}})
+        df.attrs["title"] = "LC Success Rate %"
+        table = TableData.from_DataFrame(df)
+        table.format_and_color_cells()
+        table.highlight_best_and_worst_results_by_column()
+
+        fig, ax = plt.subplots(1, 1, figsize=(3.2, 2))
+        ax.axis('off')
+        fig.tight_layout(pad=0.0)
+        with unittest.mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            table.render_onto_ax(fig, ax)
+        plt.close(fig)
+        self.assertIn("Warning", mock_stdout.getvalue())
+
+    def test_merged_column_sized_off_its_real_data_not_just_its_header(self):
+        """Regression test: a merge_TableData column's width must reflect its actual
+        "value/value" data, not just its (possibly much shorter) header.
+
+        A multi-segment cell's Cell.Text is wiped to '' and redrawn manually via
+        fig.text() -- but that wipe happens before matplotlib's own (deferred)
+        auto_set_column_width actually runs its measurement (at the table's first
+        real draw), so matplotlib sees an empty cell and sizes that column off its
+        header alone, starving it if the real data is longer than the header."""
+        df_a = pd.DataFrame({'AB': {'r1': 12345.0, 'r2': 11111.0}})
+        df_b = pd.DataFrame({'AB': {'r1': 67890.0, 'r2': 22222.0}})
+        table_a = TableData.from_DataFrame(df_a)
+        table_a.format_and_color_cells(fmt=TableData.fmt_fixed(0))
+        table_b = TableData.from_DataFrame(df_b)
+        table_b.format_and_color_cells(fmt=TableData.fmt_fixed(0))
+        merged = TableData.merge_TableData(table_a, table_b)
+        merged.set_title("Method")  # shorter than the "12345/67890" merged data
+
+        fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.axis('off')
+        fig.tight_layout()
+        merged.render_onto_ax(fig, ax)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        tbl = [c for c in ax.tables][0]
+        plt.close(fig)
+
+        # "12345/67890" (col 1) is longer than "Method"/"r1"/"r2" (col 0), so col 1
+        # must not end up narrower than col 0.
+        col0_width = tbl[0, 0].get_window_extent(renderer=renderer).width
+        col1_width = tbl[0, 1].get_window_extent(renderer=renderer).width
+        self.assertGreaterEqual(col1_width, col0_width)
+
+    def test_well_fitting_table_does_not_warn(self):
+        """A table whose content comfortably fits its bbox must not print a warning."""
+        table = self._make_table(values={'ColA': {'r1': 1.0}, 'ColB': {'r1': 2.0}})
+        with unittest.mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            table.render_onto_ax(self.fig, self.ax)
+        self.assertNotIn("Warning", mock_stdout.getvalue())
+
     def test_overlay_artists_use_figure_fraction_transform_not_identity(self):
         """Regression test: overlay text/lines must use fig.transFigure, not raw
         display pixels, so they stay correctly positioned after a later
@@ -675,6 +755,34 @@ class TestToPdf(unittest.TestCase):
             save_path.parent.mkdir(parents=True, exist_ok=True)
             TableData.to_pdf([table], str(save_path))
             self.assertTrue(save_path.exists())
+
+    def test_width_sets_figure_width_in_inches(self):
+        table = self._make_table()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([table], str(save_path), width=20.0)
+                _, kwargs = spy.call_args
+                self.assertEqual(kwargs['figsize'][0], 20.0)
+
+    def test_default_width_is_12_inches(self):
+        table = self._make_table()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([table], str(save_path))
+                _, kwargs = spy.call_args
+                self.assertEqual(kwargs['figsize'][0], 12.0)
+
+    def test_font_sizes_forwarded_to_render_onto_ax(self):
+        table = self._make_table()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(table, 'render_onto_ax', wraps=table.render_onto_ax) as spy:
+                TableData.to_pdf([table], str(save_path), font_size=8, data_font_size=10)
+                _, kwargs = spy.call_args
+                self.assertEqual(kwargs['font_size'], 8)
+                self.assertEqual(kwargs['data_font_size'], 10)
 
     def test_style_forwarded_to_render_onto_ax(self):
         table = self._make_table()
