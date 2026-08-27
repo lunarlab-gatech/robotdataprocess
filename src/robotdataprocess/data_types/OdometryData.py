@@ -338,7 +338,9 @@ class OdometryData(PathData):
             else:
                 raise ValueError(f"Unsupported msg_type for OdometryData: {msg_type}")
         elif lib_type == ROSMsgLibType.RCLPY:
-            if msg_type == "Path":
+            if msg_type == "Odometry":
+                return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Odometry')
+            elif msg_type == "Path":
                 return ModuleImporter.get_module_attribute('nav_msgs.msg', 'Path')
             elif msg_type == "TFMessage":
                 return ModuleImporter.get_module_attribute('tf2_msgs.msg', 'TFMessage')
