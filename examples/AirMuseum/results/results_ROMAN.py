@@ -43,7 +43,7 @@ def main():
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
     robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O", "MG_TS", "MG"]
+    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
     dataset_name = "Scenario5"
 
     # Environment image / robot display config

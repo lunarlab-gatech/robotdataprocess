@@ -1329,6 +1329,90 @@ def _generate_lc_side_by_side_figure(
     plt.close(fig)
 
 
+def _generate_lc_sep_figure(
+    group: Tuple[str, ...],
+    col: str,
+    lc_data_list: List[LoopClosureData],
+    labels_list: List[str],
+    group_indices: List[int],
+    run_names: List[str],
+    run_display_names: Dict[str, str],
+    save_dir: Path,
+    inliers_only: bool = False,
+) -> None:
+    """Generate a per-method LC scatter slide for one robot group.
+
+    Produces one square scatter panel per run, each showing only that run's
+    loop closures, so overlapping methods never occlude one another. All
+    panels share synchronized axis limits so errors are directly comparable.
+
+    Args:
+        group: Robot names identifying this group (e.g. ``("Husky1", "Drone1")``).
+        col: Short group label used in the filename (e.g. ``"H1D1"``).
+        lc_data_list: Interleaved list of all-LC and inlier-LC LoopClosureData for
+            each run (length ``2 * len(run_names)``), each with ``calculate_errors``
+            and ``label_successful`` already called. Even indices are all-LC; odd
+            are inlier-LC.
+        labels_list: Display label for each entry in ``lc_data_list``.
+        group_indices: Group index per entry, following the pattern
+            ``[0, 0, 1, 1, ..., n-1, n-1]``.
+        run_names: Ordered list of run identifiers.
+        run_display_names: Maps each run identifier to its display name (panel title).
+        save_dir: Directory in which to save ``lc_sep_<col>.pdf``.
+        inliers_only: If False (default), each panel shows all-LC as X markers and
+            inlier-LC as star markers. If True, each panel shows only that run's
+            inlier-LC as star markers, saved as ``lc_sep_inl_<col>.pdf``.
+    """
+    expected_group_indices = [i for i in range(len(run_names)) for _ in range(2)]
+    assert group_indices == expected_group_indices, (
+        f"group_indices must be interleaved pairs [0,0,1,1,...], "
+        f"got {group_indices}, expected {expected_group_indices}")
+
+    fig = plt.figure(figsize=(11 * len(run_names), 11))
+    gs = gridspec.GridSpec(1, len(run_names), figure=fig,
+                           left=0.035, right=0.965, bottom=0.08, top=0.92, wspace=0.25)
+    axes = [fig.add_subplot(gs[i]) for i in range(len(run_names))]
+    for ax in axes:
+        ax.set_box_aspect(1)
+
+    # Matches the palette visualize_error_scatter derives internally for the combined
+    # 'lc' plot (group_indices=[0,0,1,1,...] there), so each method keeps its color
+    run_palette = sns.color_palette("bright", len(run_names))
+    for i, (ax, run_name) in enumerate(zip(axes, run_names)):
+        if inliers_only:
+            lc_inlier = lc_data_list[2 * i + 1]
+            inlier_mask = np.ones(len(lc_inlier.results.translation_errors), dtype=bool)
+            LoopClosureData.visualize_error_scatter(
+                [lc_inlier], [labels_list[2 * i + 1]],
+                inlier_masks=[inlier_mask], colors=[run_palette[i]],
+                max_rotation_frac=1.0, max_translation_frac=1.0,
+                show_plots=False, ax=ax)
+        else:
+            LoopClosureData.visualize_error_scatter(
+                lc_data_list[2 * i:2 * i + 2], labels_list[2 * i:2 * i + 2],
+                group_indices=[0, 0], colors=[run_palette[i], run_palette[i]],
+                max_rotation_frac=1.0, max_translation_frac=1.0,
+                show_plots=False, ax=ax)
+        ax.set_title(run_display_names.get(run_name, run_name), fontsize=16, fontweight='bold')
+
+    # Synchronize axis limits so errors are directly comparable
+    x_min = min(ax.get_xlim()[0] for ax in axes)
+    x_max = max(ax.get_xlim()[1] for ax in axes)
+    y_min = min(ax.get_ylim()[0] for ax in axes)
+    y_max = max(ax.get_ylim()[1] for ax in axes)
+    for ax in axes:
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+
+    fig.text(0.01, 0.97, " / ".join(group),
+             fontsize=40, fontweight='bold', va='top', color=TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).HeaderColor)
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    filename = f'lc_sep_inl_{col}.pdf' if inliers_only else f'lc_sep_{col}.pdf'
+    fig.savefig(str(save_dir / filename), bbox_inches='tight')
+    plt.close(fig)
+
+
 def _generate_traj_lc_comb_figure(
     col: str,
     run_names: List[str],
@@ -1434,6 +1518,8 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
       - ``lc_success_rate/``   — per-group LC success rate plots
       - ``lc_with_context/``   — per-group composite slide figures
       - ``lc_side_by_side/``   — per-group all-LC vs inlier-LC side-by-side scatter slides
+      - ``lc_sep/``            — per-group, per-method LC scatter slides (one panel per run)
+      - ``lc_sep_inl/``        — same as ``lc_sep/`` but showing only inlier LC per panel
       - ``traj_lc/``           — per-group estimated trajectory with LC overlay
       - ``traj_lc_comb/``      — per-group 2x2 combination of the per-method traj_lc slides
     """
@@ -1511,7 +1597,7 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
     for lc_filter in sorted(LCFilterMode, key=lambda m: m != LCFilterMode.ONLY_INTER_LC):
         mode_dir = base_dir / lc_filter.name
         subdirs = {name: mode_dir / name for name in
-                  ('lc', 'lc_success_rate', 'lc_with_context', 'lc_side_by_side', 'traj_lc', 'traj_lc_comb')}
+                  ('lc', 'lc_success_rate', 'lc_with_context', 'lc_side_by_side', 'lc_sep', 'lc_sep_inl', 'traj_lc', 'traj_lc_comb')}
         for subdir in subdirs.values():
             subdir.mkdir(parents=True, exist_ok=True)
 
@@ -1555,6 +1641,10 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
                                         stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
             _generate_lc_side_by_side_figure(group, col, lc_data_list, labels_list, group_indices,
                                              run_names, subdirs['lc_side_by_side'])
+            _generate_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                                    run_names, run_display_names, subdirs['lc_sep'])
+            _generate_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                                    run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
             _generate_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
         _save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
