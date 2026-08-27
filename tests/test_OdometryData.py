@@ -134,6 +134,12 @@ class TestOdometryData(unittest.TestCase):
         np.testing.assert_array_equal(odom_data_test.positions[1].astype(np.float64), [0.047673, 0.008781, 0.078044])
         np.testing.assert_array_equal(odom_data_test.orientations[2].astype(np.float64), [0.810142, -0.007347, 0.586184, 0.001775])
 
+    @unittest.skipIf(os.getenv("SKIP_ROS2_TESTS") == "True", "ROS2 not installed")
+    def test_get_ros_msg_type_rclpy(self):
+        """get_ros_msg_type returns the Odometry class for RCLPY."""
+        import nav_msgs.msg
+        self.assertIs(OdometryData.get_ros_msg_type(ROSMsgLibType.RCLPY, "Odometry"), nav_msgs.msg.Odometry)
+
     def test_to_coordinate_frame(self):
         """
         Makes sure that the conversion from NED to FLU functions properly via to_coordinate_frame.
