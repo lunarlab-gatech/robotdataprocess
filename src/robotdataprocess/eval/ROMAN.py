@@ -322,6 +322,54 @@ def load_timing_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str,
     return {"align": align_total, "mapping": mapping_total, "offline_rpgo": rpgo_total}
 
 
+def load_total_data_generation_time_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
+                                          robot_groups: List[Tuple[str, ...]], critical_invocation_params: Dict[str, Any]) -> float:
+    """
+    Compute the total wall time (s) spent generating a run's underlying data across every
+    robot group, without double-counting work shared between groups.
+
+    A robot's mapping only runs once and a robot pair's alignment only runs once even though
+    both may be reused by several robot_groups (e.g. group ("A","B") and group ("A","B","C")
+    both depend on A's mapping and the A-B alignment), so runtime files are deduplicated by
+    path (mapping keyed by robot name, alignment keyed by sorted robot pair) before summing.
+    The offline RPGO runtime is per-group (keyed by the group's sorted robot names) and isn't
+    shared across groups, so it's summed once per entry in robot_groups.
+
+    Unlike :func:`load_timing_data_ROMAN`, a missing or empty runtime file raises rather than
+    returning None -- this is a post-hoc diagnostic over runs assumed already complete, not a
+    table cell that needs to render "---" for in-progress groups.
+
+    Returns:
+        The total runtime in seconds.
+    """
+    results_root = Path(roman_root) / "results"
+
+    mapping_paths = set()
+    align_paths = set()
+    rpgo_paths = set()
+    for group in robot_groups:
+        robot_names = list(group)
+        for rn in robot_names:
+            mapping_paths.add(
+                system_params.mapping_result_dir(results_root, dataset_prefix, dataset_name, rn, critical_invocation_params)
+                / f'{rn}.runtime.txt')
+
+        for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
+            sorted_pair = sorted((name_a, name_b))
+            align_dir = system_params.align_result_dir(results_root, dataset_prefix, dataset_name,
+                                                        sorted_pair[0], sorted_pair[1], critical_invocation_params)
+            align_paths.add(align_dir / f'{sorted_pair[0]}_{sorted_pair[1]}.runtime.txt')
+
+        rpgo_paths.add(system_params.rpgo_result_dir(results_root, dataset_prefix, dataset_name,
+                                                       sorted(robot_names), critical_invocation_params) / 'runtime.txt')
+
+    mapping_total = sum(float(p.read_text().strip().split(':')[-1]) for p in mapping_paths)
+    align_total = sum(float(p.read_text().strip().split(':')[-1]) for p in align_paths)
+    rpgo_total = sum(float([line for line in p.read_text().splitlines() if line.strip()][-1].strip()) for p in rpgo_paths)
+
+    return mapping_total + align_total + rpgo_total
+
+
 def load_data_size_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dataset_name: str,
                          robot_names: List, critical_invocation_params: Dict[str, Any]) -> Optional[float]:
     """
@@ -1586,6 +1634,13 @@ def run_ROMAN_evaluation(roman_root: Path, dataset_prefix: str, dataset_name: st
                                                         list(group), critical_invocation_params)
             result.mg_match = load_mg_match_stats_ROMAN(roman_root, system_params, dataset_prefix, dataset_name,
                                                          list(group), critical_invocation_params)
+
+    total_time_by_run = {}
+    for run_name in run_names:
+        total_time_by_run[run_name] = load_total_data_generation_time_ROMAN(
+            roman_root, system_params_by_run[run_name], dataset_prefix, dataset_name, robot_groups, critical_invocation_params)
+        print(f"{dataset_name} {run_name}: total data generation time = {total_time_by_run[run_name]:.1f}s")
+    print(f"{dataset_name}: total data generation time across all runs = {sum(total_time_by_run.values()):.1f}s")
 
     _save_timing_table(run_names, cols, run_display_names, results, base_dir / 'timing_table.pdf')
     _save_data_size_table(run_names, cols, run_display_names, results, base_dir / 'data_size_table.pdf')
