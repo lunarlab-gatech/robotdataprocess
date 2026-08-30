@@ -12,7 +12,7 @@ from numpy.lib.format import open_memmap
 from pathlib import Path
 from PIL import Image
 from typeguard import typechecked
-from typing import Union, Any, Tuple
+from typing import Union, Any, Optional, Tuple
 import tqdm
 from rosbags.typesys import Stores, get_typestore
 from ...utils.VideoGenerator import VideoGenerator
@@ -233,6 +233,46 @@ class ImageData(SequentialData):
             return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels))
         else:
             return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))
+
+    @staticmethod
+    def image_from_ros_msg(msg: Any, to_encoding: Optional['ImageData.ImageEncoding'] = None) -> np.ndarray:
+        """
+        Decodes one live sensor_msgs/Image into a contiguous numpy array.
+
+        Unlike ``_decode_image_msg``, this reads the encoding and geometry off the message
+        itself and honours ``msg.step``, so a publisher that pads rows to an alignment
+        boundary is decoded correctly rather than skewed. Intended for subscribers holding a
+        single message, where the bulk loaders' whole-sequence machinery does not apply.
+
+        Args:
+            msg: A ROS Image message with ``height``, ``width``, ``step``, ``encoding`` and
+                ``data`` fields.
+            to_encoding: Encoding to convert the decoded image to; None keeps the message's
+                own encoding.
+        Returns:
+            np.ndarray: Decoded image. Shape is (H, W, C) for multi-channel encodings or
+                (H, W) for single-channel.
+        Raises:
+            ValueError: If ``msg.step`` is not a whole number of pixels wide.
+        """
+        encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
+
+        itemsize = np.dtype(dtype).itemsize
+        if msg.step % itemsize != 0:
+            raise ValueError(f"Image step {msg.step} is not a multiple of the {dtype} itemsize {itemsize}.")
+
+        # Rows are `step` BYTES apart, which is >= width*channels when the publisher pads.
+        rows = np.frombuffer(msg.data, dtype=dtype).reshape(msg.height, msg.step // itemsize)
+        image = rows[:, :msg.width * channels]
+        if channels > 1:
+            image = image.reshape(msg.height, msg.width, channels)
+        image = np.ascontiguousarray(image)
+
+        if to_encoding is not None and to_encoding != encoding:
+            convert = ImageData.ImageEncoding.get_encoding_conversion(encoding, to_encoding)
+            image = np.ascontiguousarray(convert(image))
+        return image
 
     @staticmethod
     def _decode_compressed_image_msg(msg: Any) -> Tuple[np.ndarray, 'ImageData.ImageEncoding']:
