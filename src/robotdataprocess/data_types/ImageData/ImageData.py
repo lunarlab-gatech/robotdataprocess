@@ -6,6 +6,7 @@ import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
+from ...utils.math_utils import nearest_index
 from ...utils.ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.lib.format import open_memmap
@@ -487,14 +488,10 @@ class ImageData(SequentialData):
         scale = video_duration_sec / (source_times[-1] - source_times[0])
         scaled_source_times = (source_times - source_times[0]) * scale
 
-        # Build the evenly-spaced output sample times, and find each one's nearest
-        # source frame via searchsorted (scaled_source_times is sorted ascending)
+        # Build the evenly-spaced output sample times, and find each one's nearest source frame
         num_output_frames = max(int(round(fps * video_duration_sec)), 1)
         output_times = np.linspace(0.0, video_duration_sec, num_output_frames, endpoint=False)
-        right_idx = np.clip(np.searchsorted(scaled_source_times, output_times), 0, len(scaled_source_times) - 1)
-        left_idx = np.clip(right_idx - 1, 0, len(scaled_source_times) - 1)
-        use_right = np.abs(scaled_source_times[right_idx] - output_times) < np.abs(scaled_source_times[left_idx] - output_times)
-        frame_indices = np.where(use_right, right_idx, left_idx)
+        frame_indices = nearest_index(scaled_source_times, output_times)
 
         gaps = np.abs(scaled_source_times[frame_indices] - output_times)
         if np.any(gaps > max_frame_time_margin_sec):
