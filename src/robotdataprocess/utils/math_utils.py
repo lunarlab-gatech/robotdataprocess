@@ -3,7 +3,38 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
-from typing import Union
+from typing import Sequence, Union
+
+
+def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> int:
+    """
+    Index of the entry in a sorted timestamp array closest to a query time.
+
+    Snaps a time onto an existing sample grid -- e.g. anchoring a loop closure's
+    timestamp onto the pose-graph vertices it must reference. A query outside the
+    array's range clamps to the nearest end rather than raising, and a query exactly
+    between two samples resolves to the earlier one.
+
+    Args:
+        sorted_ts: (N,) timestamps, sorted ascending.
+        t: Query timestamp.
+
+    Returns:
+        Index into sorted_ts of the closest timestamp.
+
+    Raises:
+        ValueError: If sorted_ts is empty.
+    """
+    ts = np.asarray(sorted_ts, dtype=np.float64)
+    if ts.size == 0:
+        raise ValueError("sorted_ts must not be empty.")
+
+    k = int(np.searchsorted(ts, t, side='left'))
+    if k == 0:
+        return 0
+    if k >= ts.size:
+        return ts.size - 1
+    return k if abs(ts[k] - t) < abs(ts[k - 1] - t) else k - 1
 
 
 def interpolate_poses(ts: np.ndarray, pos: np.ndarray,
