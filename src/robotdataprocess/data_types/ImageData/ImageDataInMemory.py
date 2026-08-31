@@ -69,7 +69,7 @@ class ImageDataInMemory(ImageData):
                 height = msg.height
                 width = msg.width
                 encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-                img = ImageData._decode_image_msg(msg, encoding, height, width)
+                img = ImageData.decode_image_msg(msg, encoding, height, width)
                 image_shape = img.shape
                 break
         
@@ -92,7 +92,7 @@ class ImageDataInMemory(ImageData):
                 # Extract images (skipping malformed ones)
                 img = None
                 try:
-                    img = ImageData._decode_image_msg(msg, encoding, height, width)
+                    img = ImageData.decode_image_msg(msg, encoding, height, width)
                 except Exception as e:
                     print("Failure decoding image msg: ", e)
                 if img is not None and img.shape == image_shape: 

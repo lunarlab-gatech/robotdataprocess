@@ -2,6 +2,7 @@ import cv2
 from decimal import Decimal
 import numpy as np
 import os
+from types import SimpleNamespace
 import unittest
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
@@ -447,6 +448,231 @@ class TestImageData(unittest.TestCase):
 
         self.assertTrue(output.exists())
         self.assertEqual(len(self._read_mp4_frames(output)), 4)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestImageDataDecodeMsg(unittest.TestCase):
+    """
+    Tests for ImageData.decode_image_msg, ImageData.convert_image_encoding, and
+    ImageData._decode_compressed_image_msg.
+    """
+
+    # ==================== decode_image_msg: explicit encoding/height/width ====================
+
+    def test_decode_image_msg_mono8(self):
+        """ Test decode_image_msg with Mono8 (single channel), args passed explicitly. """
+        expected = np.arange(6, dtype=np.uint8).reshape(2, 3)
+        msg = SimpleNamespace(data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding.Mono8, 2, 3)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_rgb8(self):
+        """ Test decode_image_msg with RGB8 (3 channels), args passed explicitly. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        msg = SimpleNamespace(data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding.RGB8, 2, 2)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_32fc1(self):
+        """ Test decode_image_msg with _32FC1 (single channel, multi-byte dtype), args passed explicitly. """
+        expected = np.arange(4, dtype=np.float32).reshape(2, 2)
+        msg = SimpleNamespace(data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding._32FC1, 2, 2)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_bgr8(self):
+        """ Test decode_image_msg with BGR8 (3 channels) as the decode target, not just a conversion target. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        msg = SimpleNamespace(data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding.BGR8, 2, 2)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_explicit_args_override_msg_fields(self):
+        """ Test explicit encoding/height/width take precedence over msg's own conflicting fields. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        # msg's own fields describe a completely different (and data-incompatible) image; if these
+        # were used instead of the explicit args, reshaping the 12-byte buffer as 5x5 Mono8 would fail.
+        msg = SimpleNamespace(encoding='mono8', height=5, width=5, data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding.RGB8, 2, 2)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_explicit_encoding_inferred_height_width(self):
+        """ Test passing only encoding explicitly while height/width are inferred from msg. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        msg = SimpleNamespace(height=2, width=2, data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, ImageData.ImageEncoding.RGB8)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_inferred_encoding_explicit_height_width(self):
+        """ Test passing only height/width explicitly while encoding is inferred from msg. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        msg = SimpleNamespace(encoding='rgb8', data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg, height=2, width=2)
+        np.testing.assert_array_equal(image, expected)
+
+    # ==================== decode_image_msg: inferred from msg, step, endianness ====================
+
+    def test_decode_image_msg_infers_encoding_height_width(self):
+        """ Test decode_image_msg reads encoding/height/width off msg when not passed explicitly. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        msg = SimpleNamespace(height=2, width=2, encoding='rgb8', data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_step_padded(self):
+        """ Test decode_image_msg correctly strips row padding when step > width*channels*itemsize. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        raw = np.zeros((2, 8), dtype=np.uint8)
+        raw[:, :6] = expected.reshape(2, 6)
+        raw[:, 6:] = 99  # padding bytes that must be discarded
+        msg = SimpleNamespace(height=2, width=2, step=8, encoding='rgb8', data=raw.tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+
+    def test_decode_image_msg_step_padded_result_is_contiguous(self):
+        """ Test decode_image_msg returns a C-contiguous array once padding has been stripped. """
+        expected = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        raw = np.zeros((2, 8), dtype=np.uint8)
+        raw[:, :6] = expected.reshape(2, 6)
+        raw[:, 6:] = 99  # padding bytes that must be discarded
+        msg = SimpleNamespace(height=2, width=2, step=8, encoding='rgb8', data=raw.tobytes())
+        image = ImageData.decode_image_msg(msg)
+        self.assertTrue(image.flags['C_CONTIGUOUS'])
+
+    def test_decode_image_msg_step_not_multiple_of_itemsize_raises(self):
+        """ Test decode_image_msg raises ValueError when step is not a multiple of the dtype itemsize. """
+        msg = SimpleNamespace(height=2, width=2, step=5, encoding='32fc1', data=bytes(2 * 5))
+        with self.assertRaises(ValueError):
+            ImageData.decode_image_msg(msg)
+
+    def test_decode_image_msg_step_too_narrow_raises(self):
+        """ Test decode_image_msg raises ValueError when step can't hold one full row of pixels. """
+        msg = SimpleNamespace(height=2, width=2, step=4, encoding='rgb8', data=bytes(2 * 4))
+        with self.assertRaises(ValueError):
+            ImageData.decode_image_msg(msg)
+
+    def test_decode_image_msg_bigendian_16uc1(self):
+        """ Test decode_image_msg byte-swaps a big-endian _16UC1 payload back to native order. """
+        expected = np.array([[1, 1000], [2000, 65000]], dtype=np.uint16)
+        msg = SimpleNamespace(height=2, width=2, encoding='16uc1', is_bigendian=1,
+                               data=expected.astype('>u2').tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+        self.assertEqual(image.dtype, np.uint16)
+
+    def test_decode_image_msg_bigendian_32fc1(self):
+        """ Test decode_image_msg byte-swaps a big-endian _32FC1 payload back to native order. """
+        expected = np.array([[1.5, -2.25], [100.0, 3.14]], dtype=np.float32)
+        msg = SimpleNamespace(height=2, width=2, encoding='32fc1', is_bigendian=1,
+                               data=expected.astype('>f4').tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+        self.assertEqual(image.dtype, np.float32)
+
+    def test_decode_image_msg_bigendian_with_step_padding(self):
+        """ Test decode_image_msg handles a big-endian payload with row padding at the same time. """
+        expected = np.array([[1.5, -2.25], [100.0, 3.14]], dtype=np.float32)
+        raw = np.zeros((2, 3), dtype='>f4')  # 3 big-endian floats/row: 2 real + 1 padding
+        raw[:, :2] = expected.astype('>f4')
+        raw[:, 2] = 999.0
+        msg = SimpleNamespace(height=2, width=2, encoding='32fc1', step=12, is_bigendian=1, data=raw.tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+        self.assertEqual(image.dtype, np.float32)
+
+    def test_decode_image_msg_little_endian_unaffected(self):
+        """ Test decode_image_msg with is_bigendian=0 decodes the same as when the field is absent. """
+        expected = np.array([[1, 1000], [2000, 65000]], dtype=np.uint16)
+        msg = SimpleNamespace(height=2, width=2, encoding='16uc1', is_bigendian=0, data=expected.tobytes())
+        image = ImageData.decode_image_msg(msg)
+        np.testing.assert_array_equal(image, expected)
+
+    # ==================== convert_image_encoding ====================
+
+    def test_convert_image_encoding_identity(self):
+        """ Test convert_image_encoding with matching from/to encoding returns the image unchanged. """
+        image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        result = ImageData.convert_image_encoding(image, ImageData.ImageEncoding.RGB8, ImageData.ImageEncoding.RGB8)
+        np.testing.assert_array_equal(result, image)
+
+    def test_convert_image_encoding_rgb8_to_bgr8(self):
+        """ Test convert_image_encoding converts RGB8 to BGR8 by swapping channels. """
+        image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        result = ImageData.convert_image_encoding(image, ImageData.ImageEncoding.RGB8, ImageData.ImageEncoding.BGR8)
+        np.testing.assert_array_equal(result, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+
+    def test_convert_image_encoding_mono8_to_bgr8(self):
+        """ Test convert_image_encoding converts Mono8 to BGR8 by replicating channels. """
+        image = np.arange(4, dtype=np.uint8).reshape(2, 2)
+        result = ImageData.convert_image_encoding(image, ImageData.ImageEncoding.Mono8, ImageData.ImageEncoding.BGR8)
+        np.testing.assert_array_equal(result, cv2.cvtColor(image, cv2.COLOR_GRAY2BGR))
+
+    def test_convert_image_encoding_mono8_to_rgb8(self):
+        """ Test convert_image_encoding converts Mono8 to RGB8 by replicating channels. """
+        image = np.arange(4, dtype=np.uint8).reshape(2, 2)
+        result = ImageData.convert_image_encoding(image, ImageData.ImageEncoding.Mono8, ImageData.ImageEncoding.RGB8)
+        np.testing.assert_array_equal(result, cv2.cvtColor(image, cv2.COLOR_GRAY2RGB))
+
+    def test_convert_image_encoding_result_is_contiguous(self):
+        """ Test convert_image_encoding returns a C-contiguous array. """
+        image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        result = ImageData.convert_image_encoding(image, ImageData.ImageEncoding.RGB8, ImageData.ImageEncoding.BGR8)
+        self.assertTrue(result.flags['C_CONTIGUOUS'])
+
+    def test_convert_image_encoding_invalid_raises(self):
+        """ Test convert_image_encoding raises NotImplementedError for an unsupported conversion. """
+        image = np.arange(4, dtype=np.float32).reshape(2, 2)
+        with self.assertRaises(NotImplementedError):
+            ImageData.convert_image_encoding(image, ImageData.ImageEncoding._32FC1, ImageData.ImageEncoding.RGB8)
+
+    # ==================== _decode_compressed_image_msg ====================
+
+    def test_decode_compressed_image_msg_stored_encoding(self):
+        """ Test _decode_compressed_image_msg with a format string carrying a stored encoding. """
+        source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+        ok, encoded = cv2.imencode('.png', source)
+        self.assertTrue(ok)
+        msg = SimpleNamespace(format='rgb8; png compressed bgr8', data=encoded.tobytes())
+        image, encoding = ImageData._decode_compressed_image_msg(msg)
+        self.assertEqual(encoding, ImageData.ImageEncoding.BGR8)
+        np.testing.assert_array_equal(image, source)
+
+    def test_decode_compressed_image_msg_no_stored_encoding(self):
+        """ Test _decode_compressed_image_msg with a format string that has no stored encoding. """
+        source = np.arange(2 * 2, dtype=np.uint8).reshape(2, 2)
+        ok, encoded = cv2.imencode('.png', source)
+        self.assertTrue(ok)
+        msg = SimpleNamespace(format='mono8; png compressed', data=encoded.tobytes())
+        image, encoding = ImageData._decode_compressed_image_msg(msg)
+        self.assertEqual(encoding, ImageData.ImageEncoding.Mono8)
+        np.testing.assert_array_equal(image, source)
+
+    def test_decode_compressed_image_msg_no_stored_encoding_non_mono8(self):
+        """ Test the no-stored-encoding fallback with a non-mono8 original encoding, to confirm
+        the fallback uses whatever precedes the semicolon rather than being mono8-specific. """
+        source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+        ok, encoded = cv2.imencode('.png', source)
+        self.assertTrue(ok)
+        msg = SimpleNamespace(format='rgb8; png compressed', data=encoded.tobytes())
+        image, encoding = ImageData._decode_compressed_image_msg(msg)
+        self.assertEqual(encoding, ImageData.ImageEncoding.RGB8)
+        np.testing.assert_array_equal(image, source)
+
+    def test_decode_compressed_image_msg_shape_based_fallback(self):
+        """ Test _decode_compressed_image_msg infers encoding from shape when the format string has no encoding token. """
+        source = np.arange(2 * 2 * 3, dtype=np.uint8).reshape(2, 2, 3)
+        ok, encoded = cv2.imencode('.png', source)
+        self.assertTrue(ok)
+        msg = SimpleNamespace(format='png', data=encoded.tobytes())
+        image, encoding = ImageData._decode_compressed_image_msg(msg)
+        self.assertEqual(encoding, ImageData.ImageEncoding.BGR8)
+        np.testing.assert_array_equal(image, source)
+
+    def test_decode_compressed_image_msg_decode_failure_raises(self):
+        """ Test _decode_compressed_image_msg raises RuntimeError when cv2.imdecode fails. """
+        msg = SimpleNamespace(format='png', data=b'not a real image')
+        with self.assertRaises(RuntimeError):
+            ImageData._decode_compressed_image_msg(msg)
 
 
 if __name__ == "__main__":
