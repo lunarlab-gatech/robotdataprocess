@@ -250,6 +250,8 @@ def load_LC_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dat
         merged_lc.prune_inter_robot_loop_closures()
 
     # Load the per-pair inlier g2o files (these are pair-specific)
+    # Kimera-RPGO writes these against the sparse-keyframe-indexed graph when sparsified, so they need sparse/odom_all.time.txt, not dense.
+    inlier_time_subdir = 'sparse' if system_params.offline_rpgo_params.sparsified else 'dense'
     lc_inlier_data_list = []
     for name_a, name_b in pair_fn(sorted_names, 2):
         letter_a = letter_by_name[name_a]
@@ -259,7 +261,7 @@ def load_LC_data_ROMAN(roman_root: Path, system_params, dataset_prefix: str, dat
         else:
             g2o_filename = f'inlier_lc_inter_{letter_a}_{letter_b}.g2o'
         lc_data_inlier = LoopClosureData.from_g2o(rpgo_dir / g2o_filename,
-                                                  rpgo_dir / 'dense' / 'odom_all.time.txt',
+                                                  rpgo_dir / inlier_time_subdir / 'odom_all.time.txt',
                                                   names_override=effective_override)
         lc_inlier_data_list.append(lc_data_inlier)
 

@@ -5,10 +5,10 @@ from robotdataprocess.data_types.OdometryData import OdometryData
 
 def main():
     # Enter desired configuration here
-    dataset_num = "V2.3.C"
+    dataset_num = "SmallTownSequence"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_Datasets/' + dataset_num + '/data'
-    robot_name = "Husky2"
+    robot_name = "Husky1"
 
     # Make directory paths
     input_path = Path(input_dir).absolute()

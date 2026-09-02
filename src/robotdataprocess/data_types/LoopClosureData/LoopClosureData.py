@@ -16,6 +16,7 @@ from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, StrMethodFormatter
 import numpy as np
+from ...utils.visualization_utils import darken_color
 from ..PathData import PathData
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -1070,7 +1071,7 @@ class LoopClosureData(Data):
                 scatter_color_in = point_colors_in
             else:
                 scatter_color_out = color
-                scatter_color_in = color
+                scatter_color_in = darken_color(color)
 
             # Outliers
             ax.scatter(
