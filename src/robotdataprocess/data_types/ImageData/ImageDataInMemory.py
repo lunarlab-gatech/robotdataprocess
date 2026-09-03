@@ -117,7 +117,7 @@ class ImageDataInMemory(ImageData):
             f.write(f"encoding: {encoding}\n")
 
         # Create an ImageData class
-        return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
+        return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r'))
     
     @classmethod
     def from_npy(cls, folder_path: Union[Path, str]):
@@ -152,7 +152,7 @@ class ImageDataInMemory(ImageData):
         encoding = ImageData.ImageEncoding.from_str(attr_data["encoding"])
 
         # Create an ImageData class
-        return cls(frame_id, np.load(ts_path), height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
+        return cls(frame_id, np.load(ts_path), height, width, encoding, np.load(imgs_path, mmap_mode='r'))
 
     @classmethod
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
