@@ -16,6 +16,7 @@ from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, StrMethodFormatter
 import numpy as np
+from ...utils.visualization_utils import darken_color
 from ..PathData import PathData
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
@@ -850,6 +851,7 @@ class LoopClosureData(Data):
         ax: plt.Axes = None,
         marker_size_x: float = 75,
         marker_size_star: float = 300,
+        colors: List = None,
     ):
         """
         Scatter plot of loop closure errors (log-log scale): each point is one
@@ -888,6 +890,11 @@ class LoopClosureData(Data):
                 X markers. The legend marker scales proportionally.
             marker_size_star: Marker size (``s`` in ``scatter``) for the inlier star
                 markers. The legend marker scales proportionally.
+            colors: Optional explicit per-entry colors, one per entry in ``lc_data_list``
+                (or, with ``group_indices``, one shared color per group index — paired
+                entries must agree). Overrides the palette this method would otherwise
+                generate on its own; use this to keep colors consistent with another
+                call plotting a different subset of the same entries.
 
         Returns:
             Tuple of (matplotlib Figure, list of stats dicts). Each stats dict contains
@@ -917,6 +924,9 @@ class LoopClosureData(Data):
 
         if group_indices is not None and len(group_indices) != len(lc_data_list):
             raise ValueError("group_indices must have the same length as lc_data_list")
+
+        if colors is not None and len(colors) != len(lc_data_list):
+            raise ValueError("colors must have the same length as lc_data_list")
 
         if group_indices is not None:
             counts = Counter(group_indices)
@@ -977,7 +987,9 @@ class LoopClosureData(Data):
         else:
             fig = ax.get_figure()
 
-        if using_group_indices:
+        if colors is not None:
+            palette = colors
+        elif using_group_indices:
             group_palette = sns.color_palette("bright", len(seen_groups))
             palette = [group_palette[seen_groups[gi]] for gi in group_indices]
         else:
@@ -1059,7 +1071,7 @@ class LoopClosureData(Data):
                 scatter_color_in = point_colors_in
             else:
                 scatter_color_out = color
-                scatter_color_in = color
+                scatter_color_in = darken_color(color)
 
             # Outliers
             ax.scatter(

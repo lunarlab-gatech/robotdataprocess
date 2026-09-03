@@ -527,7 +527,7 @@ class TableData:
         renderer = fig.canvas.get_renderer()
 
         # Detect if any cell's text crowds its columns
-        min_width_fraction: float = 1.0 - 2 * Cell.PAD
+        min_width_fraction: float = 1.0 / pad_factor
         max_width_ratio: float = max([
             tbl[row, col].get_text().get_window_extent(renderer=renderer).width
                 / (tbl[row, col].get_window_extent(renderer=renderer).width * min_width_fraction)

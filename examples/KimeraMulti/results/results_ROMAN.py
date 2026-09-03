@@ -10,22 +10,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
 
 DATASET_ROBOT_GROUPS: Dict[str, List[Tuple[str, ...]]] = {
-    "campus_tunnels_1207_compressed": [
-        ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek"),
-        ("acl_jackal",),
-        ("acl_jackal2",),
-        ("sparkal1",),
-        ("sparkal2",),
-    ],
+    # "campus_tunnels_1207_compressed": [
+    #     ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek"),
+    #     ("acl_jackal",),
+    #     ("acl_jackal2",),
+    #     ("sparkal1",),
+    #     ("sparkal2",),
+    # ],
     # "campus_hybrid_1208_compressed": [
     #     ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek"),
     #     ("acl_jackal", "acl_jackal2", "sparkal1"),
     #     ("sparkal2", "hathor"),
     # ],
-    # "campus_outdoor_1014_compressed": [
-    #     ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"),
-    #     ("acl_jackal", "acl_jackal2"),
-    # ],
+    "campus_outdoor_1014_compressed": [
+        ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth"),
+        ("acl_jackal", "acl_jackal2"),
+    ],
 }
 
 def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
@@ -55,7 +55,7 @@ def main():
     See :func:`robotdataprocess.eval.ROMAN.run_ROMAN_evaluation` for the outputs produced.
     """
 
-    run_names = ["ROMAN_O", "MG_TS", "MG"]
+    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
 
     robot_name_to_color: Dict = {
         "acl_jackal": "#FFA501",

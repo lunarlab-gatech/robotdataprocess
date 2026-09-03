@@ -7,6 +7,7 @@ import cv2
 import copy
 from decimal import Decimal
 import numpy as np
+import os
 from pathlib import Path
 from PIL import Image
 from rosbags.rosbag1 import Reader as Reader1
@@ -75,53 +76,95 @@ class BagLazyImageArray:
     """
     A read-only array-like interface that loads images from a ROS1 bag on demand.
 
-    Header-stamp timestamps are held in memory alongside an already-open
-    ``Reader1`` instance and a ``header_to_rec_ns`` dict that maps each
-    header-stamp (integer nanoseconds) to its bag recording time (integer
-    nanoseconds).  On access, the recording time is used with
-    ``reader.messages(start=rec_ns, stop=rec_ns+1)`` to seek directly to the
-    right position; the retrieved message's header stamp is then verified
-    against the target before returning.  The reader is shared across slices
-    and boolean-masked views and stays open for the lifetime of the object.
+    Header-stamp timestamps are held in memory alongside ``bag_path`` and a
+    ``header_to_rec_ns`` dict that maps each header-stamp (integer
+    nanoseconds) to its bag recording time (integer nanoseconds).  On access,
+    the recording time is used with ``reader.messages(start=rec_ns,
+    stop=rec_ns+1)`` to seek directly to the right position; the retrieved
+    message's header stamp is then verified against the target before
+    returning.
+
+    A ``Reader1`` is opened lazily (on first access) and cached per
+    ``os.getpid()``, rather than being opened once and shared. This is
+    required for safety under ``multiprocessing.Process`` forking: sibling
+    worker processes forked from the same parent would otherwise inherit the
+    same open file description (and its shared kernel-level read offset) from
+    a reader that was already open in the parent before the fork, so an
+    unsynchronized seek+read in one process could land between another's seek
+    and read. Caching by pid means each process transparently opens (and
+    keeps) its own independent reader/file-descriptor the first time it
+    accesses this array, instead of reusing whatever reader object it
+    inherited from its parent at fork time.
     """
 
     container: 'ImageDataOnDisk'
-    reader: Reader1
+    bag_path: Path
     conn_id: int
     timestamps: List[Decimal]
     _header_to_rec_ns: dict  # {header_stamp_ns (int): recording_time_ns (int)}
     msgtype: str
     typestore: Any  # rosbags Typestore
     transformations: List[Callable]
+    _reader: Union[Reader1, None]
+    _reader_pid: Union[int, None]
 
-    def __init__(self, container: 'ImageDataOnDisk', reader: Reader1, conn_id: int,
+    def __init__(self, container: 'ImageDataOnDisk', bag_path: Union[Path, str], conn_id: int,
                  timestamps: List[Decimal], header_to_rec_ns: dict, msgtype: str, typestore: Any,
                  transformations: Union[List[Callable], None] = None) -> None:
         self.container = container
-        self.reader = reader
+        self.bag_path = Path(bag_path)
         self.conn_id = conn_id
         self.timestamps = timestamps
         self._header_to_rec_ns = header_to_rec_ns
         self.msgtype = msgtype
         self.typestore = typestore
         self.transformations = copy.deepcopy(transformations) if transformations else []
+        self._reader = None
+        self._reader_pid = None
+
+    def get_reader(self) -> Reader1:
+        """
+        The ``Reader1`` open in the *current* process. Opens a fresh reader
+        (its own independent file descriptor) the first time this is
+        accessed in a given process, or again if the process's pid has
+        changed since the cached reader was opened (i.e. we're now running in
+        a forked child that inherited a parent's reader object but must not
+        reuse its file descriptor). The stale inherited reader, if any, is
+        simply dropped rather than closed, since closing it would close the
+        underlying file description that the parent (or a sibling process)
+        may still be using.
+        """
+        pid = os.getpid()
+        if self._reader is None or self._reader_pid != pid:
+            self._reader = Reader1(self.bag_path)
+            self._reader.open()
+            self._reader_pid = pid
+        return self._reader
+
+    def close(self) -> None:
+        """ Closes the reader open in the current process, if any. """
+        if self._reader is not None and self._reader_pid == os.getpid():
+            self._reader.close()
+        self._reader = None
+        self._reader_pid = None
 
     def __getitem__(self, idx: Union[int, slice, np.ndarray]) -> Union[np.ndarray, 'BagLazyImageArray']:
         if isinstance(idx, np.ndarray) and idx.dtype == bool:
             new_ts: List[Decimal] = [t for t, keep in zip(self.timestamps, idx) if keep]
-            return BagLazyImageArray(self.container, self.reader, self.conn_id,
+            return BagLazyImageArray(self.container, self.bag_path, self.conn_id,
                                      new_ts, self._header_to_rec_ns, self.msgtype,
                                      self.typestore, self.transformations)
 
         if isinstance(idx, slice):
-            return BagLazyImageArray(self.container, self.reader, self.conn_id,
+            return BagLazyImageArray(self.container, self.bag_path, self.conn_id,
                                      self.timestamps[idx], self._header_to_rec_ns, self.msgtype,
                                      self.typestore, self.transformations)
 
         target_ns: int = int(self.timestamps[idx] * Decimal('1e9'))
         rec_ns: int = self._header_to_rec_ns[target_ns]
-        conns = [c for c in self.reader.connections if c.id == self.conn_id]
-        for _, _, rawdata in self.reader.messages(connections=conns, start=rec_ns, stop=rec_ns + 1):
+        reader = self.get_reader()
+        conns = [c for c in reader.connections if c.id == self.conn_id]
+        for _, _, rawdata in reader.messages(connections=conns, start=rec_ns, stop=rec_ns + 1):
             msg = self.typestore.deserialize_ros1(rawdata, self.msgtype)
             if msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec != target_ns:
                 continue
@@ -129,7 +172,7 @@ class BagLazyImageArray:
                 image, _ = ImageData._decode_compressed_image_msg(msg)
             else:
                 wire_encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-                image = ImageData._decode_image_msg(
+                image = ImageData.decode_image_msg(
                     msg, wire_encoding, msg.height, msg.width).copy()
             for transform in self.transformations:
                 image = transform(image)
@@ -165,22 +208,19 @@ class ImageDataOnDisk(ImageData):
     ``.png`` and ``.npy`` folders where filenames encode timestamps.
     """
         
-    images: LazyImageArray # Not initalized here, but put here for visual code highlighting
-    _bag_reader: Union[Reader1, None]
+    images: Union[LazyImageArray, BagLazyImageArray] # Not initalized here, but put here for visual code highlighting
 
     def __init__(self, frame_id: str, timestamps: Union[np.ndarray, list], height: int, width: int,
                  encoding: ImageData.ImageEncoding, image_paths: List[Path],
-                 transformations: Union[List[Callable], None] = None,
-                 bag_reader: Union[Reader1, None] = None):
+                 transformations: Union[List[Callable], None] = None):
 
         super().__init__(frame_id, timestamps, height, width, encoding, None)
         transformations_copy = copy.deepcopy(transformations) if transformations else []
         self.images = LazyImageArray(self, image_paths, transformations_copy)
-        self._bag_reader = bag_reader
 
     def __del__(self) -> None:
-        if self._bag_reader is not None:
-            self._bag_reader.close()
+        if isinstance(self.images, BagLazyImageArray):
+            self.images.close()
 
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImageDataOnDisk. """
@@ -369,10 +409,12 @@ class ImageDataOnDisk(ImageData):
     @classmethod
     def from_ros1_bag(cls, bag_path: Union[Path, str], img_topic: str) -> 'ImageDataOnDisk':
         """
-        Creates a class structure from a ROS1 bag file lazily.  The bag is
-        opened once and kept open for the lifetime of the returned object.
-        Only per-message index timestamps are loaded into memory; image bytes
-        are read on demand when a specific index is accessed.
+        Creates a class structure from a ROS1 bag file lazily. The bag is
+        opened once here to build the index, then closed; a fresh reader is
+        opened lazily (and independently per process) the first time image
+        bytes are actually accessed, see ``BagLazyImageArray``. Only
+        per-message index timestamps are loaded into memory; image bytes are
+        read on demand when a specific index is accessed.
 
         Args:
             bag_path (Path | str): Path to the ``.bag`` file.
@@ -382,49 +424,52 @@ class ImageDataOnDisk(ImageData):
         Raises:
             ValueError: If ``img_topic`` is not present in the bag.
         """
+        bag_path = Path(bag_path)
         typestore = get_typestore(Stores.ROS1_NOETIC)
-        reader = Reader1(Path(bag_path))
+        reader = Reader1(bag_path)
         reader.open()
 
-        conns = [c for c in reader.connections if c.topic == img_topic]
-        if not conns:
+        try:
+            conns = [c for c in reader.connections if c.topic == img_topic]
+            if not conns:
+                raise ValueError(f"Topic {img_topic!r} not found in bag {bag_path}.")
+            conn = conns[0]
+
+            # Single pass: extract metadata from the first message and build a
+            # {header_stamp_ns -> recording_time_ns} mapping for all messages.
+            frame_id: str = ''
+            height: int = 0
+            width: int = 0
+            encoding: ImageData.ImageEncoding = ImageData.ImageEncoding.RGB8
+            pairs: List[tuple] = []  # (header_stamp: Decimal, recording_time_ns: int)
+
+            num_msgs = conn.msgcount
+            pbar = tqdm.tqdm(total=num_msgs, desc="Indexing Images...", unit=" msgs")
+            for _, rec_ns, rawdata in reader.messages(connections=conns):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+                if not pairs:
+                    frame_id = msg.header.frame_id
+                    if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
+                        first_image, encoding = ImageData._decode_compressed_image_msg(msg)
+                        height, width = first_image.shape[:2]
+                    else:
+                        height = msg.height
+                        width = msg.width
+                        encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+                stamp = msg.header.stamp
+                h_stamp = Decimal(stamp.sec) + Decimal(stamp.nanosec) * Decimal('1e-9')
+                pairs.append((h_stamp, rec_ns))
+                pbar.update(1)
+            pbar.close()
+        finally:
             reader.close()
-            raise ValueError(f"Topic {img_topic!r} not found in bag {bag_path}.")
-        conn = conns[0]
-
-        # Single pass: extract metadata from the first message and build a
-        # {header_stamp_ns -> recording_time_ns} mapping for all messages.
-        frame_id: str = ''
-        height: int = 0
-        width: int = 0
-        encoding: ImageData.ImageEncoding = ImageData.ImageEncoding.RGB8
-        pairs: List[tuple] = []  # (header_stamp: Decimal, recording_time_ns: int)
-
-        num_msgs = conn.msgcount
-        pbar = tqdm.tqdm(total=num_msgs, desc="Indexing Images...", unit=" msgs")
-        for _, rec_ns, rawdata in reader.messages(connections=conns):
-            msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
-            if not pairs:
-                frame_id = msg.header.frame_id
-                if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
-                    first_image, encoding = ImageData._decode_compressed_image_msg(msg)
-                    height, width = first_image.shape[:2]
-                else:
-                    height = msg.height
-                    width = msg.width
-                    encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-            stamp = msg.header.stamp
-            h_stamp = Decimal(stamp.sec) + Decimal(stamp.nanosec) * Decimal('1e-9')
-            pairs.append((h_stamp, rec_ns))
-            pbar.update(1)
-        pbar.close()
 
         pairs.sort(key=lambda p: p[0])
         timestamps: List[Decimal] = [p[0] for p in pairs]
         header_to_rec_ns: dict = {int(p[0] * Decimal('1e9')): p[1] for p in pairs}
 
-        instance = cls(frame_id, timestamps, height, width, encoding, [], bag_reader=reader)
-        instance.images = BagLazyImageArray(instance, reader, conn.id, timestamps,
+        instance = cls(frame_id, timestamps, height, width, encoding, [])
+        instance.images = BagLazyImageArray(instance, bag_path, conn.id, timestamps,
                                             header_to_rec_ns, conn.msgtype, typestore)
         return instance
 

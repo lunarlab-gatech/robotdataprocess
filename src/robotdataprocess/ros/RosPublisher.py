@@ -2,6 +2,7 @@ from ..data_types.Data import ROSMsgLibType
 from ..data_types.SequentialData import SequentialData
 from ..data_types.ImageData.ImageData import ImageData
 from ..utils.ModuleImporter import ModuleImporter
+from enum import Enum
 import multiprocessing
 from multiprocessing import Process, Manager, Event, resource_tracker
 from multiprocessing.managers import DictProxy
@@ -60,12 +61,30 @@ class _SingleDataPublisher():
         num_workers: Number of worker processes to pre-build messages.
         verbose: Whether to print topic publishing status to the console.
         stats_dict: Dictionary for processes to put publishing statistics for printing.
+        publish_mode: Whether to skip ahead to the most recent message when behind
+            schedule (PUB_LAST), or publish every message in order (PUB_ALL).
     """
+
+    class PublishMode(Enum):
+        """
+        Controls how a publisher catches up when it falls behind schedule.
+
+        Attributes:
+            PUB_LAST: On falling behind, skip ahead and publish only the most
+                recent due message, discarding the ones in between. Default.
+            PUB_ALL: Never skip; publish every message in order, even if that
+                means publishing several messages back-to-back within a
+                single timer tick to drain a backlog.
+        """
+
+        PUB_LAST = 0
+        PUB_ALL = 1
 
     def __init__(self, libtype: ROSMsgLibType, ros2_node_class: Union[Any, None], data: SequentialData, topic_name: str,
                  type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
-                 verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
-        
+                 verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False,
+                 publish_mode: PublishMode = PublishMode.PUB_LAST):
+
         # Save parameters
         self.libtype = libtype
         self.ros2_node_class = ros2_node_class
@@ -82,6 +101,12 @@ class _SingleDataPublisher():
         self._is_finished = False
         self.restart_when_behind = False
         self.latched = latched
+        self.publish_mode = publish_mode
+
+        # Running total used to compute avg_behind_secs (how far behind wall-clock
+        # schedule published messages have been, on average), for dashboard visibility.
+        self._behind_secs_sum = 0.0
+        self._behind_secs_count = 0
 
         # Timing setup
         self.start_time = time.monotonic() + 1.0
@@ -361,55 +386,64 @@ class _SingleDataPublisher():
                 self.log_msg_to_ros("Node destroyed.", self.stats_dict)
                 return
         
-        # Get the next message from the queue if we don't have one ready
-        if self.next_msg is None:
-            result = self._pop_msg_with_index(self.index.value)
-            if result is None: return
-            self.next_msg: Tuple[int, float, Any] = result
+        # In PUB_ALL mode, a single timer tick may publish several messages
+        # back-to-back to drain a backlog (e.g. a burst of near-simultaneous
+        # messages), rather than being limited to one publish per tick.
+        while True:
+            # Get the next message from the queue if we don't have one ready
+            if self.next_msg is None:
+                result = self._pop_msg_with_index(self.index.value)
+                if result is None: return
+                self.next_msg: Tuple[int, float, Any] = result
 
-        # Calculate target publish time for the current message
-        now = time.monotonic()
-        target: float = float(self.data.timestamps[self.index.value]) - self.first_ts + self.start_time
+            # Calculate target publish time for the current message
+            now = time.monotonic()
+            target: float = float(self.data.timestamps[self.index.value]) - self.first_ts + self.start_time
 
-        # Publish when time has arrived
-        if now >= target:
+            # Wait for a later tick if it's not time to publish yet
+            if now < target:
+                return
 
-            # Check if we are behind
-            behind: bool = False
-            if self.index.value < self.data.len() - 1:
-                next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
-                if now > next_target:
-                    behind = True
-            
-            # If behind...
-            if behind:
-                # We either plan a restart
-                if self.restart_when_behind:
+            if self.publish_mode == _SingleDataPublisher.PublishMode.PUB_LAST:
+                # Check if we are behind
+                behind: bool = False
+                if self.index.value < self.data.len() - 1:
+                    next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
+                    if now > next_target:
+                        behind = True
 
-                    # Calculate the next message to publish (skipping some)
-                    prev_skipped_msgs = self.skipped_msgs
-                    while self.index.value < self.data.len() - 1 and self.skipped_msgs - prev_skipped_msgs < RESTART_JUMP_MSGS:
-                        self.index.value += 1
-                        self.skipped_msgs += 1
+                # If behind...
+                if behind:
+                    # We either plan a restart
+                    if self.restart_when_behind:
 
-                    # We don't want to publish before its time, so empty next_msg and return
-                    self.next_msg = None
-                    return
-                
-                # Or just skip to the next message that isn't behind
-                else:
-                    # Find the next index
-                    while self.index.value < self.data.len() - 1: 
-                        next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
-                        if now < next_target: 
-                            break 
-                        self.index.value += 1 
-                        self.skipped_msgs += 1
+                        # Calculate the next message to publish (skipping some)
+                        prev_skipped_msgs = self.skipped_msgs
+                        while self.index.value < self.data.len() - 1 and self.skipped_msgs - prev_skipped_msgs < RESTART_JUMP_MSGS:
+                            self.index.value += 1
+                            self.skipped_msgs += 1
 
-                    # Load the next message for it (if available)
-                    result = self._pop_msg_with_index(self.index.value)
-                    if result is None: return
-                    self.next_msg: Tuple[int, float, Any] = result
+                        # We don't want to publish before its time, so empty next_msg and return
+                        self.next_msg = None
+                        return
+
+                    # Or just skip to the next message that isn't behind
+                    else:
+                        # Find the next index
+                        while self.index.value < self.data.len() - 1:
+                            next_target = float(self.data.timestamps[self.index.value + 1]) - self.first_ts + self.start_time
+                            if now < next_target:
+                                break
+                            self.index.value += 1
+                            self.skipped_msgs += 1
+
+                        # Load the next message for it (if available)
+                        result = self._pop_msg_with_index(self.index.value)
+                        if result is None: return
+                        self.next_msg: Tuple[int, float, Any] = result
+
+                        # Recompute the target time for the message we actually ended up with
+                        target = float(self.data.timestamps[self.index.value]) - self.first_ts + self.start_time
 
             # Publish the message
             self.publisher.publish(self.next_msg[2])
@@ -419,13 +453,19 @@ class _SingleDataPublisher():
             if self._last_pub is not None and self._last_pub[1] >= self.next_msg[1]:
                 raise RuntimeError("Published timestamps out of order!")
             self._last_pub = self.next_msg
-            
+
             # Stats calculation
             elapsed = now - self.start_time
             msgs_published = self.index.value - self.skipped_msgs
             interval = float(now - self.prev_time) if self.index.value > 0 else 0.0
-            avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
             inst_hz = 1.0 / interval if interval > 0 else 0.0
+            inst_behind_secs = now - target
+
+            avg_hz = msgs_published / float(elapsed) if elapsed > 0 else 0.0
+            self._behind_secs_sum += inst_behind_secs
+            self._behind_secs_count += 1
+            avg_behind_secs = self._behind_secs_sum / self._behind_secs_count
+            
             self.prev_time = now
 
             # Update statistics (at most 10Hz)
@@ -436,7 +476,9 @@ class _SingleDataPublisher():
                     "progress": self.index.value,
                     "total": self.data.len(),
                     "avg_hz": avg_hz,
+                    "avg_behind_secs": avg_behind_secs,
                     "inst_hz": inst_hz,
+                    "inst_behind_secs": inst_behind_secs,
                     "skipped": self.skipped_msgs,
                     "log_queue": self.stats_dict[self.topic]['log_queue'],
                     'local_buf_size': len(self.local_buf),
@@ -447,16 +489,24 @@ class _SingleDataPublisher():
             # Prepare the next message
             if self.index.value < self.data.len():
                 result = self._pop_msg_with_index(self.index.value)
-                if result is None: 
+                if result is None:
                     self.next_msg = None
                     return
                 self.next_msg = result
             else:
                 self.next_msg = None
+                return
+
+            # In PUB_LAST mode, only publish one message per timer tick (unchanged
+            # behavior). In PUB_ALL mode, loop back to check whether the newly
+            # prepared message is also already due, to drain the backlog.
+            if self.publish_mode == _SingleDataPublisher.PublishMode.PUB_LAST:
+                return
 
 @typechecked
 def _run_ROS1_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
-                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
+                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False,
+                                publish_mode: _SingleDataPublisher.PublishMode = _SingleDataPublisher.PublishMode.PUB_LAST) -> None:
     """
     Entry point for each ROS1 publishing multiprocessing worker.
     NOTE: This function feels useless, but follows similar structure to the ROS2 version, which is more complex.
@@ -466,9 +516,10 @@ def _run_ROS1_publisher_process(data: SequentialData, topic_name: str, type: Uni
         import rospy
         class SingleDataPublisherROS1():
             def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
-                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
-                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
-        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
+                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False,
+                         publish_mode: _SingleDataPublisher.PublishMode = _SingleDataPublisher.PublishMode.PUB_LAST):
+                self._pub = _SingleDataPublisher(ROSMsgLibType.ROSPY, None, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched, publish_mode)
+        node = SingleDataPublisherROS1(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched, publish_mode)
         while not rospy.is_shutdown() and not node._pub._is_finished:
             time.sleep(0.1)
 
@@ -478,7 +529,8 @@ def _run_ROS1_publisher_process(data: SequentialData, topic_name: str, type: Uni
 
 @typechecked
 def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False,
-                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False) -> None:
+                                num_workers: int = 1, verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False,
+                                publish_mode: _SingleDataPublisher.PublishMode = _SingleDataPublisher.PublishMode.PUB_LAST) -> None:
     """
     Entry point for each ROS2 publishing multiprocessing worker.
     """
@@ -491,9 +543,10 @@ def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Uni
         # Wrapper class that is also a ROS2 Node, so that we are in compliance with rclpy design.
         class SingleDataPublisherROS2(Node):
             def __init__(self, data: SequentialData, topic_name: str, type: Union[str, None], hertz: float, stop_event, wait_for_sub: bool = False, num_workers: int = 1,
-                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False):
+                         verbose: bool = True, stats_dict: Union[DictProxy, None] = None, latched: bool = False,
+                         publish_mode: _SingleDataPublisher.PublishMode = _SingleDataPublisher.PublishMode.PUB_LAST):
                 super().__init__(f"robotdataprocess_publisher_{topic_name.replace('/', '_')}")
-                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
+                self._pub = _SingleDataPublisher(ROSMsgLibType.RCLPY, self, data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched, publish_mode)
 
             def is_finished(self) -> bool:
                 return self._pub._is_finished
@@ -501,7 +554,7 @@ def _run_ROS2_publisher_process(data: SequentialData, topic_name: str, type: Uni
         # Start ROS2 node
         if not rclpy.ok():
             rclpy.init()
-        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched)
+        node = SingleDataPublisherROS2(data, topic_name, type, hertz, stop_event, wait_for_sub, num_workers, verbose, stats_dict, latched, publish_mode)
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=2.0)
             if node.is_finished():
@@ -613,7 +666,8 @@ def _run_clock_publisher_process(libtype: ROSMsgLibType, start_sim_time: float,
 def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: List[str], data_msg_type: List[Union[str, None]],
                                   data_hz: List[float], data_workers: List[int], libtype: ROSMsgLibType, shutdown_ros: bool,
                                   verbose: bool = True, delay_seconds: float = 0.0, wait_for_sub: bool = False,
-                                  publish_clock: bool = False, data_latched: Union[List[bool], None] = None) -> None:
+                                  publish_clock: bool = False, data_latched: Union[List[bool], None] = None,
+                                  data_publish_mode: Union[List[_SingleDataPublisher.PublishMode], None] = None) -> None:
     """
     Launches one publisher process per Data stream, either for ROS1 or ROS2.
 
@@ -632,6 +686,10 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         data_latched: Per-topic flag indicating whether the publisher should be latched (e.g. for
             static transforms). Latched publishers hold the node alive until all non-latched
             publishers finish. Defaults to all False.
+        data_publish_mode: Per-topic catch-up behavior when a publisher falls behind schedule:
+            PUB_LAST skips ahead and publishes only the most recent due message (discarding the
+            ones in between); PUB_ALL never skips, publishing every message in order even if that
+            means draining several within a single timer tick. Defaults to all PUB_LAST.
     """
 
     # Optional delay before starting (for testing purposes)
@@ -648,6 +706,11 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         data_latched = [data.len() == 1 for data in data_list]
     assert len(data_list) == len(data_latched), "data_latched must have the same length as data_list!"
 
+    # Default: skip ahead to the most recent message when behind schedule
+    if data_publish_mode is None:
+        data_publish_mode = [_SingleDataPublisher.PublishMode.PUB_LAST for _ in data_list]
+    assert len(data_list) == len(data_publish_mode), "data_publish_mode must have the same length as data_list!"
+
     # Create a shared dictionary across processes for statistics
     manager = Manager()
     stats_dict = manager.dict() # Shared across processes
@@ -658,20 +721,22 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         all_topics.append(CLOCK_TOPIC)
     for topic in all_topics:
         stats_dict[topic] = {"last_update_time": 0, "progress": 0, "total": 0, "avg_hz": 0,
-                             "inst_hz": 0, "skipped": 0, "log_queue": manager.list(),
+                             "avg_behind_secs": 0, "inst_hz": 0, "inst_behind_secs": 0,
+                             "skipped": 0, "log_queue": manager.list(),
                              'local_buf_size': 0, 'worker_queue_size': 0}
 
     # Launch the appropriate publisher processes
     processes: List[Process] = []
     topic_to_proc: dict = {}
     stop_event = Event()
-    for data, topic, type, hertz, workers, latched in zip(data_list, data_topics, data_msg_type, data_hz, data_workers, data_latched):
+    for data, topic, type, hertz, workers, latched, publish_mode in zip(
+            data_list, data_topics, data_msg_type, data_hz, data_workers, data_latched, data_publish_mode):
         if libtype == ROSMsgLibType.RCLPY:
             pub_proc_func = _run_ROS2_publisher_process
         elif libtype == ROSMsgLibType.ROSPY:
             pub_proc_func = _run_ROS1_publisher_process
 
-        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict, latched))
+        p = Process(target=pub_proc_func, args=(data, topic, type, hertz, stop_event, wait_for_sub, workers, verbose, stats_dict, latched, publish_mode))
         p.start()
         processes.append(p)
         topic_to_proc[topic] = p
@@ -686,6 +751,17 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         clock_process.start()
         topic_to_proc[CLOCK_TOPIC] = clock_process
 
+    # Helper to format a "how far behind schedule" duration
+    def format_behind_secs(seconds: float) -> str:
+        """ Auto-scales the unit so small values stay readable: seconds (>= 1s), milliseconds (>= 1ms), or nanoseconds (< 1ms). """
+        abs_seconds = abs(seconds)
+        if abs_seconds >= 1.0:
+            return f"{seconds:.3f}s"
+        elif abs_seconds >= 1e-3:
+            return f"{seconds * 1e3:.3f}ms"
+        else:
+            return f"{seconds * 1e9:.0f}ns"
+
     # Helper to build the table with a Status column
     def generate_table() -> Table:
         table = Table(title="ROS Publisher Dashboard", show_header=True, header_style="bold magenta")
@@ -694,6 +770,8 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         table.add_column("Progress", justify="right", min_width=13)
         table.add_column("Avg Hz", justify="right")
         table.add_column("Inst Hz", justify="right")
+        table.add_column("Avg Behind", justify="right")
+        table.add_column("Inst Behind", justify="right")
         table.add_column("Skipped Msgs", justify="right")
         table.add_column("Buffer Sizes", justify="right")
 
@@ -718,6 +796,8 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
                 f"{s['progress']}/{s['total']}",
                 f"{s['avg_hz']:.1f}",
                 f"{s['inst_hz']:.1f}",
+                format_behind_secs(s['avg_behind_secs']),
+                format_behind_secs(s['inst_behind_secs']),
                 f"{s['skipped']}",
                 f"{s['local_buf_size']}/∞ | {s['worker_queue_size']}/{MSG_QUEUE_MAX_SIZE}",
                 style=row_style

@@ -1,5 +1,6 @@
 import decimal
 from decimal import Decimal
+import multiprocessing
 import numpy as np
 import os
 from pathlib import Path
@@ -13,6 +14,29 @@ import tempfile
 import unittest
 import cv2
 from PIL import Image
+
+
+def _bag_multiprocess_worker(data: ImageDataOnDisk, worker_id: int, num_workers: int,
+                              result_queue: multiprocessing.Queue, barrier: multiprocessing.Barrier) -> None:
+    """
+    Module-level worker for test_from_ros1_bag_multiprocess_worker_access. Replicates
+    RosPublisher's _message_worker access pattern: this process is one of several
+    forked siblings that all inherited the same (already-constructed, possibly
+    already-opened) ImageDataOnDisk from their common parent, and each round-robins
+    over a disjoint slice of indices, reading every image assigned to it.
+    """
+    try:
+        barrier.wait(timeout=30)
+    except Exception:
+        return
+
+    for idx in range(worker_id, data.len(), num_workers):
+        try:
+            image = np.array(data.images[idx])
+            result_queue.put((idx, image))
+        except Exception as e:
+            result_queue.put((idx, e))
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImageDataOnDisk(unittest.TestCase):
@@ -819,6 +843,88 @@ class TestImageDataOnDisk(unittest.TestCase):
             np.testing.assert_array_equal(data.images[0], images_written[1])  # green (header 1.0s)
             np.testing.assert_array_equal(data.images[1], images_written[2])  # blue  (header 2.0s)
             np.testing.assert_array_equal(data.images[2], images_written[0])  # red   (header 3.0s)
+
+    def test_from_ros1_bag_multiprocess_worker_access(self):
+        """
+        Regression test for a shared-file-descriptor race in BagLazyImageArray.
+
+        Replicates publish_data_ROS_multiprocess's fork-per-topic-worker pattern
+        (RosPublisher._SingleDataPublisher spawns several sibling Process workers
+        per image topic that round-robin over disjoint index slices): a single
+        ImageDataOnDisk is loaded once in this (parent) process, then several
+        Process workers are forked from it and each reads its assigned indices
+        concurrently. A multiprocessing.Barrier holds all workers at the starting
+        line so their reads overlap as much as possible.
+
+        Before the fix, all forked siblings inherited the *same* already-open
+        Reader1/file descriptor from the parent (a single shared kernel-level file
+        offset), so one worker's seek could land between another's seek and read,
+        corrupting reads and raising rosbags ReaderErrors. This test doesn't just
+        check that no worker raises: it verifies every single image recovered by
+        every worker exactly matches the known pixel content written for its
+        index, since a caught-but-wrong read (mis-seeked to a neighboring frame)
+        would otherwise pass silently.
+
+        Images are made a realistic camera resolution (not just tiny placeholder
+        pixels) so that, as in the real bag that exposed this bug, individual
+        messages are large enough to land in separate bag chunks -- with all
+        messages packed into a single chunk there's nothing to actually race
+        over, since every worker would seek to the same chunk offset regardless
+        of which message it wants.
+        """
+        ctx = multiprocessing.get_context('fork')
+
+        H, W = 480, 640
+        N = 40
+        num_workers = 4
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0 + i * 0.01 for i in range(N)]
+
+        # Every frame gets a distinct, independently-verifiable solid colour.
+        images = np.zeros((N, H, W, 3), dtype=np.uint8)
+        for i in range(N):
+            images[i, :, :] = [i % 256, (i * 7) % 256, (i * 13) % 256]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_multiprocess.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            # Load once in the parent process. If a Reader1 is already open on
+            # this object at fork time (as it always was before the fix), every
+            # child below inherits that same open file description.
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            result_queue = ctx.Queue()
+            barrier = ctx.Barrier(num_workers)
+            procs = [
+                ctx.Process(target=_bag_multiprocess_worker,
+                            args=(data, worker_id, num_workers, result_queue, barrier))
+                for worker_id in range(num_workers)
+            ]
+            for p in procs:
+                p.start()
+
+            try:
+                results = {}
+                for _ in range(N):
+                    idx, payload = result_queue.get(timeout=60)
+                    self.assertNotIn(idx, results, f"Index {idx} was returned more than once.")
+                    if isinstance(payload, Exception):
+                        self.fail(f"Worker raised while reading index {idx}: {payload!r}")
+                    results[idx] = payload
+            finally:
+                for p in procs:
+                    p.join(timeout=10)
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=5)
+
+            self.assertEqual(len(results), N)
+            for i in range(N):
+                np.testing.assert_array_equal(
+                    results[i], images[i],
+                    err_msg=f"Image at index {i} does not match what was written to the bag.")
 
     def test_eq(self):
         """ Test __eq__ works on lazily loaded imagery, comparing frame-by-frame via LazyImageArray indexing. """

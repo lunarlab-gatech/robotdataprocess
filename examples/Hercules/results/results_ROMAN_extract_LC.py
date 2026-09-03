@@ -12,19 +12,19 @@ from results_ROMAN import load_gt_data_ROMAN
 
 def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
-    critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
-    dataset_prefix = "airmuseum"
-    dataset_name = "Scenario5"
-    pair = ["robotA", "robotB"]
-    run_names = ["ROMAN_O", "MG_NONM"]
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
+    dataset_prefix = "hercules"
+    dataset_name = "V2.3.AP"
+    pair = ["Husky1", "Drone1"]
+    run_names = ["ROMAN_O", "MG_TS_SM"]
     out_dir = Path(__file__).parent.parent.parent.parent / 'figures' / dataset_prefix / dataset_name / 'ALL'
     out_dir.mkdir(parents=True, exist_ok=True)
 
     robot_name_to_chars_mapping: dict = {
-        "drone": "D",
-        "robotA": "RA",
-        "robotB": "RB",
-        "robotC": "RC"
+        "Husky1": "H1",
+        "Husky2": "H2",
+        "Drone1": "D1",
+        "Drone2": "D2"
     }
 
     gt_list = load_gt_data_ROMAN(dataset_name, pair)
