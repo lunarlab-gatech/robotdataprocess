@@ -751,6 +751,17 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
         clock_process.start()
         topic_to_proc[CLOCK_TOPIC] = clock_process
 
+    # Helper to format a "how far behind schedule" duration
+    def format_behind_secs(seconds: float) -> str:
+        """ Auto-scales the unit so small values stay readable: seconds (>= 1s), milliseconds (>= 1ms), or nanoseconds (< 1ms). """
+        abs_seconds = abs(seconds)
+        if abs_seconds >= 1.0:
+            return f"{seconds:.3f}s"
+        elif abs_seconds >= 1e-3:
+            return f"{seconds * 1e3:.3f}ms"
+        else:
+            return f"{seconds * 1e9:.0f}ns"
+
     # Helper to build the table with a Status column
     def generate_table() -> Table:
         table = Table(title="ROS Publisher Dashboard", show_header=True, header_style="bold magenta")
@@ -785,8 +796,8 @@ def publish_data_ROS_multiprocess(data_list: List[SequentialData], data_topics: 
                 f"{s['progress']}/{s['total']}",
                 f"{s['avg_hz']:.1f}",
                 f"{s['inst_hz']:.1f}",
-                f"{s['avg_behind_secs']:.3f}s",
-                f"{s['inst_behind_secs']:.3f}s",
+                format_behind_secs(s['avg_behind_secs']),
+                format_behind_secs(s['inst_behind_secs']),
                 f"{s['skipped']}",
                 f"{s['local_buf_size']}/∞ | {s['worker_queue_size']}/{MSG_QUEUE_MAX_SIZE}",
                 style=row_style
