@@ -554,25 +554,16 @@ class ImageData(SequentialData):
             raise ValueError(f"Index {i} is out of bounds!")
 
         # Calculate the step
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            step = 3 * self.width
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            step = 4 * self.width
-        else:
-            raise NotImplementedError(f"Unsupported encoding {self.encoding} for rosbag_get_ros_msg!")
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
+        step = np.dtype(dtype).itemsize * channels * self.width
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
         nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN))
 
         # Calculate the ROS2 Image data
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            data = self.images[i].flatten()
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            data = self.images[i].flatten().view(np.uint8)
-            # TODO: Check endianness for _32FC1
-        else:
-            raise NotImplementedError(f"Unsupported encoding {self.encoding} for rosbag_get_ros_msg!")
+        data = self.images[i].flatten().view(np.uint8)
+        # TODO: Check endianness for multi-byte encodings (_32FC1, _16UC1)
 
         # Write the data into the new class
         if lib_type == ROSMsgLibType.ROSBAGS:
