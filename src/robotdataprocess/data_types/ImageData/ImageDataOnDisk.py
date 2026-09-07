@@ -325,6 +325,36 @@ class ImageDataOnDisk(ImageData):
         self.width = new_width
         self.height = new_height
 
+    def set_above_threshold_to_zero(self, threshold: float) -> None:
+        """
+        Zero out every pixel strictly greater than threshold, applied lazily
+        via the transformation pipeline.
+
+        Intended for depth imagery, where zero is the conventional "no
+        measurement" sentinel, so out-of-range readings are marked invalid
+        rather than passed downstream as real geometry. Positive infinity is
+        zeroed too, since it compares greater than any finite threshold. NaN
+        is not, because every comparison against NaN is False.
+
+        Args:
+            threshold: Values strictly above this are set to zero. Must be
+                finite; a non-finite threshold would zero nothing at all.
+
+        Raises:
+            ValueError: If threshold is not finite.
+        """
+        if not np.isfinite(threshold):
+            raise ValueError(f"Threshold must be finite, got {threshold}.")
+
+        def _zero_above(image: np.ndarray, threshold=threshold) -> np.ndarray:
+            # Copy first: .npy images load as read-only memory-maps, so the
+            # masked write below would fail on the original array.
+            thresholded: np.ndarray = np.array(image, copy=True)
+            thresholded[thresholded > threshold] = 0
+            return thresholded
+
+        self.images.transformations.append(_zero_above)
+
     # =========================================================================
     # ============================ Class Methods ==============================
     # =========================================================================

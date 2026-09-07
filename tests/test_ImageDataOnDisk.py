@@ -414,6 +414,38 @@ class TestImageDataOnDisk(unittest.TestCase):
             img_data.resize(-1, -1)
 
     # =========================================================================
+    # ===================== set_above_threshold_to_zero =======================
+    # =========================================================================
+
+    def _write_invalid_depth_npy(self, folder: Path) -> None:
+        """ Writes a depth frame carrying the invalid values learned stereo produces. """
+        depth = np.array([[1.5, 40.0], [np.inf, 4.5e8]], dtype=np.float32)
+        np.save(folder / "1.000000000.npy", depth)
+
+    def test_set_above_threshold_to_zero(self):
+        """ Test values above the threshold, including +inf, are zeroed and the rest kept. """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_invalid_depth_npy(Path(tmpdir))
+            data = ImageDataOnDisk.from_npy_files(Path(tmpdir), 'depth_cam')
+
+            data.set_above_threshold_to_zero(50.0)
+
+            expected = np.array([[1.5, 40.0], [0.0, 0.0]], dtype=np.float32)
+            np.testing.assert_array_equal(data.images[0], expected)
+            self.assertEqual(data.images[0].dtype, np.float32)
+
+    def test_set_above_threshold_to_zero_non_finite_threshold_raises(self):
+        """ Test a non-finite threshold raises rather than silently zeroing nothing. """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_invalid_depth_npy(Path(tmpdir))
+            data = ImageDataOnDisk.from_npy_files(Path(tmpdir), 'depth_cam')
+
+            with self.assertRaises(ValueError):
+                data.set_above_threshold_to_zero(np.inf)
+            with self.assertRaises(ValueError):
+                data.set_above_threshold_to_zero(np.nan)
+
+    # =========================================================================
     # ====================== crop_images_to_LiDAR_FOV ========================
     # =========================================================================
 
