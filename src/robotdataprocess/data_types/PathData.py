@@ -210,21 +210,17 @@ class PathData(SequentialData):
             print(f"Data already in {target_frame.name} coordinate frame, returning...")
             return
 
-        if target_frame == CoordinateFrame.FLU and self.frame in (CoordinateFrame.NED, CoordinateFrame.LDB):
-            R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
+        R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
 
-            if transform_type == TransformType.CHANGE_OF_BASIS:
-                self._convert_frame(R_frame)
-            elif transform_type == TransformType.ROTATION:
-                R_frame_Q = R.from_matrix(R_frame)
-                self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
-                self._ori_apply_rotation_left_side(R_frame_Q)
+        if transform_type == TransformType.CHANGE_OF_BASIS:
+            self._convert_frame(R_frame)
+        elif transform_type == TransformType.ROTATION:
+            R_frame_Q = R.from_matrix(R_frame)
+            self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
+            self._ori_apply_rotation_left_side(R_frame_Q)
 
-            self.frame = CoordinateFrame.FLU
-            self._invalidate_cache()
-
-        else:
-            raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
+        self.frame = CoordinateFrame.FLU
+        self._invalidate_cache()
         
     def redefine_local_axes(self, curr_local_frame: CoordinateFrame, target_local_frame: CoordinateFrame):
         """
