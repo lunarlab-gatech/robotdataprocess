@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 DATASET_ROBOT_GROUPS: Dict[str, List[Tuple[str, ...]]] = {
     "campus_tunnels_1207_compressed": [
@@ -52,7 +52,7 @@ def main():
 
     Evaluates the robot groups in DATASET_ROBOT_GROUPS, once per dataset sequence.
 
-    See :func:`robotdataprocess.eval.ROMAN.run_ROMAN_evaluation` for the outputs produced.
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
 
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
@@ -77,9 +77,10 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
+    evaluator = SLAMEvaluator(roman_root)
     for dataset_name, robot_groups in DATASET_ROBOT_GROUPS.items():
-        run_ROMAN_evaluation(roman_root, "kimera_multi", dataset_name, run_names, robot_groups, critical_invocation_params,
-                             figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
+        evaluator.run_evaluation("kimera_multi", dataset_name, run_names, robot_groups, critical_invocation_params,
+                                 figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
 
 if __name__ == "__main__":
     main()

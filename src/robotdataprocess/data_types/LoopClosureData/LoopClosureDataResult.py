@@ -1,6 +1,21 @@
+from enum import Enum
 from typeguard import typechecked
 from typing import Optional
 import numpy as np
+
+class LoopClosureFilterMode(Enum):
+    """
+    Which subset of loop closures to load.
+
+    Attributes:
+        ALL: Load both inter-robot and intra-robot loop closures.
+        ONLY_INTER_LC: Load only inter-robot (cross-robot) loop closures.
+        ONLY_INTRA_LC: Load only intra-robot (single-robot) loop closures.
+    """
+
+    ALL = 0
+    ONLY_INTER_LC = 1
+    ONLY_INTRA_LC = 2
 
 class LoopClosureDataResult:
     """

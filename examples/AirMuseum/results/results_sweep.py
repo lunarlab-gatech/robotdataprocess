@@ -10,7 +10,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import calculate_merged_ate, load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
+from robotdataprocess import LoopClosureFilterMode
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from results_ROMAN import load_gt_data_ROMAN
 
 def _calculate_merged_ate_star(task: Dict[str, Any]):
@@ -21,7 +22,7 @@ def _calculate_merged_ate_star(task: Dict[str, Any]):
     which of potentially hundreds of pooled tasks actually failed.
     """
     try:
-        return calculate_merged_ate(*task["args"])
+        return task["evaluator"].calculate_merged_ate(*task["args"])
     except Exception as e:
         raise RuntimeError(f"calculate_merged_ate failed for base_config='{task['base_config']}', "
                            f"overrides={task['overrides']}, robot_pair={task['pair']}") from e
@@ -112,6 +113,7 @@ def main():
     trans_err_in_target = 1.0
     rot_err_in_target = 5.0
 
+    evaluator = SLAMEvaluator(roman_root)
     gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_name, robot_pair)))
 
     sweeps_dir = roman_root / "research" / "AirMuseum" / "sweeps"
@@ -121,16 +123,17 @@ def main():
     overrides_list = [o for sweep_data in sweep_data_by_name.values() for o in sweep_param_grid(sweep_data)]
 
     # Build every (method, swept system_params) task up front, then run the ATE calculations
-    # (the expensive part) in parallel, exactly like run_ROMAN_evaluation does.
+    # (the expensive part) in parallel, exactly like run_evaluation does.
     tasks = []
     for method in methods:
-        base_system_params = load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, method)
+        base_system_params = evaluator.load_system_params(dataset_prefix, dataset_name, method)
         base_config = f"{dataset_prefix}_{dataset_name}_{method}.yaml"
         for overrides in overrides_list:
             swept_system_params = apply_overrides(base_system_params, overrides)
             tasks.append({
-                "args": (roman_root, swept_system_params, dataset_prefix, dataset_name, method,
+                "args": (swept_system_params, dataset_prefix, dataset_name, method,
                         robot_pair, critical_invocation_params, load_gt_data_ROMAN),
+                "evaluator": evaluator,
                 "method": method,
                 "base_config": base_config,
                 "overrides": overrides,
@@ -144,11 +147,11 @@ def main():
     counts = {method: {"success": 0, "failure": 0} for method in methods}
     for task, result in zip(tasks, results):
         method = task["method"]
-        system_params, robot_names = task["args"][1], task["args"][5]
+        system_params, robot_names = task["args"][0], task["args"][4]
         ate = result.merged_metrics.APE.translation_part.rmse
 
-        lc_all, lc_inlier = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name, robot_names,
-                                         critical_invocation_params, lc_filter=LCFilterMode.ONLY_INTER_LC)
+        lc_all, lc_inlier = evaluator.load_LC_data(system_params, dataset_prefix, dataset_name, robot_names,
+                                         critical_invocation_params, lc_filter=LoopClosureFilterMode.ONLY_INTER_LC)
         num_inlier_inter_lc = lc_inlier.num_loop_closures
 
         lc_all.calculate_errors(gt_dict)

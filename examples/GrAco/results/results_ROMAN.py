@@ -7,7 +7,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
     """
@@ -28,7 +28,7 @@ def main():
     """
     Generate all evaluation figures and tables for the GrAco dataset.
 
-    See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
 
     all_robots = ["ground-06", "aerial-08"]
@@ -58,8 +58,9 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    run_ROMAN_evaluation(roman_root, "graco", dataset_name, run_names, robot_groups, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
+    evaluator = SLAMEvaluator(roman_root)
+    evaluator.run_evaluation("graco", dataset_name, run_names, robot_groups, critical_invocation_params,
+                             figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()

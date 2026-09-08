@@ -68,6 +68,7 @@ coverage run -m unittest discover tests
 - Tests use `unittest` exclusively (no pytest fixtures, parametrize, etc.)
 - For tests that render matplotlib plots, set the Agg backend **before** importing any module that imports matplotlib: `import matplotlib; matplotlib.use('Agg')` at the top of the test file, before data class imports.
 - Test fixtures live in `tests/files/<TestClassName>/`. Helper data (CSV, TXT, etc.) goes there.
+- `tests/temporary_files/` is deprecated for new tests -- use a `tempfile` temp directory (e.g. `tempfile.mkdtemp()` or `TemporaryDirectory()`) for output a test needs to write to disk, so cleanup is automatic instead of relying on manual `shutil.rmtree` in `setUp`/`tearDown`.
 
 ### Documentation (docs/)
 - Sphinx with `sphinx_rtd_theme`, `autodoc`, and `napoleon` extensions. Config in `docs/source/conf.py`.

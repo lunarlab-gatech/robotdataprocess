@@ -6,8 +6,9 @@ from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
+from robotdataprocess import LoopClosureFilterMode
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
-from robotdataprocess.eval.ROMAN import load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from results_ROMAN import load_gt_data_ROMAN
 
 def main():
@@ -27,14 +28,15 @@ def main():
         "robotC": "RC"
     }
 
+    evaluator = SLAMEvaluator(roman_root)
     gt_list = load_gt_data_ROMAN(dataset_name, pair)
     gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
 
     merged_lc_by_run: Dict[str, LoopClosureData] = {}
     for run_name in run_names:
-        system_params = load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, run_name)
-        merged_lc, _ = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name, pair,
-                                          critical_invocation_params, lc_filter=LCFilterMode.ALL)
+        system_params = evaluator.load_system_params(dataset_prefix, dataset_name, run_name)
+        merged_lc, _ = evaluator.load_LC_data(system_params, dataset_prefix, dataset_name, pair,
+                                              critical_invocation_params, lc_filter=LoopClosureFilterMode.ALL)
         merged_lc.calculate_errors(gt_dict)
         merged_lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
         merged_lc_by_run[run_name] = merged_lc
