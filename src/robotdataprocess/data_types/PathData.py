@@ -219,7 +219,7 @@ class PathData(SequentialData):
             self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
             self._ori_apply_rotation_left_side(R_frame_Q)
 
-        self.frame = CoordinateFrame.FLU
+        self.frame = target_frame
         self._invalidate_cache()
         
     def redefine_local_axes(self, curr_local_frame: CoordinateFrame, target_local_frame: CoordinateFrame):

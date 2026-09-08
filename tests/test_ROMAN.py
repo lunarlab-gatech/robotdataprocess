@@ -1,10 +1,17 @@
+from decimal import Decimal
 import itertools
+import matplotlib
+matplotlib.use('Agg')
+import numpy as np
 import os
 from pathlib import Path
-import unittest
-
+from robotdataprocess import CoordinateFrame, OdometryData
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
 from robotdataprocess.eval.ROMAN import load_LC_data_ROMAN, LCFilterMode
+from scipy.spatial.transform import Rotation as R
+import shutil
+from typing import Dict, List, Sequence, Tuple
+import unittest
 
 
 class _FakeOfflineRPGOParams:
@@ -13,16 +20,43 @@ class _FakeOfflineRPGOParams:
 
 
 class _FakeSystemParams:
-    """Stand-in for SystemParams that points rpgo_result_dir at a fixed test fixture
-    directory, bypassing the real hash-addressed result-directory reconstruction."""
+    """Stand-in for SystemParams that resolves result directories by a plain, readable
+    layout rather than the real hash-addressed reconstruction.
 
-    def __init__(self, rpgo_dir: Path, sparsified: bool):
+    Every directory lives under ``<results_root>/<dataset_name>/<method>/``, mirroring
+    how the real SystemParams gives each (dataset, method) its own result tree:
+    ``rpgo/<robot_a>_<robot_b>``, ``align/<robot_a>_<robot_b>``, and ``mapping/<robot>``.
+    Like the real thing, neither ``rpgo_result_dir`` nor ``align_result_dir`` is
+    order-invariant, so both assert that their robot names arrive already sorted --
+    an unsorted caller would silently address a different directory in production.
+
+    Attributes:
+        offline_rpgo_params: Holds ``sparsified``, read by ``load_LC_data_ROMAN``.
+    """
+
+    offline_rpgo_params: _FakeOfflineRPGOParams
+
+    def __init__(self, method: str, sparsified: bool):
         self.offline_rpgo_params = _FakeOfflineRPGOParams(sparsified)
-        self._rpgo_dir = rpgo_dir
+        self.method: str = method
+
+    def _method_dir(self, results_root, dataset_name: str) -> Path:
+        return Path(results_root) / dataset_name / self.method
 
     def rpgo_result_dir(self, results_root, dataset_prefix, dataset_name, sorted_robot_names,
-                        critical_invocation_params):
-        return self._rpgo_dir
+                        critical_invocation_params) -> Path:
+        assert list(sorted_robot_names) == sorted(sorted_robot_names), \
+            f"rpgo_result_dir requires sorted robot names, got {list(sorted_robot_names)}"
+        return self._method_dir(results_root, dataset_name) / 'rpgo' / '_'.join(sorted_robot_names)
+
+    def align_result_dir(self, results_root, dataset_prefix, dataset_name, name_a, name_b,
+                         critical_invocation_params) -> Path:
+        assert name_a <= name_b, f"align_result_dir requires sorted robot names, got ({name_a}, {name_b})"
+        return self._method_dir(results_root, dataset_name) / 'align' / f'{name_a}_{name_b}'
+
+    def mapping_result_dir(self, results_root, dataset_prefix, dataset_name, robot_name,
+                           critical_invocation_params) -> Path:
+        return self._method_dir(results_root, dataset_name) / 'mapping' / robot_name
 
 
 def _expected_inlier_lc(rpgo_dir: Path, sorted_names, time_subdir: str) -> LoopClosureData:
@@ -60,13 +94,16 @@ class TestLoadLCDataROMANSparsified(unittest.TestCase):
     sparse/odom_all.time.txt, not dense/odom_all.time.txt.
     """
 
-    RPGO_DIR = Path(__file__).parent / 'files' / 'test_ROMAN' / 'sparsified'
+    ROMAN_ROOT = Path(__file__).parent / 'files' / 'test_ROMAN' / 'sparsified'
+    DATASET_NAME = 'campus_outdoor_1014_compressed'
+    METHOD = 'ROMAN'
     ROBOT_NAMES = ['acl_jackal', 'acl_jackal2']
+    RPGO_DIR = ROMAN_ROOT / 'results' / DATASET_NAME / METHOD / 'rpgo' / 'acl_jackal_acl_jackal2'
 
     def test_inlier_lc_uses_sparse_timestamps(self):
-        system_params = _FakeSystemParams(self.RPGO_DIR, sparsified=True)
+        system_params = _FakeSystemParams(self.METHOD, sparsified=True)
         _, lc_inlier = load_LC_data_ROMAN(
-            Path('.'), system_params, 'kimera_multi', 'campus_outdoor_1014_compressed',
+            self.ROMAN_ROOT, system_params, 'kimera_multi', self.DATASET_NAME,
             self.ROBOT_NAMES, {}, lc_filter=LCFilterMode.ALL)
 
         expected = _expected_inlier_lc(self.RPGO_DIR, sorted(self.ROBOT_NAMES), 'sparse')
@@ -82,13 +119,16 @@ class TestLoadLCDataROMANNonSparsified(unittest.TestCase):
     sparsified), matching dense/odom_all.time.txt.
     """
 
-    RPGO_DIR = Path(__file__).parent / 'files' / 'test_ROMAN' / 'non_sparsified'
+    ROMAN_ROOT = Path(__file__).parent / 'files' / 'test_ROMAN' / 'non_sparsified'
+    DATASET_NAME = 'V2.4.F'
+    METHOD = 'ROMAN'
     ROBOT_NAMES = ['Drone2', 'Husky1']
+    RPGO_DIR = ROMAN_ROOT / 'results' / DATASET_NAME / METHOD / 'rpgo' / 'Drone2_Husky1'
 
     def test_inlier_lc_uses_dense_timestamps(self):
-        system_params = _FakeSystemParams(self.RPGO_DIR, sparsified=False)
+        system_params = _FakeSystemParams(self.METHOD, sparsified=False)
         _, lc_inlier = load_LC_data_ROMAN(
-            Path('.'), system_params, 'hercules', 'V2.4.F',
+            self.ROMAN_ROOT, system_params, 'hercules', self.DATASET_NAME,
             self.ROBOT_NAMES, {}, lc_filter=LCFilterMode.ALL)
 
         expected = _expected_inlier_lc(self.RPGO_DIR, sorted(self.ROBOT_NAMES), 'dense')

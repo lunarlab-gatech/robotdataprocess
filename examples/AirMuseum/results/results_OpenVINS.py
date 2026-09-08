@@ -9,7 +9,7 @@ from results_ROMAN import load_gt_data_ROMAN, NAME_TO_FRAME_MAP
 
 def main():
     robot_names: List[str] = ["drone", "robotA", "robotB", "robotC"]
-    dataset_seq: str = "Scenario5"
+    dataset_seq: str = "Scenario3"
     skip_robots: List = ["robotA", "robotB", "robotC"]
 
     # Get paths and names
@@ -21,9 +21,9 @@ def main():
             continue
         print("\n=== Processing results for robot:", robot_name)
 
-        # Load the OpenVINS estimate. TODO: Check if output of OpenVINS is camera frame or IMU frame.
+        # Load the OpenVINS estimate.
         est_data = OdometryData.from_txt(
-            results_path / 'openvins' / robot_name / 'ov_estimate.txt',
+            results_path / 'OpenVINS' / robot_name / 'ov_estimate.txt',
             "world", "robot", CoordinateFrame.FLU, True, [0, 5, 6, 7, 4, 1, 2, 3])
         est_data.redefine_local_axes(NAME_TO_FRAME_MAP[robot_name], CoordinateFrame.FLU)
 
