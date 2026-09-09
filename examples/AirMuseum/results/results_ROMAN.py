@@ -44,7 +44,7 @@ def main():
     all_robots = ["drone", "robotA", "robotB", "robotC"]
     robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O_SM", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
-    dataset_name = "Scenario5"
+    dataset_name = "Scenario3"
 
     # Environment image / robot display config
     user = getpass.getuser()
@@ -69,8 +69,7 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    evaluator = SLAMEvaluator(roman_root)
-    evaluator.run_evaluation("airmuseum", dataset_name, run_names, robot_groups, critical_invocation_params,
+    SLAMEvaluator.run_evaluation(roman_root, "airmuseum", dataset_name, run_names, robot_groups, critical_invocation_params,
                              figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
 
 if __name__ == "__main__":

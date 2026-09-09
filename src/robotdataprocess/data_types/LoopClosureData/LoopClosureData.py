@@ -124,23 +124,20 @@ class LoopClosureData(Data):
             timestamps_a.append(ts_a)
             timestamps_b.append(ts_b)
 
-            if names_override is not None:
-                name_a = names_override.get(entry["names"][0], entry["names"][0])
-                name_b = names_override.get(entry["names"][1], entry["names"][1])
-            else:
-                name_a = entry["names"][0]
-                name_b = entry["names"][1]
-            names.append((name_a, name_b))
+            names.append((entry["names"][0], entry["names"][1]))
             translations.append(entry["translation"])
             orientations.append(entry["rotation"])
 
-        return cls(
+        lc_data = cls(
             timestamps_a=np.array(timestamps_a, dtype=object),
             timestamps_b=np.array(timestamps_b, dtype=object),
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
         )
+        if names_override is not None:
+            lc_data.apply_names_override(names_override)
+        return lc_data
 
     @classmethod
     def from_g2o(cls, g2o_path: Union[Path, str], time_path: Union[Path, str],
@@ -250,12 +247,7 @@ class LoopClosureData(Data):
 
                 timestamps_a.append(time_lookup[(robot_id1, idx1)])
                 timestamps_b.append(time_lookup[(robot_id2, idx2)])
-                if names_override is not None:
-                    name_a = names_override.get(char1, char1)
-                    name_b = names_override.get(char2, char2)
-                    names.append((name_a, name_b))
-                else:
-                    names.append((char1, char2))
+                names.append((char1, char2))
 
                 px, py, pz = float(parts[3]), float(parts[4]), float(parts[5])
                 qx, qy, qz, qw = float(parts[6]), float(parts[7]), float(parts[8]), float(parts[9])
@@ -263,13 +255,16 @@ class LoopClosureData(Data):
                 translations.append([px, py, pz])
                 orientations.append([qx, qy, qz, qw])
 
-        return cls(
+        lc_data = cls(
             timestamps_a=np.array(timestamps_a, dtype=object),
             timestamps_b=np.array(timestamps_b, dtype=object),
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
         )
+        if names_override is not None:
+            lc_data.apply_names_override(names_override)
+        return lc_data
 
     @classmethod
     def from_maplab_json(cls, json_path: Union[Path, str],
@@ -307,27 +302,37 @@ class LoopClosureData(Data):
             timestamps_a.append(ts_a)
             timestamps_b.append(ts_b)
 
-            name_a = entry["from_mission"]
-            name_b = entry["to_mission"]
-            if names_override is not None:
-                name_a = names_override.get(name_a, name_a)
-                name_b = names_override.get(name_b, name_b)
-            names.append((name_a, name_b))
+            names.append((entry["from_mission"], entry["to_mission"]))
 
             translations.append(entry["T_A_B"]["translation"])
             orientations.append(entry["T_A_B"]["rotation_xyzw"])
 
-        return cls(
+        lc_data = cls(
             timestamps_a=np.array(timestamps_a, dtype=object),
             timestamps_b=np.array(timestamps_b, dtype=object),
             names=names,
             translations=np.array(translations, dtype=object),
             orientations=np.array(orientations, dtype=object),
         )
+        if names_override is not None:
+            lc_data.apply_names_override(names_override)
+        return lc_data
 
     # =========================================================================
     # ========================= Manipulation Methods ==========================
     # =========================================================================
+
+    def apply_names_override(self, names_override: dict) -> None:
+        """
+        Remaps each loop closure's name pair through ``names_override``, leaving names absent
+        from it unchanged. Modifies the instance in place.
+
+        Args:
+            names_override: Maps a current name to its replacement (e.g. g2o character keys to
+                robot names, or robot names to display names).
+        """
+        self.names = [(names_override.get(name_a, name_a), names_override.get(name_b, name_b))
+                      for name_a, name_b in self.names]
 
     def round_timestamps(self, decimals: int):
         """

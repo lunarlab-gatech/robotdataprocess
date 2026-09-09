@@ -1,39 +1,28 @@
-from enum import Enum
 from evo.core.units import Unit
-import itertools
+import fitz
 import math
 import matplotlib
-import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from multiprocessing import Pool
 import numpy as np
-from pathlib import Path
-import fitz
 import pandas as pd
+from pathlib import Path
 import re
-from robotdataprocess import CoordinateFrame, LoopClosureData, OdometryData, PathData, PathDataAlignResult, TableData, LoopClosureFilterMode
+from robotdataprocess import LoopClosureData, LoopClosureFilterMode, OdometryData, PathData, TableData
+from robotdataprocess.data_types.SLAMData import SLAMData
+from robotdataprocess.eval.RobotGroup import RobotGroup
 from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
-from robotdataprocess.utils.ModuleImporter import ModuleImporter
 import seaborn as sns
-import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 
 class SLAMEvaluator:
     """
-    Evaluation of SLAM runs; specifically built for working with the MeronomyGraph repo.
+    Evaluation of SLAM runs; specifically built for working with the MeronomyGraph repo. Operates
+    on :class:`SLAMData` instances, which own the loading of the data being evaluated.
     """
-
-    mg_root: Path
-
-    def __init__(self, mg_root: Path):
-        """
-        Args:
-            mg_root: The root directory of the MeronomyGraph repository (with the 
-                corresponding results).
-        """
-        self.mg_root = Path(mg_root)
 
     # =========================================================================
     # ============================= Table Helpers =============================
@@ -121,315 +110,7 @@ class SLAMEvaluator:
                 return first + n[-1]
             return first
         return '-'.join(abbrev(n) for n in names)
-
-    # =========================================================================
-    # ============================= Data Loaders ==============================
-    # =========================================================================
     
-    def load_system_params(self, dataset_name: str, dataset_seq: str, method: str) -> Any:
-        """
-        Loads the SystemParams for one experiment config, used to reconstruct hash-addressed result
-        directories. Call once per (dataset_name, dataset_seq, method) and pass into the other
-        ``load_*`` methods on this class.
-
-        Args:
-            dataset_name: The dataset used.
-            dataset_seq: The dataset version/sequence.
-            method: Run name identifying which experiment config to load.
-
-        Returns:
-            The loaded SystemParams.
-        """
-        if str(self.mg_root) not in sys.path:
-            sys.path.insert(0, str(self.mg_root))
-        DataParams = ModuleImporter.get_module_attribute('MeronomyGraph.params.data_params', 'DataParams')
-        SystemParams = ModuleImporter.get_module_attribute('MeronomyGraph.params.system_params', 'SystemParams')
-
-        experiment_path = self.mg_root / "params" / "experiments" / dataset_name / f"{dataset_seq}_{method}.yaml"
-        placeholder_data_params = DataParams(_img_data=None, _depth_data=None, _pose_data=None,
-                                            img_data_params=None, T_camera_flu=np.eye(4))
-        return SystemParams.from_experiment_config(str(experiment_path), {"_placeholder": placeholder_data_params})
-
-    def load_est_data(self, system_params: Any, dataset_name: str, dataset_seq: str,
-                            robot_names: List, critical_invocation_params: Dict[str, Any]) -> List[OdometryData]:
-        """
-        Load estimated trajectories for a set of robots from ROMAN offline RPGO output.
-
-        Returns:
-            List of OdometryData in the same order as robot_names.
-        """
-        rpgo_dir = system_params.rpgo_result_dir(self.mg_root / "results", dataset_name, dataset_seq,
-                                                sorted(robot_names), critical_invocation_params)
-        return [
-            OdometryData.from_csv(
-                str(rpgo_dir / f'{rn}.csv'),
-                "map", 'robot' + str(i), CoordinateFrame.NONE, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
-            for i, rn in enumerate(robot_names)
-        ]
-
-    def load_kimera_rpgo_first_stage_est_data(self, system_params, dataset_name: str, dataset_seq: str,
-                                                    robot_names: List, critical_invocation_params: Dict[str, Any]) -> List[OdometryData]:
-        """
-        Load pre-optimize (first-stage) estimated trajectories for a set of robots.
-
-        Returns:
-            List of OdometryData in the same order as robot_names.
-        """
-        sorted_names = sorted(robot_names)
-        rpgo_dir = system_params.rpgo_result_dir(self.mg_root / "results", dataset_name, dataset_seq,
-                                                sorted_names, critical_invocation_params)
-        names_override = {chr(97 + i): name for i, name in enumerate(sorted_names)}
-        return [
-            OdometryData.from_g2o(str(rpgo_dir / 'pre_optimize' / 'result.g2o'), str(rpgo_dir / 'dense' / 'odom_all.time.txt'), rn,
-                "map", 'robot' + str(i), CoordinateFrame.NONE, names_override)
-            for i, rn in enumerate(robot_names)
-        ]
-
-    def load_LC_data(self, system_params, dataset_name: str, dataset_seq: str, robot_names: List,
-                        critical_invocation_params: Dict[str, Any],
-                        lc_filter: LoopClosureFilterMode = LoopClosureFilterMode.ALL, names_override: Dict = None):
-        """
-        Load LC data for a ROMAN run. names_override, if given, maps g2o character keys ('a', 'b', ...)
-        to robot names used in the returned LoopClosureData (default: the sorted robot_names) -- pass
-        display-name overrides when LC names must match a visualize_2D nameList.
-
-        Returns:
-            (merged_lc, merged_lc_inlier)
-        """
-        sorted_names = sorted(robot_names)
-        rpgo_dir = system_params.rpgo_result_dir(self.mg_root / "results", dataset_name, dataset_seq,
-                                                sorted_names, critical_invocation_params)
-        letter_by_name = {name: chr(97 + i) for i, name in enumerate(sorted_names)}
-
-        if lc_filter == LoopClosureFilterMode.ONLY_INTER_LC:
-            pair_fn = itertools.combinations
-        elif lc_filter == LoopClosureFilterMode.ONLY_INTRA_LC:
-            pair_fn = lambda names, num: [(name, name) for name in names]
-        else:
-            pair_fn = itertools.combinations_with_replacement
-
-        effective_override = names_override if names_override is not None else \
-            {chr(97 + i): name for i, name in enumerate(sorted_names)}
-
-        # odom_and_lc.g2o already contains all robot pairs — load it once to avoid
-        # tripling the count when iterating over combinations_with_replacement.
-        merged_lc = LoopClosureData.from_g2o(
-            rpgo_dir / 'dense' / 'odom_and_lc.g2o',
-            rpgo_dir / 'dense' / 'odom_all.time.txt',
-            names_override=effective_override)
-        if lc_filter == LoopClosureFilterMode.ONLY_INTER_LC:
-            merged_lc.prune_intra_robot_loop_closures()
-        elif lc_filter == LoopClosureFilterMode.ONLY_INTRA_LC:
-            merged_lc.prune_inter_robot_loop_closures()
-
-        # Load the per-pair inlier g2o files (these are pair-specific)
-        # Kimera-RPGO writes these against the sparse-keyframe-indexed graph when sparsified, so they need sparse/odom_all.time.txt, not dense.
-        inlier_time_subdir = 'sparse' if system_params.offline_rpgo_params.sparsified else 'dense'
-        lc_inlier_data_list = []
-        for name_a, name_b in pair_fn(sorted_names, 2):
-            letter_a = letter_by_name[name_a]
-            letter_b = letter_by_name[name_b]
-            if name_a == name_b:
-                g2o_filename = f'inlier_lc_intra_{letter_a}.g2o'
-            else:
-                g2o_filename = f'inlier_lc_inter_{letter_a}_{letter_b}.g2o'
-            lc_data_inlier = LoopClosureData.from_g2o(rpgo_dir / g2o_filename,
-                                                    rpgo_dir / inlier_time_subdir / 'odom_all.time.txt',
-                                                    names_override=effective_override)
-            lc_inlier_data_list.append(lc_data_inlier)
-
-        merged_lc_inlier = LoopClosureData.merge(lc_inlier_data_list)
-
-        merged_lc.prune_duplicates()
-        merged_lc_inlier.prune_duplicates()
-
-        return merged_lc, merged_lc_inlier
-
-    def load_timing_data(self, system_params, dataset_name: str, dataset_seq: str,
-                            robot_names: List, critical_invocation_params: Dict[str, Any]) -> Dict[str, float]:
-        """
-        Load the runtime (s) breakdown for a ROMAN run on a robot pair.
-
-        Reads each combination's own alignment runtime (``<robot_a>_<robot_b>.runtime.txt``, one line,
-        at that combination's own align result dir), each robot's own mapping runtime
-        (``<robot>.runtime.txt``, at its own mapping result dir), and the offline RPGO runtime
-        (``runtime.txt``, a single value on its last non-empty line, at the rpgo result dir).
-
-        Returns:
-            Dict with keys ``"align"`` (sum of the alignment runtimes),
-            ``"mapping"`` (sum of the mapping runtimes), and ``"offline_rpgo"``,
-            or ``None`` if any runtime file is missing or empty.
-        """
-        results_root = self.mg_root / "results"
-
-        align_paths = []
-        for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
-            sorted_pair = sorted((name_a, name_b))
-            align_dir = system_params.align_result_dir(results_root, dataset_name, dataset_seq,
-                                                        sorted_pair[0], sorted_pair[1], critical_invocation_params)
-            align_paths.append(align_dir / f'{sorted_pair[0]}_{sorted_pair[1]}.runtime.txt')
-
-        mapping_paths = [
-            system_params.mapping_result_dir(results_root, dataset_name, dataset_seq, rn, critical_invocation_params) / f'{rn}.runtime.txt'
-            for rn in robot_names
-        ]
-
-        rpgo_runtime_path = system_params.rpgo_result_dir(results_root, dataset_name, dataset_seq,
-                                                        sorted(robot_names), critical_invocation_params) / 'runtime.txt'
-
-        if not all(p.exists() for p in align_paths) or not all(p.exists() for p in mapping_paths) or not rpgo_runtime_path.exists():
-            return None
-
-        align_lines = [p.read_text().strip() for p in align_paths]
-        mapping_lines = [p.read_text().strip() for p in mapping_paths]
-        rpgo_lines = [line.strip() for line in rpgo_runtime_path.read_text().splitlines() if line.strip()]
-        if not all(align_lines) or not all(mapping_lines) or not rpgo_lines:
-            return None
-
-        align_total = sum(float(line.split(':')[-1]) for line in align_lines)
-        mapping_total = sum(float(line.split(':')[-1]) for line in mapping_lines)
-        rpgo_total = float(rpgo_lines[-1])
-
-        return {"align": align_total, "mapping": mapping_total, "offline_rpgo": rpgo_total}
-
-    def load_total_data_generation_time(self, system_params, dataset_name: str, dataset_seq: str,
-                                            robot_groups: List[Tuple[str, ...]], critical_invocation_params: Dict[str, Any]) -> float:
-        """
-        Compute the total wall time (s) spent generating a run's underlying data across every
-        robot group, without double-counting work shared between groups.
-
-        A robot's mapping only runs once and a robot pair's alignment only runs once even though
-        both may be reused by several robot_groups (e.g. group ("A","B") and group ("A","B","C")
-        both depend on A's mapping and the A-B alignment), so runtime files are deduplicated by
-        path (mapping keyed by robot name, alignment keyed by sorted robot pair) before summing.
-        The offline RPGO runtime is per-group (keyed by the group's sorted robot names) and isn't
-        shared across groups, so it's summed once per entry in robot_groups.
-
-        Unlike :meth:`ROMANEvaluator.load_timing_data`, a missing or empty runtime file raises rather than
-        returning None -- this is a post-hoc diagnostic over runs assumed already complete, not a
-        table cell that needs to render "---" for in-progress groups.
-
-        Returns:
-            The total runtime in seconds.
-        """
-        results_root = self.mg_root / "results"
-
-        mapping_paths = set()
-        align_paths = set()
-        rpgo_paths = set()
-        for group in robot_groups:
-            robot_names = list(group)
-            for rn in robot_names:
-                mapping_paths.add(
-                    system_params.mapping_result_dir(results_root, dataset_name, dataset_seq, rn, critical_invocation_params)
-                    / f'{rn}.runtime.txt')
-
-            for name_a, name_b in itertools.combinations_with_replacement(robot_names, 2):
-                sorted_pair = sorted((name_a, name_b))
-                align_dir = system_params.align_result_dir(results_root, dataset_name, dataset_seq,
-                                                            sorted_pair[0], sorted_pair[1], critical_invocation_params)
-                align_paths.add(align_dir / f'{sorted_pair[0]}_{sorted_pair[1]}.runtime.txt')
-
-            rpgo_paths.add(system_params.rpgo_result_dir(results_root, dataset_name, dataset_seq,
-                                                        sorted(robot_names), critical_invocation_params) / 'runtime.txt')
-
-        mapping_total = sum(float(p.read_text().strip().split(':')[-1]) for p in mapping_paths)
-        align_total = sum(float(p.read_text().strip().split(':')[-1]) for p in align_paths)
-        rpgo_total = sum(float([line for line in p.read_text().splitlines() if line.strip()][-1].strip()) for p in rpgo_paths)
-
-        return mapping_total + align_total + rpgo_total
-
-    def load_data_size(self, system_params, dataset_name: str, dataset_seq: str,
-                            robot_names: List, critical_invocation_params: Dict[str, Any]) -> Optional[float]:
-        """
-        Load the total estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
-        for a ROMAN run across a group of robots.
-
-        Sums ``align.data_size.txt`` (a single ``"Total submap data size (bytes): <value>"``
-        line) across every inter-robot combination within the group -- unlike
-        :meth:`ROMANEvaluator.load_timing_data`'s pairing, self-pairs are excluded, since a robot
-        doesn't send itself any data. Robot names within each pair are passed to
-        ``align_result_dir`` in sorted (canonical) order, since ``align_result_dir`` is
-        not order-invariant (see its docstring).
-
-        Returns:
-            The total data size in decimal MB (not MiB), or ``None`` if any combination's
-            data size file is missing.
-        """
-        results_root = self.mg_root / "results"
-
-        data_size_paths = []
-        for name_a, name_b in itertools.combinations(sorted(robot_names), 2):
-            align_dir = system_params.align_result_dir(results_root, dataset_name, dataset_seq,
-                                                        name_a, name_b, critical_invocation_params)
-            data_size_paths.append(align_dir / 'align.data_size.txt')
-
-        if not all(p.exists() for p in data_size_paths):
-            return None
-
-        total_bytes = sum(float(p.read_text().strip().split(':')[-1]) for p in data_size_paths)
-        return total_bytes / 1_000_000
-
-    def load_mg_match_stats(self, system_params, dataset_name: str, dataset_seq: str,
-                                robot_names: List, critical_invocation_params: Dict[str, Any]) -> Dict:
-        """
-        Count MG two-stage matcher calls by stage for a robot pair.
-
-        Reads ``align.mg_match.txt`` for each of the (up to three) intra-/inter-robot combinations,
-        at each combination's own align result dir, and tallies how many calls reached stage 0, 1, or
-        2. Also collects, across all stage-1/2 calls, the values of ``n_stage1_matches`` and, across
-        all stage-2 calls, ``n_stage2_child_clipper``,
-        ``n_stage2_unmatched_children_to_parents_clipper``,
-        ``n_stage2_unmatched_children_to_children_clipper``, and
-        ``stage2_point_error``. Fields absent from a given line (older log
-        formats don't include all fields) are skipped for that line rather than
-        raising. Files that don't exist (e.g. non-MG methods) are skipped. Robot names within
-        each pair are passed to ``align_result_dir`` in sorted (canonical) order, since
-        ``align_result_dir`` is not order-invariant (see its docstring).
-
-        Returns:
-            Dict with ``"stage_counts"`` (stage -> occurrence count) and one
-            list of values per collected field name above (``stage2_point_error``
-            as floats, possibly ``nan``; the rest as ints), or ``None`` if no
-            ``align.mg_match.txt`` files were found for this pair.
-        """
-        results_root = self.mg_root / "results"
-
-        stage1_fields = ["n_stage1_matches"]
-        stage2_fields = [
-            "n_stage2_child_clipper",
-            "n_stage2_unmatched_children_to_parents_clipper",
-            "n_stage2_unmatched_children_to_children_clipper",
-        ]
-        field_types = {field: int for field in stage1_fields + stage2_fields}
-        field_types["stage2_point_error"] = float
-        stage2_fields = stage2_fields + ["stage2_point_error"]
-
-        stage_counts = {0: 0, 1: 0, 2: 0}
-        field_values = {field: [] for field in stage1_fields + stage2_fields}
-        found_any = False
-        for name_a, name_b in itertools.combinations_with_replacement(sorted(robot_names), 2):
-            align_dir = system_params.align_result_dir(results_root, dataset_name, dataset_seq,
-                                                        name_a, name_b, critical_invocation_params)
-            mg_match_path = align_dir / 'align.mg_match.txt'
-            if not mg_match_path.exists():
-                continue
-            found_any = True
-            for line in mg_match_path.read_text().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                tokens = line.split()
-                stage = int(tokens[1])
-                stage_counts[stage] += 1
-                fields = stage1_fields if stage == 1 else stage1_fields + stage2_fields if stage == 2 else []
-                for field in fields:
-                    key = field + ':'
-                    if key in tokens:
-                        field_values[field].append(field_types[field](tokens[tokens.index(key) + 1]))
-
-        return {"stage_counts": stage_counts, **field_values} if found_any else None
-
     # =========================================================================
     # ============================= Computation ===============================
     # =========================================================================
@@ -440,7 +121,7 @@ class SLAMEvaluator:
         Merges and rigidly aligns per-robot estimated/ground-truth trajectories for a group of
         any size (including a single robot, i.e. self-alignment), without computing any error
         metrics. Shared by :meth:`calculate_merged_ate`, which computes metrics on top of this,
-        and :meth:`visualize_merged_ate`, which only needs the aligned trajectories to plot.
+        and :meth:`save_merged_ate_figures`, which only needs the aligned trajectories to plot.
 
         Args:
             robot_names: Robot names in this group, in the same order as
@@ -466,8 +147,9 @@ class SLAMEvaluator:
         gt_data_align_list, est_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align, est_data_align)
         return est_data_align, gt_data_align, est_data_align_list, gt_data_align_list
         
-    def calculate_merged_ate(self, system_params, dataset_name: str, dataset_seq: str, method: str, robot_names: List[str],
-                            critical_invocation_params: Dict[str, Any], load_gt_data_fn,
+    @staticmethod
+    def calculate_merged_ate(slam_data: SLAMData,
+                            load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                             rpe_delta: float = 5.0, rpe_delta_unit: Unit = Unit.meters) -> SLAMResult:
         """
         Compute the merged RMS ATE for a group of robots after ROMAN offline RPGO.
@@ -476,19 +158,12 @@ class SLAMEvaluator:
         group (after aligning their time windows), then computes ATE on the
         combined trajectory. A single-robot group is a self-alignment case: no
         merging happens, and the "merged" trajectory is just that robot's own
-        trajectory. Optionally also computes the pre-optimize (first-stage) ATE.
-        Trajectory / LC overlay plots are generated separately by
-        :meth:`visualize_merged_ate`.
+        trajectory. Also computes the pre-optimize (first-stage) ATE when those
+        trajectories were available. Trajectory / LC overlay plots are generated
+        separately by :meth:`save_merged_ate_figures`.
 
         Args:
-            system_params: From :meth:`ROMANEvaluator.load_system_params`, for this dataset_name/dataset_seq/method.
-            dataset_name: Name of the dataset.
-            dataset_seq: Dataset Sequence.
-            method: Run name, used for diagnostic messages only (system_params already resolves the
-                actual result directories).
-            robot_names: Robot names in this group (e.g. ``["Husky1", "Drone1"]``) -- a single
-                entry for self-alignment, or any number for a larger group.
-            critical_invocation_params: Other data-affecting args from the original run invocation.
+            slam_data: The loaded data for this run/robot group.
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
                 dataset-specific.
             rpe_delta: Step size between the pose pairs used for all RPE calculations in
@@ -500,23 +175,19 @@ class SLAMEvaluator:
         Returns:
             SLAMResults
         """
-        est_data_lst: List[OdometryData] = self.load_est_data(system_params, dataset_name, dataset_seq,
-                                                            robot_names, critical_invocation_params)
-        gt_data_lst: List[OdometryData] = load_gt_data_fn(dataset_seq, robot_names)
+        robot_names = slam_data.robot_names
+        est_data_lst: List[OdometryData] = slam_data.estimated_trajectories
+        gt_data_lst: List[OdometryData] = load_gt_data_fn(slam_data.system_params.dataset_version, robot_names)
 
-        # Calculate first-stage (pre-optimize) metrics
+        # Calculate first-stage (pre-optimize) metrics, when those trajectories were available
         first_stage_metrics = None
-        try:
-            first_stage_est_lst = self.load_kimera_rpgo_first_stage_est_data(system_params, dataset_name, dataset_seq,
-                                                                            robot_names, critical_invocation_params)
-            first_stage_est_lst, first_stage_gt_lst = PathData.make_start_and_end_times_match(first_stage_est_lst, gt_data_lst)
+        if slam_data.pre_opt_est_trajectories:
+            first_stage_est_lst, first_stage_gt_lst = PathData.make_start_and_end_times_match(
+                slam_data.pre_opt_est_trajectories, gt_data_lst)
             first_stage_est: PathData = PathData.concatenate_PathData(first_stage_est_lst)
             first_stage_gt: PathData = PathData.concatenate_PathData(first_stage_gt_lst)
-            #print("\n========== First Stage for dataset: ", dataset_seq, method, "_".join(robot_names), "==========")
             first_stage_metrics, _, _ = OdometryData.align_and_calculate_traj_errors(first_stage_gt, first_stage_est, max_diff=0.1, visualize=False,
                                                                                     rpe_delta=rpe_delta, rpe_delta_unit=rpe_delta_unit)
-        except Exception as e:
-            print(f"Warning: Could not compute first-stage metrics for {dataset_seq} {method}: {e}")
 
         # Merge and align trajectories
         est_data_align, gt_data_align, est_data_align_list, gt_data_align_list = \
@@ -689,8 +360,9 @@ class SLAMEvaluator:
         save_path.parent.mkdir(parents=True, exist_ok=True)
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, font_size=8, data_font_size=10)
 
-    def save_merged_ate_figures(self, system_params, dataset_name: str, dataset_seq: str, method: str, robot_names: List[str],
-                                critical_invocation_params: Dict[str, Any], load_gt_data_fn,
+    @staticmethod
+    def save_merged_ate_figures(slam_data: SLAMData, method: str,
+                                load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                                 figures_base_dir: Path, viz_config: Dict) -> None:
         """
         Generate and save the 2D trajectory and LC-overlay PDFs for one run/group -- the
@@ -698,19 +370,12 @@ class SLAMEvaluator:
         independently of ATE computation (e.g. sequentially, outside the parallel ``Pool`` used
         for metrics in :meth:`run_evaluation`).
 
-        Loads and aligns its own estimated/ground-truth trajectories the same way
-        :meth:`calculate_merged_ate` does (via :meth:`align_merged_trajectories`), but computes
-        no error metrics.
+        Aligns the trajectories the same way :meth:`calculate_merged_ate` does (via
+        :meth:`align_merged_trajectories`), but computes no error metrics.
 
         Args:
-            system_params: From :meth:`ROMANEvaluator.load_system_params`, for this dataset_name/dataset_seq/method.
-            dataset_name: Name of the dataset.
-            dataset_seq: Dataset Sequence.
-            method: Run name, used for figure/file naming only (system_params already resolves the
-                actual result directories).
-            robot_names: Robot names in this group (e.g. ``["Husky1", "Drone1"]``) -- a single
-                entry for self-alignment, or any number for a larger group.
-            critical_invocation_params: Other data-affecting args from the original run invocation.
+            slam_data: The loaded data for this run/robot group.
+            method: Run name, used for figure/file naming only.
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
                 dataset-specific.
             figures_base_dir: Directory under which ``<dataset_name>/<dataset_seq>/traj`` and
@@ -721,11 +386,11 @@ class SLAMEvaluator:
                 center of their combined bounding box before plotting against the background
                 image; defaults to 0).
         """
-        est_data_lst: List[OdometryData] = self.load_est_data(system_params, dataset_name, dataset_seq,
-                                                            robot_names, critical_invocation_params)
-        gt_data_lst: List[OdometryData] = load_gt_data_fn(dataset_seq, robot_names)
+        robot_names = slam_data.robot_names
+        est_data_lst: List[OdometryData] = slam_data.estimated_trajectories
+        gt_data_lst: List[OdometryData] = load_gt_data_fn(slam_data.system_params.dataset_version, robot_names)
         _, _, est_data_align_list, gt_data_align_list = \
-            self.align_merged_trajectories(robot_names, est_data_lst, gt_data_lst)
+            SLAMEvaluator.align_merged_trajectories(robot_names, est_data_lst, gt_data_lst)
 
         image_path = viz_config["image_path"]
         x_edge = viz_config["x_edge"]
@@ -734,8 +399,8 @@ class SLAMEvaluator:
         image_extent_offsets = viz_config.get("background_image_extent_offsets")
         yaw_rotation_deg = viz_config.get("yaw_rotation_deg", 0.0)
 
-        group_lbl = self.group_label(robot_names)
-        base_dir = Path(figures_base_dir) / dataset_name / dataset_seq
+        group_lbl = SLAMEvaluator.group_label(robot_names)
+        base_dir = Path(figures_base_dir) / slam_data.system_params.dataset_name / slam_data.system_params.dataset_version
         traj_dir = base_dir / 'traj'
         traj_dir.mkdir(parents=True, exist_ok=True)
 
@@ -763,17 +428,16 @@ class SLAMEvaluator:
                         save_path=str(traj_dir / f'traj_{group_lbl}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
-        # Letters are assigned by sorted robot order to match the g2o files' own convention.
-        names_override_display = {chr(97 + i): name_map[rn] for i, rn in enumerate(sorted(robot_names))}
         gt_dict_display = {name_map[rn]: gt for rn, gt in zip(robot_names, gt_data_lst)}
         est_dataList  = est_data_align_list
         est_isGTList  = [False] * len(robot_names)
         est_nameList  = [name_map[rn] for rn in robot_names]
         est_colorList = [robot_name_to_color[name] for name in est_nameList]
         for lc_filter in LoopClosureFilterMode:
-            _, lc_data_inlier = self.load_LC_data(system_params, dataset_name, dataset_seq,
-                                                robot_names, critical_invocation_params,
-                                                lc_filter=lc_filter, names_override=names_override_display)
+            _, lc_data_inlier = slam_data.get_loop_closures(lc_filter)
+            # SLAMData already resolved the g2o letters to robot names, so only the display
+            # remap is left -- LC names must match est_nameList and gt_dict_display's keys.
+            lc_data_inlier.apply_names_override(name_map)
             lc_data_inlier.calculate_errors(gt_dict_display)
 
             traj_lc_dir = base_dir / lc_filter.name / 'traj_lc'
@@ -786,7 +450,7 @@ class SLAMEvaluator:
     @staticmethod
     def _save_timing_table(run_names: List[str], cols: List[str],
                         run_display_names: Dict[str, str],
-                        results: Dict[str, Dict[str, SLAMResult]],
+                        slam_data_by_run: Dict[str, Dict[str, SLAMData]],
                         save_path: Path) -> None:
         """
         Build and save the runtime summary PDF table.
@@ -799,13 +463,12 @@ class SLAMEvaluator:
             run_names: Ordered list of run identifiers.
             cols: Ordered list of robot-pair column labels.
             run_display_names: Maps each run identifier to its display name in the table.
-            results: ``DatasetSequenceResults`` keyed by run then column; ``.timing``
-                is ``None`` for pairs with unavailable runtime files.
+            slam_data_by_run: Loaded SLAMData keyed by run then column.
             save_path: Destination PDF path.
         """
         def get_val(run: str, col: str, key: str):
-            result = results[run].get(col)
-            entry = result.timing if result is not None else None
+            slam_data = slam_data_by_run[run].get(col)
+            entry = SLAMData.get_timing_totals([slam_data]) if slam_data is not None else None
             if key == "total":
                 return None if entry is None else entry["align"] + entry["mapping"] + entry["offline_rpgo"]
             return None if entry is None else entry[key]
@@ -842,7 +505,7 @@ class SLAMEvaluator:
     @staticmethod
     def _save_data_size_table(run_names: List[str], cols: List[str],
                             run_display_names: Dict[str, str],
-                            results: Dict[str, Dict[str, SLAMResult]],
+                            slam_data_by_run: Dict[str, Dict[str, SLAMData]],
                             save_path: Path) -> None:
         """
         Build and save the estimated communication data size summary PDF table.
@@ -854,14 +517,13 @@ class SLAMEvaluator:
             run_names: Ordered list of run identifiers.
             cols: Ordered list of robot-pair column labels.
             run_display_names: Maps each run identifier to its display name in the table.
-            results: ``DatasetSequenceResults`` keyed by run then column; ``.data_size_mb``
-                is ``None`` for pairs with unavailable data size files.
+            slam_data_by_run: Loaded SLAMData keyed by run then column.
             save_path: Destination PDF path.
         """
         def make_raw_df() -> pd.DataFrame:
             def value_fn(run, col):
-                result = results[run].get(col)
-                v = result.data_size_mb if result is not None else None
+                slam_data = slam_data_by_run[run].get(col)
+                v = slam_data.data_size_mb if slam_data is not None else None
                 return float('nan') if v is None else v
             raw_df = SLAMEvaluator._make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
             raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
@@ -1041,7 +703,7 @@ class SLAMEvaluator:
 
     @staticmethod
     def _save_mg_match_table(run_names: List[str], run_display_names: Dict[str, str], cols: List[str],
-                            results: Dict[str, Dict[str, SLAMResult]],
+                            slam_data_by_run: Dict[str, Dict[str, SLAMData]],
                             save_path: Path) -> None:
         """
         Build and save the MG two-stage matcher stats summary PDF.
@@ -1061,12 +723,13 @@ class SLAMEvaluator:
             run_names: Ordered list of run identifiers.
             run_display_names: Maps each run identifier to its display name in the table.
             cols: Ordered list of robot-pair column labels.
-            results: ``DatasetSequenceResults`` keyed by run then column; ``.mg_match``
+            slam_data_by_run: Loaded SLAMData keyed by run then column; ``.mg_match``
                 is ``None`` for pairs with no MG match files.
             save_path: Destination PDF path.
         """
         table_data_mg_match: Dict[str, Dict[str, Optional[Dict]]] = {
-            run: {col: results[run][col].mg_match for col in results[run]} for run in run_names
+            run: {col: slam_data.mg_match for col, slam_data in slam_data_by_run[run].items()}
+            for run in run_names
         }
 
         def make_raw_stage_count_df(stage: int) -> pd.DataFrame:
@@ -1116,7 +779,7 @@ class SLAMEvaluator:
                 ("stage2_point_error", "Stage 2 Point Error", False),
             ]
             for field, title, discrete in histogram_fields:
-                hist_fig = SLAMEvaluator._make_mg_match_histogram_grid_figure(run_names, run_display_names, cols,
+                hist_fig = SLAMEvaluator._save_mg_match_histogram_grid_figure(run_names, run_display_names, cols,
                                                                 table_data_mg_match, field, title, discrete)
                 pp.savefig(hist_fig, bbox_inches='tight')
                 plt.close(hist_fig)
@@ -1494,23 +1157,27 @@ class SLAMEvaluator:
     # ============================= Evaluation ================================
     # =========================================================================
 
-    def run_evaluation(self, dataset_name: str, dataset_seq: str, run_names: List[str],
+    @staticmethod
+    def run_evaluation(mg_root: Path, dataset_name: str, dataset_seq: str, run_names: List[str],
                         robot_groups: List[Tuple[str, ...]],
                         critical_invocation_params: Dict[str, Any],
-                        figures_base_dir: Path, load_gt_data_fn, viz_config: Dict,
+                        figures_base_dir: Path,
+                        load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
+                        viz_config: Dict,
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
         """
         Generate all evaluation figures and tables for one dataset.
 
         For each robot group across all run names:
-        - Computes merged RMS ATE (pre- and post-optimize) in parallel.
-        - For each ``LoopClosureFilterMode``, loads loop closure data under that filter,
+        - Loads its :class:`SLAMData` and computes merged RMS ATE (pre- and post-optimize) in parallel.
+        - For each ``LoopClosureFilterMode``, filters that group's loop closures,
             saves per-group LC error scatter plots (lc/) and success-rate plots
             (lc_success_rate/).
         - Saves a context figure combining the LC scatter with per-run stats and
             ATE for each group (lc_with_context/).
 
         Args:
+            mg_root: Path to the MeronomyGraph repo checkout (with corresponding results).
             dataset_name: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
                 ``"GrAco"``).
             dataset_seq: Dataset identifier (e.g. ``"V2.3.AC"``).
@@ -1523,7 +1190,7 @@ class SLAMEvaluator:
             figures_base_dir: Directory under which ``figures/<dataset_name>/<dataset_seq>/`` outputs are saved.
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
                 dataset-specific.
-            viz_config: Dict forwarded to :meth:`ROMANEvaluator.visualize_merged_ate` (see its docstring).
+            viz_config: Dict forwarded to :meth:`ROMANEvaluator.save_merged_ate_figures` (see its docstring).
             ate_threshold_m: Red-highlight cutoff (m) for every translation-error table
                 (ATE pre/post-optimize, individual ATE/RPE, RTE). Dataset-specific -- e.g.
                 a smaller-area dataset like AirMuseum should use a smaller value than Hercules.
@@ -1560,7 +1227,7 @@ class SLAMEvaluator:
         # Fail loudly here instead of losing a column silently.
         cols_by_label: Dict[str, List[Tuple[str, ...]]] = {}
         for group in robot_groups:
-            cols_by_label.setdefault(self.group_label(group), []).append(group)
+            cols_by_label.setdefault(SLAMEvaluator.group_label(group), []).append(group)
         collisions = {label: groups for label, groups in cols_by_label.items() if len(groups) > 1}
         if collisions:
             raise ValueError(f"group_label collisions for {dataset_seq}: {collisions}")
@@ -1569,10 +1236,6 @@ class SLAMEvaluator:
         # already selected -- safe here since this function never shows interactive figures (every
         # plot is saved via save_path), and avoids any attempt to open a display.
         matplotlib.use("Agg", force=True)
-
-        # Load each run's SystemParams once, up front, and reuse it across every group/table below
-        system_params_by_run = {run_name: self.load_system_params(dataset_name, dataset_seq, run_name)
-                                for run_name in run_names}
 
         # Define mapping between run name and display name
         run_display_names = {
@@ -1583,57 +1246,53 @@ class SLAMEvaluator:
             "MG_TS": "MeronomyGraph"
         }
 
-        # Calculate RMS ATE in parallel
-        tasks = [(system_params_by_run[run_name], dataset_name, dataset_seq, run_name, list(group),
-                critical_invocation_params, load_gt_data_fn)
+        # Load every run/group's data, then compute its RMS ATE, both in parallel
+        load_tasks = [(mg_root, dataset_name, dataset_seq, run_name, list(group), critical_invocation_params)
                 for group in robot_groups
                 for run_name in run_names]
-        with Pool() as pool:
-            pool_results = pool.starmap(self.calculate_merged_ate, tasks)
 
-        # All computed results for this dataset, keyed by run then robot-group column —
-        # the single object threaded through every table/figure function below.
+        # Must happen here in the parent (not only inside the forked workers) so unpickling
+        # MeronomyGraph-backed objects (e.g. SLAMData.system_params) back in the parent succeeds.
+        SLAMData.ensure_MeronomyGraph_importable(mg_root)
+        with Pool() as pool:
+            loaded = pool.starmap(SLAMData.from_MeronomyGraph, load_tasks)
+            pool_results = pool.starmap(SLAMEvaluator.calculate_merged_ate,
+                                        [(slam_data, load_gt_data_fn) for slam_data in loaded])
+
+        # All loaded data and computed results for this dataset, keyed by run then robot-group
+        # column — the objects threaded through every table/figure function below.
+        slam_data_by_run: Dict[str, Dict[str, SLAMData]] = {run: {} for run in run_names}
         results: Dict[str, Dict[str, SLAMResult]] = {run: {} for run in run_names}
-        for (_, _, _, run_name, group, *_), result in zip(tasks, pool_results):
-            results[run_name][self.group_label(group)] = result
+        for (_, _, _, run_name, group, *_), slam_data, result in zip(load_tasks, loaded, pool_results):
+            col = SLAMEvaluator.group_label(group)
+            slam_data_by_run[run_name][col] = slam_data
+            results[run_name][col] = result
 
         # Save trajectory/LC-overlay figures sequentially (not via Pool -- unlike ATE
         # computation, this touches matplotlib, which isn't safe to fan out across
         # worker processes with an interactive backend).
         for run_name in run_names:
-            system_params = system_params_by_run[run_name]
-            for group in robot_groups:
-                self.save_merged_ate_figures(system_params, dataset_name, dataset_seq, run_name, list(group),
-                                          critical_invocation_params, load_gt_data_fn, figures_base_dir, viz_config)
+            for col, slam_data in slam_data_by_run[run_name].items():
+                SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, load_gt_data_fn,
+                                                      figures_base_dir, viz_config)
 
         # Define sequence group column names
-        cols = [self.group_label(g) for g in robot_groups]
+        cols = [SLAMEvaluator.group_label(g) for g in robot_groups]
 
         base_dir = Path(figures_base_dir) / dataset_name / dataset_seq
 
-        # Load per-group runtime, data size, and MG match stats for every run
-        for run_name in run_names:
-            system_params = system_params_by_run[run_name]
-            for group in robot_groups:
-                col = self.group_label(group)
-                result = results[run_name][col]
-                result.timing = self.load_timing_data(system_params, dataset_name, dataset_seq,
-                                                        list(group), critical_invocation_params)
-                result.data_size_mb = self.load_data_size(system_params, dataset_name, dataset_seq,
-                                                            list(group), critical_invocation_params)
-                result.mg_match = self.load_mg_match_stats(system_params, dataset_name, dataset_seq,
-                                                            list(group), critical_invocation_params)
-
         total_time_by_run = {}
         for run_name in run_names:
-            total_time_by_run[run_name] = self.load_total_data_generation_time(
-                system_params_by_run[run_name], dataset_name, dataset_seq, robot_groups, critical_invocation_params)
+            # Deduped across this run's groups -- the pipeline caches, so mapping/alignment work
+            # shared by several groups only ran once.
+            total_time_by_run[run_name] = sum(
+                SLAMData.get_timing_totals(list(slam_data_by_run[run_name].values())).values())
             print(f"{dataset_seq} {run_name}: total data generation time = {total_time_by_run[run_name]:.1f}s")
         print(f"{dataset_seq}: total data generation time across all runs = {sum(total_time_by_run.values()):.1f}s")
 
-        self._save_timing_table(run_names, cols, run_display_names, results, base_dir / 'timing_table.pdf')
-        self._save_data_size_table(run_names, cols, run_display_names, results, base_dir / 'data_size_table.pdf')
-        self._save_mg_match_table(run_names, run_display_names, cols, results, base_dir / 'mg_match_table.pdf')
+        SLAMEvaluator._save_timing_table(run_names, cols, run_display_names, slam_data_by_run, base_dir / 'timing_table.pdf')
+        SLAMEvaluator._save_data_size_table(run_names, cols, run_display_names, slam_data_by_run, base_dir / 'data_size_table.pdf')
+        SLAMEvaluator._save_mg_match_table(run_names, run_display_names, cols, slam_data_by_run, base_dir / 'mg_match_table.pdf')
 
         # Generate the LC-dependent outputs once per LC filter mode, each under its own subfolder.
         # Process ONLY_INTER_LC first so its inlier-LC stats are available for the ATE
@@ -1648,7 +1307,7 @@ class SLAMEvaluator:
             # For each group...
             for group in robot_groups:
                 # Load GT Data
-                col = self.group_label(group)
+                col = SLAMEvaluator.group_label(group)
                 gt_list = load_gt_data_fn(dataset_seq, list(group))
                 gt_dict = {name: gt for name, gt in zip(group, gt_list)}
 
@@ -1657,8 +1316,7 @@ class SLAMEvaluator:
                 labels_list: List[str] = []
                 group_indices: List[int] = []
                 for i, run_name in enumerate(run_names):
-                    merged_lc, merged_lc_inlier = self.load_LC_data(system_params_by_run[run_name], dataset_name, dataset_seq,
-                                                                    list(group), critical_invocation_params, lc_filter=lc_filter)
+                    merged_lc, merged_lc_inlier = slam_data_by_run[run_name][col].get_loop_closures(lc_filter)
                     for lc in (merged_lc, merged_lc_inlier):
                         lc.calculate_errors(gt_dict)
                         lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
@@ -1681,26 +1339,26 @@ class SLAMEvaluator:
                     results[run_name][col].lc_stats_by_mode[lc_filter] = stats[2 * i]
                     results[run_name][col].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
-                self._save_lc_context_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_context_figure(group, col, lc_data_list, labels_list, group_indices,
                                             stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
-                self._save_lc_side_by_side_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_side_by_side_figure(group, col, lc_data_list, labels_list, group_indices,
                                                 run_names, subdirs['lc_side_by_side'])
-                self._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
                                         run_names, run_display_names, subdirs['lc_sep'])
-                self._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
                                         run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
-                self._save_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
+                SLAMEvaluator._save_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
-            self._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
+            SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
 
         # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
         # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
         # connect the group's pose graph — intra-robot closures don't merge separate robots' trajectories.
         # Single-robot groups have no inter-robot LC by definition, so they're excluded from suppression.
-        multi_robot_cols = {self.group_label(g) for g in robot_groups if len(g) > 1}
-        self._save_ate_tables(run_names, cols, multi_robot_cols, run_display_names, results, base_dir / 'metrics_table.pdf',
+        multi_robot_cols = {SLAMEvaluator.group_label(g) for g in robot_groups if len(g) > 1}
+        SLAMEvaluator._save_ate_tables(run_names, cols, multi_robot_cols, run_display_names, results, base_dir / 'metrics_table.pdf',
                         ate_threshold_m, rot_threshold_deg)
 
         # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
-        self._save_ate_split_table(run_names, robot_groups, run_display_names, results,
+        SLAMEvaluator._save_ate_split_table(run_names, robot_groups, run_display_names, results,
                             base_dir / 'ate_split_table.pdf', ate_threshold_m)
