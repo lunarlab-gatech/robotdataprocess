@@ -110,7 +110,18 @@ class SLAMEvaluator:
                 return first + n[-1]
             return first
         return '-'.join(abbrev(n) for n in names)
-    
+
+    @staticmethod
+    def make_robot_groups(dataset_name: str, dataset_seq: str,
+                        robot_name_groups: List[Tuple[str, ...]]) -> List[RobotGroup]:
+        """
+        Builds ``RobotGroup``\\ s for the common case of one dataset shared by every group, with
+        labels derived from :meth:`group_label`.
+        """
+        return [RobotGroup(robots=tuple(g), dataset_name=dataset_name, dataset_seq=dataset_seq,
+                        label=SLAMEvaluator.group_label(g))
+                for g in robot_name_groups]
+
     # =========================================================================
     # ============================= Computation ===============================
     # =========================================================================
@@ -314,7 +325,7 @@ class SLAMEvaluator:
             label="tab:merged_rms_ate")
 
     @staticmethod
-    def _save_ate_split_table(run_names: List[str], robot_groups: List[Tuple[str, ...]],
+    def _save_ate_split_table(run_names: List[str], robot_groups: List[RobotGroup],
                             run_display_names: Dict[str, str],
                             results: Dict[str, Dict[str, SLAMResult]],
                             save_path: Path, ate_threshold_m: float) -> None:
@@ -324,21 +335,21 @@ class SLAMEvaluator:
         For each robot group, produces one column per robot holding that robot's
         individual post-optimize RMS ATE/RPE, computed by separating the merged
         aligned trajectory back into per-robot trajectories (see
-        :meth:`ROMANEvaluator.calculate_merged_ate`).
+        :meth:`SLAMEvaluator.calculate_merged_ate`).
 
         Args:
             run_names: Ordered list of run identifiers.
-            robot_groups: Ordered list of robot-name groups (each an arbitrary-length
-                tuple/list), matching the group order used to build ``results``.
+            robot_groups: Ordered list of ``RobotGroup``, matching the group order used
+                to build ``results``.
             run_display_names: Maps each run identifier to its display name in the table.
             results: ``DatasetSequenceResults`` keyed by run then column.
             save_path: Destination PDF path.
             ate_threshold_m: Red-highlight cutoff (m) for both tables (both are translation-only).
         """
-        sub_cols = [f"{SLAMEvaluator.group_label(grp)}\n{name}" for grp in robot_groups for name in grp]
+        sub_cols = [f"{grp.label}\n{name}" for grp in robot_groups for name in grp.robots]
 
-        subcol_group_idx = {f"{SLAMEvaluator.group_label(grp)}\n{name}": (SLAMEvaluator.group_label(grp), i)
-                            for grp in robot_groups for i, name in enumerate(grp)}
+        subcol_group_idx = {f"{grp.label}\n{name}": (grp.label, i)
+                            for grp in robot_groups for i, name in enumerate(grp.robots)}
 
         def make_raw_df(metric_fn) -> pd.DataFrame:
             def value_fn(run, subcol):
@@ -1158,15 +1169,18 @@ class SLAMEvaluator:
     # =========================================================================
 
     @staticmethod
-    def run_evaluation(mg_root: Path, dataset_name: str, dataset_seq: str, run_names: List[str],
-                        robot_groups: List[Tuple[str, ...]],
+    def run_evaluation(mg_root: Path, output_dir: Path, run_names: List[str],
+                        robot_groups: List[RobotGroup],
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                         viz_config: Dict,
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
         """
-        Generate all evaluation figures and tables for one dataset.
+        Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
+        its own dataset, so one call can group results across several datasets/sequences (e.g.
+        the Kimera-Multi paper's per-robot-count groupings). Use :meth:`make_robot_groups` for
+        the common case of one dataset shared by every group.
 
         For each robot group across all run names:
         - Loads its :class:`SLAMData` and computes merged RMS ATE (pre- and post-optimize) in parallel.
@@ -1178,26 +1192,17 @@ class SLAMEvaluator:
 
         Args:
             mg_root: Path to the MeronomyGraph repo checkout (with corresponding results).
-            dataset_name: Result folder prefix identifying the dataset family (e.g. ``"hercules"``,
-                ``"GrAco"``).
-            dataset_seq: Dataset identifier (e.g. ``"V2.3.AC"``).
+            output_dir: Path, relative to ``figures_base_dir``, under which this grouping's outputs are saved.
             run_names: Ordered list of run/method identifiers to evaluate.
-            robot_groups: Explicit list of robot-name groups to evaluate, each an arbitrary-length
-                tuple/list of names -- a singleton for self-alignment, a pair, a triplet, or the
-                full robot set. Callers decide exactly what to plot (e.g.
-                ``list(itertools.combinations(all_robots, 2))`` for every pairwise combination).
+            robot_groups: Explicit list of ``RobotGroup`` to evaluate.
             critical_invocation_params: Other data-affecting args from the original run invocation.
-            figures_base_dir: Directory under which ``figures/<dataset_name>/<dataset_seq>/`` outputs are saved.
-            load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
-                dataset-specific.
-            viz_config: Dict forwarded to :meth:`ROMANEvaluator.save_merged_ate_figures` (see its docstring).
-            ate_threshold_m: Red-highlight cutoff (m) for every translation-error table
-                (ATE pre/post-optimize, individual ATE/RPE, RTE). Dataset-specific -- e.g.
-                a smaller-area dataset like AirMuseum should use a smaller value than Hercules.
-            rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table
-                (absolute and relative). Defaults to 10 degrees for all datasets.
+            figures_base_dir: Directory under which ``<output_dir>/`` outputs are saved.
+            load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``, dataset-specific.
+            viz_config: Dict forwarded to :meth:`SLAMEvaluator.save_merged_ate_figures` (see its docstring).
+            ate_threshold_m: Red-highlight cutoff (m) for every translation-error table.
+            rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
 
-        Outputs saved under ``figures/<dataset_name>/<dataset_seq>/``:
+        Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
         - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, one column per
             robot in each group
@@ -1206,7 +1211,7 @@ class SLAMEvaluator:
         - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
         - ``traj/``              — per-group estimated vs. GT trajectory plots
 
-        Outputs saved under ``figures/<dataset_name>/<dataset_seq>/<LoopClosureFilterMode.name>/``, once per LC filter mode:
+        Outputs saved under ``<figures_base_dir>/<output_dir>/<LoopClosureFilterMode.name>/``, once per LC filter mode:
         - ``lc_tables.pdf``      — LC success rate and count summary tables
         - ``lc_success_rate_table.tex``, ``lc_successful_total_table.tex`` — under
             ``LoopClosureFilterMode.ALL`` only, standalone LaTeX versions of the all-LC
@@ -1221,16 +1226,15 @@ class SLAMEvaluator:
         - ``traj_lc_comb/``      — per-group 2x2 combination of the per-method traj_lc slides
         """
 
-        # results[run_name] is keyed by group_label(group) below; two different groups that
-        # abbreviate to the same label would silently collide and overwrite each other's results
-        # (e.g. "acl_jackal" and "acl_jackal2" both -> "A" before group_label's trailing-digit fix).
-        # Fail loudly here instead of losing a column silently.
+        # results[run_name] is keyed by group.label below; two different groups sharing a label
+        # (e.g. two default-labeled groups whose robots abbreviate the same way) would silently
+        # collide and overwrite each other's results. Fail loudly here instead of losing a column.
         cols_by_label: Dict[str, List[Tuple[str, ...]]] = {}
         for group in robot_groups:
-            cols_by_label.setdefault(SLAMEvaluator.group_label(group), []).append(group)
+            cols_by_label.setdefault(group.label, []).append(group.robots)
         collisions = {label: groups for label, groups in cols_by_label.items() if len(groups) > 1}
         if collisions:
-            raise ValueError(f"group_label collisions for {dataset_seq}: {collisions}")
+            raise ValueError(f"group_label collisions for {output_dir}: {collisions}")
 
         # Force the headless Agg backend regardless of whatever backend an earlier import may have
         # already selected -- safe here since this function never shows interactive figures (every
@@ -1247,9 +1251,10 @@ class SLAMEvaluator:
         }
 
         # Load every run/group's data, then compute its RMS ATE, both in parallel
-        load_tasks = [(mg_root, dataset_name, dataset_seq, run_name, list(group), critical_invocation_params)
+        load_tasks = [(mg_root, group.dataset_name, group.dataset_seq, run_name, list(group.robots), critical_invocation_params)
                 for group in robot_groups
                 for run_name in run_names]
+        task_row_col = [(run_name, group.label) for group in robot_groups for run_name in run_names]
 
         # Must happen here in the parent (not only inside the forked workers) so unpickling
         # MeronomyGraph-backed objects (e.g. SLAMData.system_params) back in the parent succeeds.
@@ -1259,12 +1264,11 @@ class SLAMEvaluator:
             pool_results = pool.starmap(SLAMEvaluator.calculate_merged_ate,
                                         [(slam_data, load_gt_data_fn) for slam_data in loaded])
 
-        # All loaded data and computed results for this dataset, keyed by run then robot-group
+        # All loaded data and computed results for this grouping, keyed by run then robot-group
         # column — the objects threaded through every table/figure function below.
         slam_data_by_run: Dict[str, Dict[str, SLAMData]] = {run: {} for run in run_names}
         results: Dict[str, Dict[str, SLAMResult]] = {run: {} for run in run_names}
-        for (_, _, _, run_name, group, *_), slam_data, result in zip(load_tasks, loaded, pool_results):
-            col = SLAMEvaluator.group_label(group)
+        for (run_name, col), slam_data, result in zip(task_row_col, loaded, pool_results):
             slam_data_by_run[run_name][col] = slam_data
             results[run_name][col] = result
 
@@ -1276,10 +1280,10 @@ class SLAMEvaluator:
                 SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, load_gt_data_fn,
                                                       figures_base_dir, viz_config)
 
-        # Define sequence group column names
-        cols = [SLAMEvaluator.group_label(g) for g in robot_groups]
+        # Define group column names
+        cols = [group.label for group in robot_groups]
 
-        base_dir = Path(figures_base_dir) / dataset_name / dataset_seq
+        base_dir = Path(figures_base_dir) / output_dir
 
         total_time_by_run = {}
         for run_name in run_names:
@@ -1287,8 +1291,8 @@ class SLAMEvaluator:
             # shared by several groups only ran once.
             total_time_by_run[run_name] = sum(
                 SLAMData.get_timing_totals(list(slam_data_by_run[run_name].values())).values())
-            print(f"{dataset_seq} {run_name}: total data generation time = {total_time_by_run[run_name]:.1f}s")
-        print(f"{dataset_seq}: total data generation time across all runs = {sum(total_time_by_run.values()):.1f}s")
+            print(f"{output_dir} {run_name}: total data generation time = {total_time_by_run[run_name]:.1f}s")
+        print(f"{output_dir}: total data generation time across all runs = {sum(total_time_by_run.values()):.1f}s")
 
         SLAMEvaluator._save_timing_table(run_names, cols, run_display_names, slam_data_by_run, base_dir / 'timing_table.pdf')
         SLAMEvaluator._save_data_size_table(run_names, cols, run_display_names, slam_data_by_run, base_dir / 'data_size_table.pdf')
@@ -1307,16 +1311,15 @@ class SLAMEvaluator:
             # For each group...
             for group in robot_groups:
                 # Load GT Data
-                col = SLAMEvaluator.group_label(group)
-                gt_list = load_gt_data_fn(dataset_seq, list(group))
-                gt_dict = {name: gt for name, gt in zip(group, gt_list)}
+                gt_list = load_gt_data_fn(group.dataset_seq, list(group.robots))
+                gt_dict = {name: gt for name, gt in zip(group.robots, gt_list)}
 
                 # Calculate LC errors and visualize
                 lc_data_list: List[LoopClosureData] = []
                 labels_list: List[str] = []
                 group_indices: List[int] = []
                 for i, run_name in enumerate(run_names):
-                    merged_lc, merged_lc_inlier = slam_data_by_run[run_name][col].get_loop_closures(lc_filter)
+                    merged_lc, merged_lc_inlier = slam_data_by_run[run_name][group.label].get_loop_closures(lc_filter)
                     for lc in (merged_lc, merged_lc_inlier):
                         lc.calculate_errors(gt_dict)
                         lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
@@ -1327,38 +1330,38 @@ class SLAMEvaluator:
                 _, stats = LoopClosureData.visualize_error_scatter(
                     lc_data_list, labels_list, group_indices=group_indices,
                     max_rotation_frac=1.0, max_translation_frac=1.0,
-                    show_plots=False, save_path=str(subdirs['lc'] / f'lc_{col}.pdf'))
+                    show_plots=False, save_path=str(subdirs['lc'] / f'lc_{group.label}.pdf'))
 
                 fig_sr = LoopClosureData.visualize_success_rate(
                     lc_data_list[::2], labels_list[::2], show_plots=False,
                     max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
-                fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{col}_success_rate.pdf'))
+                fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{group.label}_success_rate.pdf'))
                 plt.close(fig_sr)
 
                 for i, run_name in enumerate(run_names):
-                    results[run_name][col].lc_stats_by_mode[lc_filter] = stats[2 * i]
-                    results[run_name][col].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
+                    results[run_name][group.label].lc_stats_by_mode[lc_filter] = stats[2 * i]
+                    results[run_name][group.label].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
-                SLAMEvaluator._save_lc_context_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_context_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
                                             stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
-                SLAMEvaluator._save_lc_side_by_side_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_side_by_side_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
                                                 run_names, subdirs['lc_side_by_side'])
-                SLAMEvaluator._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
                                         run_names, run_display_names, subdirs['lc_sep'])
-                SLAMEvaluator._save_lc_sep_figure(group, col, lc_data_list, labels_list, group_indices,
+                SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
                                         run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
-                SLAMEvaluator._save_traj_lc_comb_figure(col, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
+                SLAMEvaluator._save_traj_lc_comb_figure(group.label, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
             SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
 
-        # ATE table is LC-independent, so it's saved once at the dataset root. Cell suppression
+        # ATE table is LC-independent, so it's saved once at the grouping root. Cell suppression
         # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
         # connect the group's pose graph — intra-robot closures don't merge separate robots' trajectories.
         # Single-robot groups have no inter-robot LC by definition, so they're excluded from suppression.
-        multi_robot_cols = {SLAMEvaluator.group_label(g) for g in robot_groups if len(g) > 1}
+        multi_robot_cols = {group.label for group in robot_groups if len(group.robots) > 1}
         SLAMEvaluator._save_ate_tables(run_names, cols, multi_robot_cols, run_display_names, results, base_dir / 'metrics_table.pdf',
                         ate_threshold_m, rot_threshold_deg)
 
-        # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the dataset root.
+        # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the grouping root.
         SLAMEvaluator._save_ate_split_table(run_names, robot_groups, run_display_names, results,
                             base_dir / 'ate_split_table.pdf', ate_threshold_m)

@@ -214,8 +214,9 @@ class SLAMData(Data):
                             robot_names: List[str], critical_invocation_params: Dict[str, Any]) -> Dict[str, Dict]:
         """
         Load the runtime (s) breakdown for a ROMAN run on a robot group, keyed by the robot
-        identity that produced it (not by file path) so :meth:`total_data_generation_time` can
-        dedup work shared between groups without further disk access.
+        identity that produced it (not by file path), qualified by dataset, so
+        :meth:`get_timing_totals` can dedup work shared between groups of the same dataset
+        without conflating same-named robots from different datasets/sequences.
 
         Reads each combination's own alignment runtime (``<robot_a>_<robot_b>.runtime.txt``, one line,
         at that combination's own align result dir), each robot's own mapping runtime
@@ -229,9 +230,10 @@ class SLAMData(Data):
             critical_invocation_params: Other data-affecting args from the original run invocation.
 
         Returns:
-            Dict with keys ``"align"`` (``{(robot_a, robot_b): seconds}``, one entry per
-            combination including self-pairs), ``"mapping"`` (``{robot: seconds}``), and
-            ``"offline_rpgo"`` (``{tuple(robot_names): seconds}``).
+            Dict with keys ``"align"`` (``{(dataset_name, dataset_seq, robot_a, robot_b): seconds}``,
+            one entry per combination including self-pairs), ``"mapping"``
+            (``{(dataset_name, dataset_seq, robot): seconds}``), and ``"offline_rpgo"``
+            (``{(dataset_name, dataset_seq, *robot_names): seconds}``).
 
         Raises:
             FileNotFoundError: If any runtime file is missing.
@@ -264,9 +266,10 @@ class SLAMData(Data):
         if not all(align_lines.values()) or not all(mapping_lines.values()) or not rpgo_lines:
             raise ValueError(f"Empty runtime file for robot group {robot_names}")
 
-        align = {pair: float(line.split(':')[-1]) for pair, line in align_lines.items()}
-        mapping = {rn: float(line.split(':')[-1]) for rn, line in mapping_lines.items()}
-        offline_rpgo = {tuple(robot_names): float(rpgo_lines[-1])}
+        dataset_key = (system_params.dataset_name, system_params.dataset_version)
+        align = {(*dataset_key, *pair): float(line.split(':')[-1]) for pair, line in align_lines.items()}
+        mapping = {(*dataset_key, rn): float(line.split(':')[-1]) for rn, line in mapping_lines.items()}
+        offline_rpgo = {(*dataset_key, *robot_names): float(rpgo_lines[-1])}
 
         return {"align": align, "mapping": mapping, "offline_rpgo": offline_rpgo}
 

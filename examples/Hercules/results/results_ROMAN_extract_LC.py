@@ -6,19 +6,18 @@ from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess import LoopClosureFilterMode
 from robotdataprocess.data_types.LoopClosureData.LoopClosureData import LoopClosureData
-from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.data_types.SLAMData import SLAMData
 from results_ROMAN import load_gt_data_ROMAN
 
 def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
     dataset_prefix = "hercules"
-    dataset_name = "V2.3.AP"
-    pair = ["Husky1", "Drone1"]
+    dataset_seq = "V2.3.AP"
+    pair = sorted(["Husky1", "Drone1"])
     run_names = ["ROMAN_O", "MG_TS_SM"]
-    out_dir = Path(__file__).parent.parent.parent.parent / 'figures' / dataset_prefix / dataset_name / 'ALL'
+    out_dir = Path(__file__).parent.parent.parent.parent / 'figures' / dataset_prefix / dataset_seq / 'ALL'
     out_dir.mkdir(parents=True, exist_ok=True)
 
     robot_name_to_chars_mapping: dict = {
@@ -28,15 +27,13 @@ def main():
         "Drone2": "D2"
     }
 
-    evaluator = SLAMEvaluator(roman_root)
-    gt_list = load_gt_data_ROMAN(dataset_name, pair)
+    gt_list = load_gt_data_ROMAN(dataset_seq, pair)
     gt_dict = {name: gt for name, gt in zip(pair, gt_list)}
 
     merged_lc_by_run: Dict[str, LoopClosureData] = {}
     for run_name in run_names:
-        system_params = evaluator.load_system_params(dataset_prefix, dataset_name, run_name)
-        merged_lc, _ = evaluator.load_LC_data(system_params, dataset_prefix, dataset_name, pair,
-                                              critical_invocation_params, lc_filter=LoopClosureFilterMode.ALL)
+        system_params = SLAMData.load_system_params(roman_root, dataset_prefix, dataset_seq, run_name)
+        merged_lc, _ = SLAMData.load_LC_data(roman_root, system_params, pair, critical_invocation_params)
         merged_lc.calculate_errors(gt_dict)
         merged_lc.label_successful(trans_err_in_target=1.0, rot_err_in_target=5.0)
         merged_lc_by_run[run_name] = merged_lc

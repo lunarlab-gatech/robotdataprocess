@@ -11,6 +11,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess import LoopClosureFilterMode
+from robotdataprocess.data_types.SLAMData import SLAMData
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from results_ROMAN import load_gt_data_ROMAN
 
@@ -22,10 +23,25 @@ def _calculate_merged_ate_star(task: Dict[str, Any]):
     which of potentially hundreds of pooled tasks actually failed.
     """
     try:
-        return task["evaluator"].calculate_merged_ate(*task["args"])
+        return SLAMEvaluator.calculate_merged_ate(*task["args"])
     except Exception as e:
         raise RuntimeError(f"calculate_merged_ate failed for base_config='{task['base_config']}', "
                            f"overrides={task['overrides']}, robot_pair={task['pair']}") from e
+
+def build_swept_slam_data(mg_root: Path, system_params, robot_names: List[str],
+                          critical_invocation_params: Dict[str, Any]) -> SLAMData:
+    """
+    Builds a SLAMData from an already-constructed (parameter-swept) system_params.
+
+    TODO: A swept system_params doesn't correspond to any experiment config file on disk, so
+    SLAMData.from_MeronomyGraph (which loads its own system_params from one) can't be used
+    directly. This needs a new SLAMData.from_... factory that takes a system_params instead of
+    loading one, sharing a helper with from_MeronomyGraph rather than duplicating its six loader
+    calls here. Not implemented yet.
+    """
+    raise NotImplementedError(
+        "build_swept_slam_data needs a SLAMData factory that accepts an already-built "
+        "system_params -- see the TODO above.")
 
 def load_sweep_data(sweep_path: Path) -> Dict[str, Any]:
     """ Loads a W&B sweep config YAML, raising if it isn't a "method: grid" sweep. """
@@ -105,7 +121,7 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
     dataset_prefix = "airmuseum"
-    dataset_name = "Scenario5"
+    dataset_seq = "Scenario5"
     robot_pair = ["drone", "robotB"]
     methods = ["MG"]
     sweep_names = ["sweep_harder_params"]
@@ -113,8 +129,7 @@ def main():
     trans_err_in_target = 1.0
     rot_err_in_target = 5.0
 
-    evaluator = SLAMEvaluator(roman_root)
-    gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_name, robot_pair)))
+    gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_seq, robot_pair)))
 
     sweeps_dir = roman_root / "research" / "AirMuseum" / "sweeps"
 
@@ -126,14 +141,14 @@ def main():
     # (the expensive part) in parallel, exactly like run_evaluation does.
     tasks = []
     for method in methods:
-        base_system_params = evaluator.load_system_params(dataset_prefix, dataset_name, method)
-        base_config = f"{dataset_prefix}_{dataset_name}_{method}.yaml"
+        base_system_params = SLAMData.load_system_params(roman_root, dataset_prefix, dataset_seq, method)
+        base_config = f"{dataset_prefix}_{dataset_seq}_{method}.yaml"
         for overrides in overrides_list:
             swept_system_params = apply_overrides(base_system_params, overrides)
+            slam_data = build_swept_slam_data(roman_root, swept_system_params, robot_pair, critical_invocation_params)
             tasks.append({
-                "args": (swept_system_params, dataset_prefix, dataset_name, method,
-                        robot_pair, critical_invocation_params, load_gt_data_ROMAN),
-                "evaluator": evaluator,
+                "args": (slam_data, load_gt_data_ROMAN),
+                "slam_data": slam_data,
                 "method": method,
                 "base_config": base_config,
                 "overrides": overrides,
@@ -147,11 +162,10 @@ def main():
     counts = {method: {"success": 0, "failure": 0} for method in methods}
     for task, result in zip(tasks, results):
         method = task["method"]
-        system_params, robot_names = task["args"][0], task["args"][4]
+        slam_data = task["slam_data"]
         ate = result.merged_metrics.APE.translation_part.rmse
 
-        lc_all, lc_inlier = evaluator.load_LC_data(system_params, dataset_prefix, dataset_name, robot_names,
-                                         critical_invocation_params, lc_filter=LoopClosureFilterMode.ONLY_INTER_LC)
+        lc_all, lc_inlier = slam_data.get_loop_closures(LoopClosureFilterMode.ONLY_INTER_LC)
         num_inlier_inter_lc = lc_inlier.num_loop_closures
 
         lc_all.calculate_errors(gt_dict)
@@ -164,7 +178,7 @@ def main():
 
         success = ate < ate_threshold_m and num_inlier_inter_lc >= 1
         counts[method]["success" if success else "failure"] += 1
-        print(f"[{method}] {robot_names}: ATE={ate:.2f}m, inlier LC={num_successful_inlier_inter_lc}/{num_inlier_inter_lc} "
+        print(f"[{method}] {slam_data.robot_names}: ATE={ate:.2f}m, inlier LC={num_successful_inlier_inter_lc}/{num_inlier_inter_lc} "
               f"all LC={num_successful_inter_lc}/{num_total_inter_lc} "
               f"-> {'SUCCESS' if success else 'FAILURE'}")
 

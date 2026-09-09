@@ -16,7 +16,7 @@ NAME_TO_FRAME_MAP: dict = {
     "robotC": CoordinateFrame.FUR
 }
 
-def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
+def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
     """
     Load ground truth trajectories for a set of robots from <robot_name>.txt.
 
@@ -27,7 +27,7 @@ def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryDat
     user = getpass.getuser()
     gt_data: List[OdometryData] = []
     for rn in robot_names:
-        data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_name + '/data/'
+        data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_seq + '/data/'
                               + rn + '/body_stamped_groundtruth.txt', 'world', 'robot',
                               CoordinateFrame.NONE, True, [0, 1, 2, 3, 7, 4, 5, 6])
         data.redefine_local_axes(NAME_TO_FRAME_MAP[rn], CoordinateFrame.FLU)
@@ -44,7 +44,7 @@ def main():
     all_robots = ["drone", "robotA", "robotB", "robotC"]
     robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O_SM", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
-    dataset_name = "Scenario3"
+    dataset_seq = "Scenario3"
 
     # Environment image / robot display config
     user = getpass.getuser()
@@ -69,8 +69,9 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    SLAMEvaluator.run_evaluation(roman_root, "airmuseum", dataset_name, run_names, robot_groups, critical_invocation_params,
-                             figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
+    robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups)
+    SLAMEvaluator.run_evaluation(roman_root, Path("airmuseum") / dataset_seq, run_names, robot_groups,
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
 
 if __name__ == "__main__":
     main()
