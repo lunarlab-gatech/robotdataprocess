@@ -171,8 +171,15 @@ Conversion).
 All tests must meet the following bar — not just "does it run" but "does it catch bugs":
 
 1. Full input coverage: Cover all meaningful inputs, including edge cases (empty, zero, one item, maximum, invalid). For infinite input spaces, cover a representative sample including boundaries.
-2. Bug-detection strength: If a small, plausible implementation change were introduced (off-by-one, wrong condition, missing branch), at least one test must fail. Tests that only verify the happy path do not meet this bar.
+2. Bug-detection strength: If a small, plausible implementation change were introduced (off-by-one, wrong condition, missing branch, column/argument swap), at least one test must fail. Tests that only verify the happy path do not meet this bar.
 3. Branch coverage: Every code branch (if/else, try/except, early return) must be exercised by at least one test case.
 
 Apply this standard when writing new tests and when reviewing or extending existing ones. Use tools like coverage (examples found in .github/workflows/python_test.yml) to help ensure successful compliance with requirement #3.
+
+Before writing any new or extended test case, first present an evaluation of the planned test
+protocol against requirements #1-3 above, with concrete details (not just the checklist restated):
+which inputs/branches/edge cases are covered and which aren't (#1, #3), and why the test data is
+expected to catch a plausible bug rather than only exercise the happy path -- e.g. what a broken
+implementation would have to do to still pass (#2). Get the user's explicit approval on this
+evaluation before writing the test files/fixtures.
 
