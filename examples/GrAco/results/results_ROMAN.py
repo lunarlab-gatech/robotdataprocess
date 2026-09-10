@@ -7,9 +7,9 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
-def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
+def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
     """
     Load ground truth trajectories for a set of robots from <robot_name>.txt.
 
@@ -19,7 +19,7 @@ def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryDat
     user = getpass.getuser()
     return [
         OdometryData.from_csv(
-            '/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + rn + '/' + rn + '.txt',
+            '/media/' + user + '/T73/GrAco_dataset/' + dataset_seq + '/data/' + rn + '/' + rn + '.txt',
             'world', 'robot', CoordinateFrame.ENU, False, [0, 1, 2, 3, 7, 4, 5, 6])
         for rn in robot_names
     ]
@@ -28,17 +28,17 @@ def main():
     """
     Generate all evaluation figures and tables for the GrAco dataset.
 
-    See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
 
     all_robots = ["ground-06", "aerial-08"]
     robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O"]
-    dataset_name = "V1.0"
+    dataset_seq = "V1.0"
 
     # Environment image / robot display config
     user = getpass.getuser()
-    image_path = '/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/environment.png'
+    image_path = '/media/' + user + '/T73/GrAco_dataset/' + dataset_seq + '/data/environment.png'
     x_edge = 691.216296
 
     robot_name_to_color: Dict = {
@@ -58,8 +58,9 @@ def main():
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    run_ROMAN_evaluation(roman_root, "graco", dataset_name, run_names, robot_groups, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
+    robot_groups = SLAMEvaluator.make_robot_groups("graco", dataset_seq, robot_groups)
+    SLAMEvaluator.run_evaluation(roman_root, Path("graco") / dataset_seq, run_names, robot_groups,
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()
