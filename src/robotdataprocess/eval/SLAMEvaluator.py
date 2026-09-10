@@ -372,9 +372,9 @@ class SLAMEvaluator:
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, font_size=8, data_font_size=10)
 
     @staticmethod
-    def save_merged_ate_figures(slam_data: SLAMData, method: str,
+    def save_merged_ate_figures(slam_data: SLAMData, method: str, label: str,
                                 load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
-                                figures_base_dir: Path, viz_config: Dict) -> None:
+                                base_dir: Path, viz_config: Dict) -> None:
         """
         Generate and save the 2D trajectory and LC-overlay PDFs for one run/group -- the
         visualization counterpart of :meth:`calculate_merged_ate`, split out so it can be run
@@ -387,10 +387,12 @@ class SLAMEvaluator:
         Args:
             slam_data: The loaded data for this run/robot group.
             method: Run name, used for figure/file naming only.
+            label: This group's column/figure-filename label (``RobotGroup.label``).
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
                 dataset-specific.
-            figures_base_dir: Directory under which ``<dataset_name>/<dataset_seq>/traj`` and
-                ``<dataset_name>/<dataset_seq>/<LoopClosureFilterMode.name>/traj_lc`` outputs are saved.
+            base_dir: Directory under which ``traj/`` and ``<LoopClosureFilterMode.name>/traj_lc/``
+                outputs are saved -- the same one :meth:`run_evaluation` uses for this group's
+                other outputs, not derived from ``slam_data``'s own dataset.
             viz_config: Dict with keys ``"image_path"``, ``"x_edge"``, ``"robot_name_to_color"``
                 (keyed by display name), and optionally ``"name_map"`` (robot name -> display name;
                 defaults to identity) and ``"yaw_rotation_deg"`` (rotates trajectories about the
@@ -410,8 +412,7 @@ class SLAMEvaluator:
         image_extent_offsets = viz_config.get("background_image_extent_offsets")
         yaw_rotation_deg = viz_config.get("yaw_rotation_deg", 0.0)
 
-        group_lbl = SLAMEvaluator.group_label(robot_names)
-        base_dir = Path(figures_base_dir) / slam_data.system_params.dataset_name / slam_data.system_params.dataset_version
+        base_dir = Path(base_dir)
         traj_dir = base_dir / 'traj'
         traj_dir.mkdir(parents=True, exist_ok=True)
 
@@ -424,7 +425,7 @@ class SLAMEvaluator:
                         background_image_path=image_path, background_image_x_edge=x_edge,
                         background_image_extent_offsets=image_extent_offsets,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{group_lbl}_{method}.pdf'))
+                        save_path=str(traj_dir / f'traj_{label}_{method}.pdf'))
 
         # Plot only GT in 2D
         dataList  = gt_data_align_list
@@ -436,7 +437,7 @@ class SLAMEvaluator:
                         background_image_extent_offsets=image_extent_offsets,
                         gt_color_lightness_range_val=8,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{group_lbl}_{method}_onlyGT.pdf'))
+                        save_path=str(traj_dir / f'traj_{label}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
         gt_dict_display = {name_map[rn]: gt for rn, gt in zip(robot_names, gt_data_lst)}
@@ -456,7 +457,7 @@ class SLAMEvaluator:
             PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
                             loop_closure_data=lc_data_inlier, lc_line_width=2.0, lc_errors_vmax=2.0,
                             title=f"{method} LC overlaid on trajectory",
-                            save_path=str(traj_lc_dir / f'traj_lc_{group_lbl}_{method}.pdf'))
+                            save_path=str(traj_lc_dir / f'traj_lc_{label}_{method}.pdf'))
 
     @staticmethod
     def _save_timing_table(run_names: List[str], cols: List[str],
@@ -1272,18 +1273,18 @@ class SLAMEvaluator:
             slam_data_by_run[run_name][col] = slam_data
             results[run_name][col] = result
 
+        base_dir = Path(figures_base_dir) / output_dir
+
         # Save trajectory/LC-overlay figures sequentially (not via Pool -- unlike ATE
         # computation, this touches matplotlib, which isn't safe to fan out across
         # worker processes with an interactive backend).
         for run_name in run_names:
             for col, slam_data in slam_data_by_run[run_name].items():
-                SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, load_gt_data_fn,
-                                                      figures_base_dir, viz_config)
+                SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, col, load_gt_data_fn,
+                                                      base_dir, viz_config)
 
         # Define group column names
         cols = [group.label for group in robot_groups]
-
-        base_dir = Path(figures_base_dir) / output_dir
 
         total_time_by_run = {}
         for run_name in run_names:

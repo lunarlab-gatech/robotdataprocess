@@ -32,7 +32,7 @@ class _FakeSystemParams:
     address a different directory in production.
 
     Attributes:
-        dataset_name: Read directly by ``SLAMEvaluator.save_merged_ate_figures`` for its output path.
+        dataset_name: Used here for the results directory layout.
         dataset_version: Read directly by ``SLAMEvaluator.calculate_merged_ate``/
             ``save_merged_ate_figures`` (passed to ``load_gt_data_fn`` as ``dataset_seq``), and
             used here for the results directory layout.
@@ -180,14 +180,14 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
         }
         slam_data = self._build_slam_data(['robotA', 'robotB'])
         SLAMEvaluator.save_merged_ate_figures(
-            slam_data, self.METHOD, self._load_gt_data_fn, self.figures_dir, viz_config)
+            slam_data, self.METHOD, 'RA-RB', self._load_gt_data_fn, self.figures_dir, viz_config)
 
         expected_files = [
-            'kimera_multi/test_dataset_seq/traj/traj_RA-RB_ROMAN.pdf',
-            'kimera_multi/test_dataset_seq/traj/traj_RA-RB_ROMAN_onlyGT.pdf',
-            'kimera_multi/test_dataset_seq/ALL/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
-            'kimera_multi/test_dataset_seq/ONLY_INTER_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
-            'kimera_multi/test_dataset_seq/ONLY_INTRA_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
+            'traj/traj_RA-RB_ROMAN.pdf',
+            'traj/traj_RA-RB_ROMAN_onlyGT.pdf',
+            'ALL/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
+            'ONLY_INTER_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
+            'ONLY_INTRA_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
         ]
         for rel_path in expected_files:
             path = self.figures_dir / rel_path
@@ -203,13 +203,13 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
         }
         slam_data = self._build_slam_data(['robotA'])
         SLAMEvaluator.save_merged_ate_figures(
-            slam_data, self.METHOD,
+            slam_data, self.METHOD, 'RA',
             lambda dataset_seq, robot_names: [self._make_gt_odometry(0.0, 0.0, 0.02, 1.0)],
             self.figures_dir, viz_config)
 
         expected_files = [
-            'kimera_multi/test_dataset_seq/traj/traj_RA_ROMAN.pdf',
-            'kimera_multi/test_dataset_seq/traj/traj_RA_ROMAN_onlyGT.pdf',
+            'traj/traj_RA_ROMAN.pdf',
+            'traj/traj_RA_ROMAN_onlyGT.pdf',
         ]
         for rel_path in expected_files:
             path = self.figures_dir / rel_path
