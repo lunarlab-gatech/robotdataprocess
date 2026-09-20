@@ -7,7 +7,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.RobotGroup import RobotGroup
+from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 DATASET_NAME = "kimera_multi"
@@ -37,17 +37,8 @@ def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData
         gt_data.append(data)
     return gt_data
 
-def main():
-    """
-    Generate all evaluation figures and tables for the Kimera-Multi dataset, grouped the way the
-    Kimera-Multi paper does -- by robot count, not by dataset sequence -- so each grouping call
-    below spans whichever sequences it needs.
-
-    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
-    """
-
-    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
-
+def make_viz_config() -> RobotGroupViz:
+    """Builds the Kimera-Multi robot display config, shared across every grouping (no background image)."""
     robot_name_to_color: Dict = {
         "acl_jackal": "#FFA501",
         "acl_jackal2": "#FF0101",
@@ -58,41 +49,56 @@ def main():
         "apis": "#808080",
         "sobek": "#000000",
     }
-    viz_config = {
-        "image_path": None,
-        "x_edge": None,
-        "robot_name_to_color": robot_name_to_color,
-    }
+    return RobotGroupViz(
+        name_map=None,
+        robot_name_to_color=robot_name_to_color,
+        image_path=None,
+        image_x_edge=None,
+        image_extent_offsets=None,
+    )
 
-    figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
-    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+def main():
+    """
+    Generate all evaluation figures and tables for the Kimera-Multi dataset, grouped the way the
+    Kimera-Multi paper does -- by robot count, not by dataset sequence -- so each grouping call
+    below spans whichever sequences it needs.
+
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
+    """
+
+    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
+    viz_config = make_viz_config()
+
+    user = getpass.getuser()
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
     # The four single-robot tunnel groups -- all from the same sequence.
     easy = SLAMEvaluator.make_robot_groups(DATASET_NAME, TUNNELS_SEQ,
-        [("acl_jackal",), ("acl_jackal2",), ("sparkal1",), ("sparkal2",)])
+        [("acl_jackal",), ("acl_jackal2",), ("sparkal1",), ("sparkal2",)], viz_config)
 
     # The full-robot-set group from each sequence. Labeled explicitly: tunnels and hybrid share
     # the same 8 robots, so the default group_label would collide between them.
     medium = [
-        RobotGroup(robots=TUNNELS_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=TUNNELS_SEQ, label="tunnels"),
-        RobotGroup(robots=HYBRID_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=HYBRID_SEQ, label="hybrid"),
-        RobotGroup(robots=OUTDOOR_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=OUTDOOR_SEQ, label="outdoor"),
+        RobotGroup(robots=TUNNELS_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=TUNNELS_SEQ, label="tunnels", viz_config=viz_config),
+        RobotGroup(robots=HYBRID_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=HYBRID_SEQ, label="hybrid", viz_config=viz_config),
+        RobotGroup(robots=OUTDOOR_ROBOTS, dataset_name=DATASET_NAME, dataset_seq=OUTDOOR_SEQ, label="outdoor", viz_config=viz_config),
     ]
 
     # The three remaining 2-3 robot groups, spanning the hybrid and outdoor sequences.
     difficult = [
         RobotGroup(robots=("acl_jackal", "acl_jackal2", "sparkal1"), dataset_name=DATASET_NAME, dataset_seq=HYBRID_SEQ,
-                   label=SLAMEvaluator.group_label(("acl_jackal", "acl_jackal2", "sparkal1"))),
+                   label=SLAMEvaluator.group_label(("acl_jackal", "acl_jackal2", "sparkal1")), viz_config=viz_config),
         RobotGroup(robots=("sparkal2", "hathor"), dataset_name=DATASET_NAME, dataset_seq=HYBRID_SEQ,
-                   label=SLAMEvaluator.group_label(("sparkal2", "hathor"))),
+                   label=SLAMEvaluator.group_label(("sparkal2", "hathor")), viz_config=viz_config),
         RobotGroup(robots=("acl_jackal", "acl_jackal2"), dataset_name=DATASET_NAME, dataset_seq=OUTDOOR_SEQ,
-                   label=SLAMEvaluator.group_label(("acl_jackal", "acl_jackal2"))),
+                   label=SLAMEvaluator.group_label(("acl_jackal", "acl_jackal2")), viz_config=viz_config),
     ]
 
     for output_name, robot_groups in [("Easy", easy), ("Medium", medium), ("Difficult", difficult)]:
         SLAMEvaluator.run_evaluation(roman_root, Path(DATASET_NAME) / output_name, run_names, robot_groups,
-                                 critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
+                                 critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=10.0)
 
 if __name__ == "__main__":
     main()

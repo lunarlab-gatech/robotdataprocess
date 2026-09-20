@@ -7,6 +7,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
@@ -47,20 +48,21 @@ def main():
         "aerial-07": "#1A46D6",
         "aerial-08": "#E8EF12",
     }
-    viz_config = {
-        "image_path": image_path,
-        "x_edge": x_edge,
-        "robot_name_to_color": robot_name_to_color,
-        "background_image_extent_offsets": (55, 80),
-    }
+    viz_config = RobotGroupViz(
+        name_map=None,
+        robot_name_to_color=robot_name_to_color,
+        image_path=image_path,
+        image_x_edge=x_edge,
+        image_extent_offsets=(55, 80),
+    )
 
-    figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
-    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    robot_groups = SLAMEvaluator.make_robot_groups("graco", dataset_seq, robot_groups)
+    robot_groups = SLAMEvaluator.make_robot_groups("graco", dataset_seq, robot_groups, viz_config)
     SLAMEvaluator.run_evaluation(roman_root, Path("graco") / dataset_seq, run_names, robot_groups,
-                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()

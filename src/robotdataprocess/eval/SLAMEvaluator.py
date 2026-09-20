@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 from robotdataprocess import LoopClosureData, LoopClosureFilterMode, OdometryData, PathData, TableData
 from robotdataprocess.data_types.SLAMData import SLAMData
-from robotdataprocess.eval.RobotGroup import RobotGroup
+from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
 import seaborn as sns
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -113,13 +113,13 @@ class SLAMEvaluator:
 
     @staticmethod
     def make_robot_groups(dataset_name: str, dataset_seq: str,
-                        robot_name_groups: List[Tuple[str, ...]]) -> List[RobotGroup]:
+                        robot_name_groups: List[Tuple[str, ...]], viz_config: RobotGroupViz) -> List[RobotGroup]:
         """
-        Builds ``RobotGroup``\\ s for the common case of one dataset shared by every group, with
-        labels derived from :meth:`group_label`.
+        Builds ``RobotGroup``\\ s for the common case of one dataset (and viz_config) shared by
+        every group, with labels derived from :meth:`group_label`.
         """
         return [RobotGroup(robots=tuple(g), dataset_name=dataset_name, dataset_seq=dataset_seq,
-                        label=SLAMEvaluator.group_label(g))
+                        label=SLAMEvaluator.group_label(g), viz_config=viz_config)
                 for g in robot_name_groups]
 
     # =========================================================================
@@ -374,7 +374,7 @@ class SLAMEvaluator:
     @staticmethod
     def save_merged_ate_figures(slam_data: SLAMData, method: str, label: str,
                                 load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
-                                base_dir: Path, viz_config: Dict) -> None:
+                                base_dir: Path, viz_config: RobotGroupViz) -> None:
         """
         Generate and save the 2D trajectory and LC-overlay PDFs for one run/group -- the
         visualization counterpart of :meth:`calculate_merged_ate`, split out so it can be run
@@ -393,11 +393,7 @@ class SLAMEvaluator:
             base_dir: Directory under which ``traj/`` and ``<LoopClosureFilterMode.name>/traj_lc/``
                 outputs are saved -- the same one :meth:`run_evaluation` uses for this group's
                 other outputs, not derived from ``slam_data``'s own dataset.
-            viz_config: Dict with keys ``"image_path"``, ``"x_edge"``, ``"robot_name_to_color"``
-                (keyed by display name), and optionally ``"name_map"`` (robot name -> display name;
-                defaults to identity) and ``"yaw_rotation_deg"`` (rotates trajectories about the
-                center of their combined bounding box before plotting against the background
-                image; defaults to 0).
+            viz_config: This group's background-image config.
         """
         robot_names = slam_data.robot_names
         est_data_lst: List[OdometryData] = slam_data.estimated_trajectories
@@ -405,12 +401,12 @@ class SLAMEvaluator:
         _, _, est_data_align_list, gt_data_align_list = \
             SLAMEvaluator.align_merged_trajectories(robot_names, est_data_lst, gt_data_lst)
 
-        image_path = viz_config["image_path"]
-        x_edge = viz_config["x_edge"]
-        name_map: Dict = viz_config.get("name_map") or {rn: rn for rn in robot_names}
-        robot_name_to_color: Dict = viz_config["robot_name_to_color"]
-        image_extent_offsets = viz_config.get("background_image_extent_offsets")
-        yaw_rotation_deg = viz_config.get("yaw_rotation_deg", 0.0)
+        image_path = viz_config.image_path
+        x_edge = viz_config.image_x_edge
+        name_map: Dict = viz_config.name_map or {rn: rn for rn in robot_names}
+        robot_name_to_color: Dict = viz_config.robot_name_to_color
+        image_extent_offsets = viz_config.image_extent_offsets
+        yaw_rotation_deg = viz_config.yaw_rotation_deg
 
         base_dir = Path(base_dir)
         traj_dir = base_dir / 'traj'
@@ -1175,13 +1171,14 @@ class SLAMEvaluator:
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
-                        viz_config: Dict,
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
         """
         Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
-        its own dataset, so one call can group results across several datasets/sequences (e.g.
-        the Kimera-Multi paper's per-robot-count groupings). Use :meth:`make_robot_groups` for
-        the common case of one dataset shared by every group.
+        its own dataset and its own background-image ``viz_config``, so one call can group results
+        across several datasets/sequences (e.g. the Kimera-Multi paper's per-robot-count groupings,
+        or several dataset sequences that each need their own background image). Use
+        :meth:`make_robot_groups` for the common case of one dataset (and viz_config) shared by
+        every group.
 
         For each robot group across all run names:
         - Loads its :class:`SLAMData` and computes merged RMS ATE (pre- and post-optimize) in parallel.
@@ -1199,7 +1196,6 @@ class SLAMEvaluator:
             critical_invocation_params: Other data-affecting args from the original run invocation.
             figures_base_dir: Directory under which ``<output_dir>/`` outputs are saved.
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``, dataset-specific.
-            viz_config: Dict forwarded to :meth:`SLAMEvaluator.save_merged_ate_figures` (see its docstring).
             ate_threshold_m: Red-highlight cutoff (m) for every translation-error table.
             rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
 
@@ -1274,6 +1270,7 @@ class SLAMEvaluator:
             results[run_name][col] = result
 
         base_dir = Path(figures_base_dir) / output_dir
+        group_by_label: Dict[str, RobotGroup] = {group.label: group for group in robot_groups}
 
         # Save trajectory/LC-overlay figures sequentially (not via Pool -- unlike ATE
         # computation, this touches matplotlib, which isn't safe to fan out across
@@ -1281,7 +1278,7 @@ class SLAMEvaluator:
         for run_name in run_names:
             for col, slam_data in slam_data_by_run[run_name].items():
                 SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, col, load_gt_data_fn,
-                                                      base_dir, viz_config)
+                                                      base_dir, group_by_label[col].viz_config)
 
         # Define group column names
         cols = [group.label for group in robot_groups]

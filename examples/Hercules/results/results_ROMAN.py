@@ -8,6 +8,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
@@ -49,18 +50,8 @@ def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData
 
     return gt_data_list
 
-def main():
-    """
-    Generate all evaluation figures and tables for the HERCULES dataset.
-
-    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
-    """
-    all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
-    robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"] # "ROMAN_O"
-    dataset_seq = "V2.4.C"
-
-    # Environment image / robot display config
+def make_viz_config(dataset_seq: str) -> RobotGroupViz:
+    """Builds the HERCULES environment image / robot display config for one dataset_seq."""
     user = getpass.getuser()
     image_path = '/media/' + user + '/T73/Hercules_datasets/' + dataset_seq + '/data/environment.png'
     if dataset_seq in "V2.3.AP":  x_edge = 350
@@ -83,20 +74,34 @@ def main():
         "UAV1": "#F0F02A",
         "UAV2": "#1B0ED5",
     }
-    viz_config = {
-        "image_path": image_path,
-        "x_edge": x_edge,
-        "name_map": name_map,
-        "robot_name_to_color": robot_name_to_color,
-    }
+    return RobotGroupViz(
+        name_map=name_map,
+        robot_name_to_color=robot_name_to_color,
+        image_path=image_path,
+        image_x_edge=x_edge,
+        image_extent_offsets=None,
+    )
 
-    figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
-    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+def main():
+    """
+    Generate all evaluation figures and tables for the HERCULES dataset.
+
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
+    """
+    all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_groups = list(itertools.combinations(all_robots, 2))
+    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"] # "ROMAN_O"
+    dataset_seq = "V2.4.C"
+    viz_config = make_viz_config(dataset_seq)
+
+    user = getpass.getuser()
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    robot_groups = SLAMEvaluator.make_robot_groups("hercules", dataset_seq, robot_groups)
+    robot_groups = SLAMEvaluator.make_robot_groups("hercules", dataset_seq, robot_groups, viz_config)
     SLAMEvaluator.run_evaluation(roman_root, Path("hercules") / dataset_seq, run_names, robot_groups,
-                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=20.0)
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
     main()

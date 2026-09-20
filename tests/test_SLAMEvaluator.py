@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from robotdataprocess import CoordinateFrame, OdometryData
 from robotdataprocess.data_types.SLAMData import SLAMData
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from scipy.spatial.transform import Rotation as R
 import shutil
@@ -174,10 +175,10 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
         shutil.rmtree(self.figures_dir, ignore_errors=True)
 
     def test_two_robot_group_saves_expected_figures(self):
-        viz_config = {
-            "image_path": None, "x_edge": None,
-            "robot_name_to_color": {"robotA": "#FFA501", "robotB": "#0014FF"},
-        }
+        viz_config = RobotGroupViz(
+            name_map=None, robot_name_to_color={"robotA": "#FFA501", "robotB": "#0014FF"},
+            image_path=None, image_x_edge=None, image_extent_offsets=None,
+        )
         slam_data = self._build_slam_data(['robotA', 'robotB'])
         SLAMEvaluator.save_merged_ate_figures(
             slam_data, self.METHOD, 'RA-RB', self._load_gt_data_fn, self.figures_dir, viz_config)
@@ -197,10 +198,10 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
     def test_single_robot_group_saves_expected_figures(self):
         # A single-robot group has no inter-robot pairs at all, so load_LC_data only needs an
         # empty intra-robot inlier file here (no inter-robot inlier file, unlike the 2-robot case).
-        viz_config = {
-            "image_path": None, "x_edge": None,
-            "robot_name_to_color": {"robotA": "#FFA501"},
-        }
+        viz_config = RobotGroupViz(
+            name_map=None, robot_name_to_color={"robotA": "#FFA501"},
+            image_path=None, image_x_edge=None, image_extent_offsets=None,
+        )
         slam_data = self._build_slam_data(['robotA'])
         SLAMEvaluator.save_merged_ate_figures(
             slam_data, self.METHOD, 'RA',

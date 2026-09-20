@@ -7,6 +7,7 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 
 NAME_TO_FRAME_MAP: dict = {
@@ -34,6 +35,24 @@ def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData
         gt_data.append(data)
     return gt_data
 
+def make_viz_config() -> RobotGroupViz:
+    """Builds the AirMuseum environment image / robot display config, shared across all its scenarios."""
+    user = getpass.getuser()
+    robot_name_to_color: Dict = {
+        "drone": "#FFA501",
+        "robotA": "#FF0101",
+        "robotB": "#008000",
+        "robotC": "#0014FF",
+    }
+    return RobotGroupViz( # TODO: This is off
+        name_map=None,
+        robot_name_to_color=robot_name_to_color,
+        image_path='/media/' + user + '/T73/AirMuseum_dataset/environment.png',
+        image_x_edge=39,
+        image_extent_offsets=(-12.5, 3),
+        yaw_rotation_deg=280.0,
+    )
+
 def main():
     """
     Generate all evaluation figures and tables for the AirMuseum dataset.
@@ -45,33 +64,16 @@ def main():
     robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O_SM", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
     dataset_seq = "Scenario3"
+    viz_config = make_viz_config()
 
-    # Environment image / robot display config
     user = getpass.getuser()
-    image_path = '/media/' + user + '/T73/AirMuseum_dataset/environment.png'
-    x_edge: float = 39 # TODO: This is off
-
-    robot_name_to_color: Dict = {
-        "drone": "#FFA501",
-        "robotA": "#FF0101",
-        "robotB": "#008000",
-        "robotC": "#0014FF",
-    }
-    viz_config = { # TODO: This is off
-        "image_path": image_path,
-        "x_edge": x_edge,
-        "robot_name_to_color": robot_name_to_color,
-        "background_image_extent_offsets": (-12.5, 3),
-        "yaw_rotation_deg": 280.0,
-    }
-
-    figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
-    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups)
+    robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups, viz_config)
     SLAMEvaluator.run_evaluation(roman_root, Path("airmuseum") / dataset_seq, run_names, robot_groups,
-                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=10.0)
 
 if __name__ == "__main__":
     main()
