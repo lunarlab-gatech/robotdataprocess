@@ -13,7 +13,7 @@ from typing import Callable, Dict, List
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.RobotGroup import RobotGroup
-from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator, FigureOutputLevel
 
 _EXAMPLES_DIR = Path(__file__).parent.parent.parent
 
@@ -63,21 +63,27 @@ class GroupingMode(Enum):
 def _make_groups(dataset_name: str, seqs: List[tuple], mode: GroupingMode) -> List[RobotGroup]:
     """
     Builds one dataset's ``RobotGroup``\\ s from a list of ``(dataset_seq, seq_label, robots,
-    viz_config)`` entries: one all-robots-aligned group per entry under ``GroupingMode.GLOBAL``,
-    or one group per pair under ``GroupingMode.PAIRWISE``. ``seq_label`` is a short display name
-    for ``dataset_seq`` (they may be the same string). Every label starts with
+    viz_config, excluded_pairs)`` entries: one all-robots-aligned group per entry under
+    ``GroupingMode.GLOBAL``, or one group per pair under ``GroupingMode.PAIRWISE`` (skipping any
+    pair listed in ``excluded_pairs``, e.g. pairs with no ground-truth overlap, which would make
+    evaluating them unfair -- each pair is sorted before comparing, so ``excluded_pairs`` entries
+    don't need to match a particular order). ``seq_label`` is a short display name for
+    ``dataset_seq`` (they may be the same string). Every label starts with
     ``"<dataset_name>_<seq_label>"``, with the pair's abbreviation appended under
     ``GroupingMode.PAIRWISE``, since sequences sharing a robot roster would otherwise collide.
     """
     groups = []
-    for dataset_seq, seq_label, robots, viz_config in seqs:
-        base_label = f"{dataset_name}_{seq_label}"
+    for dataset_seq, seq_label, robots, viz_config, excluded_pairs in seqs:
+        base_label = f"{dataset_name}\n{seq_label}"
+        sorted_excluded_pairs = {tuple(sorted(p)) for p in excluded_pairs}
         if mode == GroupingMode.GLOBAL:
             groups.append(RobotGroup(robots=robots, dataset_name=dataset_name, dataset_seq=dataset_seq,
                                       label=base_label, viz_config=viz_config))
         else:
-            for pair in itertools.combinations(robots, 2):
-                label = f"{base_label}_{SLAMEvaluator.group_label(pair)}"
+            for pair in itertools.combinations(sorted(robots), 2):
+                if pair in sorted_excluded_pairs:
+                    continue
+                label = f"{base_label}\n{SLAMEvaluator.group_label(pair)}"
                 groups.append(RobotGroup(robots=pair, dataset_name=dataset_name, dataset_seq=dataset_seq,
                                           label=label, viz_config=viz_config))
     return groups
@@ -86,29 +92,44 @@ def _make_airmuseum_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds AirMuseum's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     viz_config = _airmuseum.make_viz_config()
     robots = ("drone", "robotA", "robotB", "robotC")
-    seqs = [(seq, seq, robots, viz_config) for seq in ["Scenario3", "Scenario4", "Scenario5"]]
+    scenario3_excluded_pairs = [("robotA", "robotC")] # No Overlap
+    scenario4_excluded_pairs = [("drone", "robotA")]  # No Overlap
+    scenario5_excluded_pairs = [] # All overlap
+    seqs = [
+        ("Scenario3", "Scenario3", robots, viz_config, scenario3_excluded_pairs),
+        ("Scenario4", "Scenario4", robots, viz_config, scenario4_excluded_pairs),
+        ("Scenario5", "Scenario5", robots, viz_config, scenario5_excluded_pairs),
+    ]
     return _make_groups("airmuseum", seqs, mode)
 
 def _make_hercules_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds HERCULES's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     robots = ("Husky1", "Husky2", "Drone1", "Drone2")
+    excluded_pairs = [] # All overlap
     seq_names = ["V2.3.AP", "V2.3.AC", "V2.4.C", "V2.4.F"]
     viz_configs = [_hercules.make_viz_config(seq) for seq in seq_names]
-    seqs = [(seq, seq, robots, viz_config) for seq, viz_config in zip(seq_names, viz_configs)]
+    seqs = [(seq, seq, robots, viz_config, excluded_pairs) for seq, viz_config in zip(seq_names, viz_configs)]
     return _make_groups("hercules", seqs, mode)
 
 def _make_kimera_multi_groups(mode: GroupingMode) -> List[RobotGroup]:
     """
     Builds Kimera-Multi's robot groups per sequence: all robots aligned (8 for tunnels/hybrid,
-    6 for outdoor), or every pair (28 pairs for tunnels/hybrid, 15 for outdoor).
+    6 for outdoor), or every pair (28 pairs for tunnels/hybrid, 15 for outdoor), minus pairs with
+    no ground-truth overlap.
     """
     viz_config = _kimera_multi.make_viz_config()
     eight_robots = ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek")
     six_robots = ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth")
+    tunnels_excluded_pairs = [] # All Overlap
+    hybrid_excluded_pairs = [("acl_jackal", "apis"), ("acl_jackal", "sobek")]        # Very little Overlap
+    outdoor_excluded_pairs = [("acl_jackal", "sparkal1"), ("acl_jackal2", "hathor"), # Very little Overlap
+                              ("acl_jackal2", "thoth"),                              # No Overlap
+                              ("sparkal1", "hathor"),                                # Very little Overlap
+                              ("sparkal1", "thoth")]                                 # No Overlap
     seqs = [
-        ("campus_tunnels_1207_compressed", "tunnels", eight_robots, viz_config),
-        ("campus_hybrid_1208_compressed", "hybrid", eight_robots, viz_config),
-        ("campus_outdoor_1014_compressed", "outdoor", six_robots, viz_config),
+        ("campus_tunnels_1207_compressed", "tunnels", eight_robots, viz_config, tunnels_excluded_pairs),
+        ("campus_hybrid_1208_compressed", "hybrid", eight_robots, viz_config, hybrid_excluded_pairs),
+        ("campus_outdoor_1014_compressed", "outdoor", six_robots, viz_config, outdoor_excluded_pairs),
     ]
     return _make_groups("kimera_multi", seqs, mode)
 
@@ -125,7 +146,7 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.PAIRWISE
-    robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
+    robot_groups = _make_airmuseum_groups(mode) #+ _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
@@ -136,7 +157,8 @@ def main():
 
     SLAMEvaluator.run_evaluation(roman_root, Path("all") / mode.name.lower(), run_names, robot_groups,
                              critical_invocation_params, figures_base_dir,
-                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0)
+                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0, 
+                             figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":
     if "--profile" in sys.argv:

@@ -722,6 +722,14 @@ class TestToPdf(unittest.TestCase):
         table.highlight_best_and_worst_results_by_column()
         return table
 
+    def _make_table_with_columns(self, num_data_cols: int, title="Method"):
+        df = pd.DataFrame({f'Col{i}': {'r1': float(i)} for i in range(num_data_cols)})
+        df.attrs["title"] = title
+        table = TableData.from_DataFrame(df)
+        table.format_and_color_cells()
+        table.highlight_best_and_worst_results_by_column()
+        return table
+
     def test_saves_single_table_pdf(self):
         table = self._make_table()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -765,14 +773,40 @@ class TestToPdf(unittest.TestCase):
                 _, kwargs = spy.call_args
                 self.assertEqual(kwargs['figsize'][0], 20.0)
 
-    def test_default_width_is_12_inches(self):
-        table = self._make_table()
+    def test_default_width_scales_with_column_count(self):
+        """
+        Default width is _DEFAULT_WIDTH_PER_COLUMN * (num data columns + 1 for the row-label
+        column). A single-data-column table (2 rendered columns) and a 7-data-column table (8
+        rendered columns, matching the "6 data + Average" case _DEFAULT_WIDTH_PER_COLUMN was
+        calibrated against) exercise both ends -- a wrong +1 offset or wrong ratio would fail one
+        without necessarily failing the other.
+        """
+        one_col_table = self._make_table()
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = Path(tmpdir) / "out.pdf"
             with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
-                TableData.to_pdf([table], str(save_path))
+                TableData.to_pdf([one_col_table], str(save_path))
                 _, kwargs = spy.call_args
-                self.assertEqual(kwargs['figsize'][0], 12.0)
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 2)
+
+        seven_col_table = self._make_table_with_columns(7)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([seven_col_table], str(save_path))
+                _, kwargs = spy.call_args
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 8)
+
+    def test_default_width_uses_widest_table_among_multiple(self):
+        """Passing several tables at once bases the default width on whichever has the most columns."""
+        narrow_table = self._make_table()
+        wide_table = self._make_table_with_columns(7, title="Other")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([narrow_table, wide_table], str(save_path))
+                _, kwargs = spy.call_args
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 8)
 
     def test_font_sizes_forwarded_to_render_onto_ax(self):
         table = self._make_table()

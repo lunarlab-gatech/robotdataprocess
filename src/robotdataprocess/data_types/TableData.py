@@ -20,6 +20,7 @@ class TableData:
     """Tracks tabular data and draws/exports it as a matplotlib table or LaTeX table."""
 
     df: pd.DataFrame # Every cell holds a ``List[TableData.FormattedTextSegment]
+    _DEFAULT_WIDTH_PER_COLUMN = 1.75  # to_pdf's default figure width (inches) per table column
 
     class TextStyle(Enum):
         """Emphasis that can be applied to a ranked cell by ``highlight_best_and_worst_results_by_column``."""
@@ -600,7 +601,13 @@ class TableData:
                   "Reduce font_size/data_font_size or increase figsize.")
 
     @staticmethod
-    def to_pdf(tables: List[TableData], save_path: str, width: float = 12.0, row_height: float = 2.4,
+    def default_width(tables: List[TableData]) -> float:
+        """``_DEFAULT_WIDTH_PER_COLUMN`` times the widest table's rendered column count (``len(df.columns) + 1``, the ``+1`` being the prepended title/row-label column)."""
+        max_cols = max(len(table.df.columns) + 1 for table in tables)
+        return TableData._DEFAULT_WIDTH_PER_COLUMN * max_cols
+
+    @staticmethod
+    def to_pdf(tables: List[TableData], save_path: str, width: Optional[float] = None, row_height: float = 2.4,
         h_pad: float = 1.2, font_size: int = 11, data_font_size: Optional[int] = None,
         heavy_divider_before: Callable[[int], bool] = lambda _: False,
         style: TableData.TableStyleName = TableStyleName.GEORGIA_TECH) -> None:
@@ -613,8 +620,8 @@ class TableData:
                 ``highlight_best_and_worst_results_by_column``/``merge_TableData``), with
                 the table's title in ``df.attrs["title"]``.
             save_path: Output file path (PDF or PNG).
-            width: Figure width in inches. Widen this (or shrink font_size/data_font_size
-                on the individual tables) if render_onto_ax warns about crowded cell text.
+            width: Figure width in inches. Defaults to :meth:`default_width`. Widen further (or shrink
+                font_size/data_font_size) if render_onto_ax still warns about crowded cell text.
             row_height: Figure height per table in inches.
             h_pad: Vertical padding between subplots passed to tight_layout. The outer
                 figure pad is fixed at 0.1 font-size units to minimise top/bottom margins.
@@ -625,6 +632,8 @@ class TableData:
                 trailing summary column). Defaults to no heavy dividers.
             style: Named table style used for header, row, and divider colors.
         """
+        if width is None:
+            width = TableData.default_width(tables)
 
         # Generate a figure with subplots equal to the number of tables
         fig, axes = plt.subplots(len(tables), 1, figsize=(width, row_height * len(tables)))

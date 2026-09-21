@@ -47,7 +47,7 @@ def make_viz_config() -> RobotGroupViz:
         "hathor": "#00FFFF",
         "thoth": "#FF00FF",
         "apis": "#808080",
-        "sobek": "#000000",
+        "sobek": "#FF7700",
     }
     return RobotGroupViz(
         name_map=None,

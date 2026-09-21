@@ -784,7 +784,8 @@ class SLAMEvaluator:
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         with PdfPages(str(save_path)) as pp:
-            fig, axes = plt.subplots(2, 1, figsize=(12, 2.4 * 2))
+            width = TableData.default_width([counts_table, percent_table])
+            fig, axes = plt.subplots(2, 1, figsize=(width, 2.4 * 2))
             for ax in axes:
                 ax.axis('off')
             fig.tight_layout(pad=0.0, h_pad=0.5)
