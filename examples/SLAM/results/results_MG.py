@@ -1,7 +1,9 @@
 import cProfile
 from dataclasses import dataclass
+from enum import Enum
 import getpass
 import importlib.util
+import itertools
 import sys
 from pathlib import Path
 from robotdataprocess import OdometryData
@@ -53,46 +55,77 @@ class _LoadGtDataMG:
         dataset_name = self.dataset_name_by_seq[dataset_seq]
         return _LOAD_GT_DATA_BY_DATASET_NAME[dataset_name](dataset_seq, robot_names)
 
-def _make_airmuseum_groups() -> List[RobotGroup]:
-    """Builds the three AirMuseum all-robots-aligned groups, one per evaluated scenario."""
+class GroupingMode(Enum):
+    """Whether to align all of a sequence's robots together, or evaluate every pair separately."""
+    GLOBAL = 0
+    PAIRWISE = 1
+
+def _make_groups(dataset_name: str, seqs: List[tuple], mode: GroupingMode) -> List[RobotGroup]:
+    """
+    Builds one dataset's ``RobotGroup``\\ s from a list of ``(dataset_seq, seq_label, robots,
+    viz_config)`` entries: one all-robots-aligned group per entry under ``GroupingMode.GLOBAL``,
+    or one group per pair under ``GroupingMode.PAIRWISE``. ``seq_label`` is a short display name
+    for ``dataset_seq`` (they may be the same string). Every label starts with
+    ``"<dataset_name>_<seq_label>"``, with the pair's abbreviation appended under
+    ``GroupingMode.PAIRWISE``, since sequences sharing a robot roster would otherwise collide.
+    """
+    groups = []
+    for dataset_seq, seq_label, robots, viz_config in seqs:
+        base_label = f"{dataset_name}_{seq_label}"
+        if mode == GroupingMode.GLOBAL:
+            groups.append(RobotGroup(robots=robots, dataset_name=dataset_name, dataset_seq=dataset_seq,
+                                      label=base_label, viz_config=viz_config))
+        else:
+            for pair in itertools.combinations(robots, 2):
+                label = f"{base_label}_{SLAMEvaluator.group_label(pair)}"
+                groups.append(RobotGroup(robots=pair, dataset_name=dataset_name, dataset_seq=dataset_seq,
+                                          label=label, viz_config=viz_config))
+    return groups
+
+def _make_airmuseum_groups(mode: GroupingMode) -> List[RobotGroup]:
+    """Builds AirMuseum's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     viz_config = _airmuseum.make_viz_config()
     robots = ("drone", "robotA", "robotB", "robotC")
-    return [RobotGroup(robots=robots, dataset_name="airmuseum", dataset_seq=seq, label=seq, viz_config=viz_config)
-            for seq in ["Scenario3", "Scenario4", "Scenario5"]]
+    seqs = [(seq, seq, robots, viz_config) for seq in ["Scenario3", "Scenario4", "Scenario5"]]
+    return _make_groups("airmuseum", seqs, mode)
 
-def _make_hercules_groups() -> List[RobotGroup]:
-    """Builds the four HERCULES all-robots-aligned groups, one per evaluated scenario."""
+def _make_hercules_groups(mode: GroupingMode) -> List[RobotGroup]:
+    """Builds HERCULES's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     robots = ("Husky1", "Husky2", "Drone1", "Drone2")
-    return [RobotGroup(robots=robots, dataset_name="hercules", dataset_seq=seq, label=seq,
-                        viz_config=_hercules.make_viz_config(seq))
-            for seq in ["V2.3.AP", "V2.3.AC", "V2.4.C", "V2.4.F"]]
+    seq_names = ["V2.3.AP", "V2.3.AC", "V2.4.C", "V2.4.F"]
+    viz_configs = [_hercules.make_viz_config(seq) for seq in seq_names]
+    seqs = [(seq, seq, robots, viz_config) for seq, viz_config in zip(seq_names, viz_configs)]
+    return _make_groups("hercules", seqs, mode)
 
-def _make_kimera_multi_groups() -> List[RobotGroup]:
-    """Builds the three Kimera-Multi all-robots-aligned groups, one per evaluated sequence."""
+def _make_kimera_multi_groups(mode: GroupingMode) -> List[RobotGroup]:
+    """
+    Builds Kimera-Multi's robot groups per sequence: all robots aligned (8 for tunnels/hybrid,
+    6 for outdoor), or every pair (28 pairs for tunnels/hybrid, 15 for outdoor).
+    """
     viz_config = _kimera_multi.make_viz_config()
     eight_robots = ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth", "apis", "sobek")
     six_robots = ("acl_jackal", "acl_jackal2", "sparkal1", "sparkal2", "hathor", "thoth")
-    return [
-        RobotGroup(robots=eight_robots, dataset_name="kimera_multi", dataset_seq="campus_tunnels_1207_compressed",
-                   label="tunnels", viz_config=viz_config),
-        RobotGroup(robots=eight_robots, dataset_name="kimera_multi", dataset_seq="campus_hybrid_1208_compressed",
-                   label="hybrid", viz_config=viz_config),
-        RobotGroup(robots=six_robots, dataset_name="kimera_multi", dataset_seq="campus_outdoor_1014_compressed",
-                   label="outdoor", viz_config=viz_config),
+    seqs = [
+        ("campus_tunnels_1207_compressed", "tunnels", eight_robots, viz_config),
+        ("campus_hybrid_1208_compressed", "hybrid", eight_robots, viz_config),
+        ("campus_outdoor_1014_compressed", "outdoor", six_robots, viz_config),
     ]
+    return _make_groups("kimera_multi", seqs, mode)
 
 def main():
     """
-    Aligns all robots together for each of the ten dataset-sequence scenarios evaluated for this
-    comparison (three AirMuseum, four HERCULES, three Kimera-Multi) in a single run_evaluation
-    call -- unlike each dataset's own results_ROMAN.py, which instead groups only some of a
-    dataset sequence's robots together at a time (e.g. pairwise, or by robot count). Requires
+    Evaluates all ten dataset-sequence scenarios (three AirMuseum, four HERCULES, three
+    Kimera-Multi) in a single run_evaluation call -- unlike each dataset's own
+    results_ROMAN.py, which instead groups only some of a dataset sequence's robots together
+    at a time. Under ``GroupingMode.GLOBAL``, all of a sequence's robots are aligned together;
+    under ``GroupingMode.PAIRWISE``, every robot pair is its own group instead. Requires
     AirMuseum's "ROMAN_O_SM" results directory to be renamed/aliased to "ROMAN_O" beforehand, to
     match HERCULES/Kimera-Multi's run name.
 
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
-    robot_groups = _make_airmuseum_groups() + _make_hercules_groups() + _make_kimera_multi_groups()
+    mode = GroupingMode.PAIRWISE
+    robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
@@ -101,7 +134,7 @@ def main():
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    SLAMEvaluator.run_evaluation(roman_root, Path("AllDatasets"), run_names, robot_groups,
+    SLAMEvaluator.run_evaluation(roman_root, Path("all") / mode.name.lower(), run_names, robot_groups,
                              critical_invocation_params, figures_base_dir,
                              _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0)
 
