@@ -1,3 +1,4 @@
+from enum import Enum
 from evo.core.units import Unit
 import fitz
 import math
@@ -17,6 +18,17 @@ from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
 import seaborn as sns
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+class FigureOutputLevel(Enum):
+    """
+    How many figures/tables an evaluation writes to disk.
+
+    Attributes:
+        EVERY: Write every figure and table.
+        ESSENTIAL: Write only the essential summary figures/tables.
+    """
+
+    EVERY = 0
+    ESSENTIAL = 1
 
 class SLAMEvaluator:
     """
@@ -556,7 +568,8 @@ class SLAMEvaluator:
     def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
                         results: Dict[str, Dict[str, SLAMResult]],
                         lc_filter: LoopClosureFilterMode,
-                        save_path: Path) -> None:
+                        save_path: Path,
+                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
         """
         Build and save the LC summary PDF tables.
 
@@ -566,10 +579,10 @@ class SLAMEvaluator:
         across the pair columns, ignoring suppressed/NaN pairs), set off from the
         pair columns by a heavy divider — matching ``_save_ate_tables``.
 
-        When ``lc_filter`` is ``LoopClosureFilterMode.ALL``, the all-LC success rate and
-        successful/total tables are additionally saved as standalone ``.tex``
-        files (``lc_success_rate_table.tex``, ``lc_successful_total_table.tex``)
-        next to ``save_path``, ready to paste into Overleaf.
+        When ``lc_filter`` is ``LoopClosureFilterMode.ALL`` and ``figure_output_level`` is
+        ``FigureOutputLevel.EVERY``, the all-LC success rate and successful/total tables are
+        additionally saved as standalone ``.tex`` files (``lc_success_rate_table.tex``,
+        ``lc_successful_total_table.tex``) next to ``save_path``, ready to paste into Overleaf.
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -578,6 +591,7 @@ class SLAMEvaluator:
                 read from ``.lc_stats_by_mode``/``.lc_inlier_stats_by_mode`` at ``lc_filter``.
             lc_filter: Which ``LoopClosureFilterMode`` to pull stats for.
             save_path: Destination PDF path.
+            figure_output_level: Whether to also save the ``ALL``-only ``.tex`` tables.
         """
         def make_raw_df(stats_selector, key: str) -> pd.DataFrame:
             return SLAMEvaluator._make_raw_df(run_names, run_display_names, lambda run: results[run].keys(),
@@ -625,7 +639,7 @@ class SLAMEvaluator:
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.GEORGIA_TECH,
                         heavy_divider_before=heavy_divider_before)
 
-        if lc_filter == LoopClosureFilterMode.ALL:
+        if lc_filter == LoopClosureFilterMode.ALL and figure_output_level == FigureOutputLevel.EVERY:
             all_lc_success_rate_table_latex.to_latex(str(save_path.parent / 'lc_success_rate_table.tex'),
                                                 caption="LC Success Rate \%", label="tab:lc_success_rate")
             all_lc_successful_total_table_latex.to_latex(str(save_path.parent / 'lc_successful_total_table.tex'),
@@ -1171,14 +1185,19 @@ class SLAMEvaluator:
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
-                        ate_threshold_m: float, rot_threshold_deg: float = 10.0) -> None:
+                        ate_threshold_m: float, rot_threshold_deg: float = 10.0,
+                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
         """
         Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
         its own dataset and its own background-image ``viz_config``, so one call can group results
         across several datasets/sequences (e.g. the Kimera-Multi paper's per-robot-count groupings,
         or several dataset sequences that each need their own background image). Use
         :meth:`make_robot_groups` for the common case of one dataset (and viz_config) shared by
-        every group.
+        every group. With ``figure_output_level=FigureOutputLevel.ESSENTIAL``, only the grouping-root
+        summary tables and one ``lc_tables.pdf`` per ``LoopClosureFilterMode`` are written, skipping
+        every per-group figure (``traj/``, ``traj_lc/``, ``lc/``, ``lc_success_rate/``,
+        ``lc_with_context/``, ``lc_side_by_side/``, ``lc_sep/``, ``lc_sep_inl/``, ``traj_lc_comb/``,
+        and the ``ALL``-only ``lc_success_rate_table.tex``/``lc_successful_total_table.tex``).
 
         For each robot group across all run names:
         - Loads its :class:`SLAMData` and computes merged RMS ATE (pre- and post-optimize) in parallel.
@@ -1198,6 +1217,7 @@ class SLAMEvaluator:
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``, dataset-specific.
             ate_threshold_m: Red-highlight cutoff (m) for every translation-error table.
             rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
+            figure_output_level: Whether to write every figure/table or only the essential ones.
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
@@ -1275,10 +1295,11 @@ class SLAMEvaluator:
         # Save trajectory/LC-overlay figures sequentially (not via Pool -- unlike ATE
         # computation, this touches matplotlib, which isn't safe to fan out across
         # worker processes with an interactive backend).
-        for run_name in run_names:
-            for col, slam_data in slam_data_by_run[run_name].items():
-                SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, col, load_gt_data_fn,
-                                                      base_dir, group_by_label[col].viz_config)
+        if figure_output_level == FigureOutputLevel.EVERY:
+            for run_name in run_names:
+                for col, slam_data in slam_data_by_run[run_name].items():
+                    SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, col, load_gt_data_fn,
+                                                          base_dir, group_by_label[col].viz_config)
 
         # Define group column names
         cols = [group.label for group in robot_groups]
@@ -1301,10 +1322,11 @@ class SLAMEvaluator:
         # suppression logic in _generate_lc_context_figure across all modes.
         for lc_filter in sorted(LoopClosureFilterMode, key=lambda m: m != LoopClosureFilterMode.ONLY_INTER_LC):
             mode_dir = base_dir / lc_filter.name
-            subdirs = {name: mode_dir / name for name in
-                    ('lc', 'lc_success_rate', 'lc_with_context', 'lc_side_by_side', 'lc_sep', 'lc_sep_inl', 'traj_lc', 'traj_lc_comb')}
-            for subdir in subdirs.values():
-                subdir.mkdir(parents=True, exist_ok=True)
+            if figure_output_level == FigureOutputLevel.EVERY:
+                subdirs = {name: mode_dir / name for name in
+                        ('lc', 'lc_success_rate', 'lc_with_context', 'lc_side_by_side', 'lc_sep', 'lc_sep_inl', 'traj_lc', 'traj_lc_comb')}
+                for subdir in subdirs.values():
+                    subdir.mkdir(parents=True, exist_ok=True)
 
             # For each group...
             for group in robot_groups:
@@ -1325,32 +1347,36 @@ class SLAMEvaluator:
                     labels_list.extend([run_name, run_name + " [Inliers]"])
                     group_indices.extend([i, i])
 
+                is_every = figure_output_level == FigureOutputLevel.EVERY
                 _, stats = LoopClosureData.visualize_error_scatter(
                     lc_data_list, labels_list, group_indices=group_indices,
-                    max_rotation_frac=1.0, max_translation_frac=1.0,
-                    show_plots=False, save_path=str(subdirs['lc'] / f'lc_{group.label}.pdf'))
+                    max_rotation_frac=1.0, max_translation_frac=1.0, show_plots=False,
+                    save_path=str(subdirs['lc'] / f'lc_{group.label}.pdf') if is_every else None)
 
-                fig_sr = LoopClosureData.visualize_success_rate(
-                    lc_data_list[::2], labels_list[::2], show_plots=False,
-                    max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
-                fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{group.label}_success_rate.pdf'))
-                plt.close(fig_sr)
+                if is_every:
+                    fig_sr = LoopClosureData.visualize_success_rate(
+                        lc_data_list[::2], labels_list[::2], show_plots=False,
+                        max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
+                    fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{group.label}_success_rate.pdf'))
+                    plt.close(fig_sr)
 
                 for i, run_name in enumerate(run_names):
                     results[run_name][group.label].lc_stats_by_mode[lc_filter] = stats[2 * i]
                     results[run_name][group.label].lc_inlier_stats_by_mode[lc_filter] = stats[2 * i + 1]
 
-                SLAMEvaluator._save_lc_context_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
-                                            stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
-                SLAMEvaluator._save_lc_side_by_side_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
-                                                run_names, subdirs['lc_side_by_side'])
-                SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
-                                        run_names, run_display_names, subdirs['lc_sep'])
-                SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
-                                        run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
-                SLAMEvaluator._save_traj_lc_comb_figure(group.label, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
+                if is_every:
+                    SLAMEvaluator._save_lc_context_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
+                                                stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
+                    SLAMEvaluator._save_lc_side_by_side_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
+                                                    run_names, subdirs['lc_side_by_side'])
+                    SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
+                                            run_names, run_display_names, subdirs['lc_sep'])
+                    SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
+                                            run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
+                    SLAMEvaluator._save_traj_lc_comb_figure(group.label, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
-            SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
+            SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf',
+                                          figure_output_level)
 
         # ATE table is LC-independent, so it's saved once at the grouping root. Cell suppression
         # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
