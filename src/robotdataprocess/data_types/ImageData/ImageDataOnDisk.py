@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL import Image
 from rosbags.rosbag1 import Reader as Reader1
 from rosbags.typesys import Stores, get_typestore
+import struct
 import tqdm
 from typeguard import typechecked
 from typing import Any, Tuple, Union, List, Callable
@@ -473,11 +474,13 @@ class ImageDataOnDisk(ImageData):
             encoding: ImageData.ImageEncoding = ImageData.ImageEncoding.RGB8
             pairs: List[tuple] = []  # (header_stamp: Decimal, recording_time_ns: int)
 
+            # Header (seq, stamp.sec, stamp.nanosec) is always a message's first 12 bytes, little-endian.
+            header_stamp_struct = struct.Struct('<II')
             num_msgs = conn.msgcount
             pbar = tqdm.tqdm(total=num_msgs, desc="Indexing Images...", unit=" msgs")
             for _, rec_ns, rawdata in reader.messages(connections=conns):
-                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
                 if not pairs:
+                    msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
                     frame_id = msg.header.frame_id
                     if conn.msgtype == ImageData._COMPRESSED_MSGTYPE:
                         first_image, encoding = ImageData._decode_compressed_image_msg(msg)
@@ -486,8 +489,10 @@ class ImageDataOnDisk(ImageData):
                         height = msg.height
                         width = msg.width
                         encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-                stamp = msg.header.stamp
-                h_stamp = Decimal(stamp.sec) + Decimal(stamp.nanosec) * Decimal('1e-9')
+                    sec, nanosec = msg.header.stamp.sec, msg.header.stamp.nanosec
+                else:
+                    sec, nanosec = header_stamp_struct.unpack_from(rawdata, 4)
+                h_stamp = Decimal(sec) + Decimal(nanosec) * Decimal('1e-9')
                 pairs.append((h_stamp, rec_ns))
                 pbar.update(1)
             pbar.close()
