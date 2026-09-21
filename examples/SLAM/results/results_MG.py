@@ -1,3 +1,5 @@
+import cProfile
+from dataclasses import dataclass
 import getpass
 import importlib.util
 import sys
@@ -14,9 +16,14 @@ from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 _EXAMPLES_DIR = Path(__file__).parent.parent.parent
 
 def _load_results_ROMAN_module(name: str, path: Path) -> ModuleType:
-    """Loads one dataset's results_ROMAN.py under a distinct module name, since all three share the filename."""
+    """
+    Loads one dataset's results_ROMAN.py under a distinct module name, since all three share the
+    filename. Registers it in ``sys.modules`` so its top-level functions can be pickled by
+    reference (needed for ``multiprocessing.Pool``), not just held live in this process.
+    """
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -30,12 +37,21 @@ _LOAD_GT_DATA_BY_DATASET_NAME: Dict[str, Callable[[str, List[str]], List[Odometr
     "kimera_multi": _kimera_multi.load_gt_data_ROMAN,
 }
 
-def _make_load_gt_data_MG(dataset_name_by_seq: Dict[str, str]) -> Callable[[str, List[str]], List[OdometryData]]:
-    """Builds the shared load_gt_data_fn, dispatching to the right dataset's loader by dataset_name."""
-    def load_gt_data_MG(dataset_seq: str, robot_names: List[str]) -> List[OdometryData]:
-        dataset_name = dataset_name_by_seq[dataset_seq]
+@dataclass(frozen=True)
+class _LoadGtDataMG:
+    """
+    Picklable ``load_gt_data_fn``, dispatching to the right dataset's loader by dataset_name --
+    a class rather than a closure so ``multiprocessing.Pool.starmap`` in ``run_evaluation`` can
+    pickle it.
+
+    Attributes:
+        dataset_name_by_seq: Maps each dataset_seq being evaluated to its dataset_name.
+    """
+    dataset_name_by_seq: Dict[str, str]
+
+    def __call__(self, dataset_seq: str, robot_names: List[str]) -> List[OdometryData]:
+        dataset_name = self.dataset_name_by_seq[dataset_seq]
         return _LOAD_GT_DATA_BY_DATASET_NAME[dataset_name](dataset_seq, robot_names)
-    return load_gt_data_MG
 
 def _make_airmuseum_groups() -> List[RobotGroup]:
     """Builds the three AirMuseum all-robots-aligned groups, one per evaluated scenario."""
@@ -87,7 +103,14 @@ def main():
 
     SLAMEvaluator.run_evaluation(roman_root, Path("AllDatasets"), run_names, robot_groups,
                              critical_invocation_params, figures_base_dir,
-                             _make_load_gt_data_MG(dataset_name_by_seq), ate_threshold_m=20.0)
+                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0)
 
 if __name__ == "__main__":
-    main()
+    if "--profile" in sys.argv:
+        profiler = cProfile.Profile()
+        profiler.enable()
+        main()
+        profiler.disable()
+        profiler.dump_stats("profile.out")
+    else:
+        main()
