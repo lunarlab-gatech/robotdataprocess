@@ -106,7 +106,7 @@ def _make_hercules_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds HERCULES's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     robots = ("Husky1", "Husky2", "Drone1", "Drone2")
     excluded_pairs = [] # All overlap
-    seq_names = ["V2.3.AP", "V2.3.AC", "V2.4.C", "V2.4.F"]
+    seq_names = ["V2.3.AC", "V2.3.AP", "V2.4.C", "V2.4.F"] 
     viz_configs = [_hercules.make_viz_config(seq) for seq in seq_names]
     seqs = [(seq, seq, robots, viz_config, excluded_pairs) for seq, viz_config in zip(seq_names, viz_configs)]
     return _make_groups("hercules", seqs, mode)
@@ -135,18 +135,33 @@ def _make_kimera_multi_groups(mode: GroupingMode) -> List[RobotGroup]:
 
 def main():
     """
-    Evaluates all ten dataset-sequence scenarios (three AirMuseum, four HERCULES, three
-    Kimera-Multi) in a single run_evaluation call -- unlike each dataset's own
-    results_ROMAN.py, which instead groups only some of a dataset sequence's robots together
-    at a time. Under ``GroupingMode.GLOBAL``, all of a sequence's robots are aligned together;
-    under ``GroupingMode.PAIRWISE``, every robot pair is its own group instead. Requires
-    AirMuseum's "ROMAN_O_SM" results directory to be renamed/aliased to "ROMAN_O" beforehand, to
-    match HERCULES/Kimera-Multi's run name.
+    Evaluates dataset-sequence scenarios across AirMuseum, HERCULES, and Kimera-Multi in a
+    single run_evaluation call -- unlike each dataset's own results_ROMAN.py, which instead
+    groups only some of a dataset sequence's robots together at a time. Under
+    ``GroupingMode.GLOBAL``, all robots of all sequences of all three datasets are aligned
+    together. Under ``GroupingMode.PAIRWISE``, a single dataset and sequence is selected instead,
+    with every robot pair of that sequence its own group. Requires AirMuseum's "ROMAN_O_SM"
+    results directory to be renamed/aliased to "ROMAN_O" beforehand, to match
+    HERCULES/Kimera-Multi's run name.
 
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.PAIRWISE
-    robot_groups = _make_airmuseum_groups(mode) #+ _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
+
+    if mode == GroupingMode.GLOBAL:
+        robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
+        output_dir = Path("all") / mode.name.lower()
+    else:
+        dataset_name = "hercules"
+        dataset_seq = "V2.3.AC"
+        group_fns_by_dataset_name: Dict[str, Callable[[GroupingMode], List[RobotGroup]]] = {
+            "airmuseum": _make_airmuseum_groups,
+            "hercules": _make_hercules_groups,
+            "kimera_multi": _make_kimera_multi_groups,
+        }
+        robot_groups = [g for g in group_fns_by_dataset_name[dataset_name](mode) if g.dataset_seq == dataset_seq]
+        output_dir = Path("all") / mode.name.lower() / dataset_name / dataset_seq
+
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
@@ -155,9 +170,9 @@ def main():
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    SLAMEvaluator.run_evaluation(roman_root, Path("all") / mode.name.lower(), run_names, robot_groups,
+    SLAMEvaluator.run_evaluation(roman_root, output_dir, run_names, robot_groups,
                              critical_invocation_params, figures_base_dir,
-                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0, 
+                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0,
                              figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":
