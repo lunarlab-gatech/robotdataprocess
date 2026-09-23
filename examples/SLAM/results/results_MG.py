@@ -147,20 +147,26 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.PAIRWISE
+    only_heterogeneous = True
+    all_dir_name = "all_heterogeneous" if only_heterogeneous else "all"
 
     if mode == GroupingMode.GLOBAL:
         robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
-        output_dir = Path("all") / mode.name.lower()
+        output_dir = Path(all_dir_name) / mode.name.lower()
     else:
         dataset_name = "hercules"
-        dataset_seq = "V2.3.AC"
+        dataset_seq = "V2.4.F"
         group_fns_by_dataset_name: Dict[str, Callable[[GroupingMode], List[RobotGroup]]] = {
             "airmuseum": _make_airmuseum_groups,
             "hercules": _make_hercules_groups,
             "kimera_multi": _make_kimera_multi_groups,
         }
         robot_groups = [g for g in group_fns_by_dataset_name[dataset_name](mode) if g.dataset_seq == dataset_seq]
-        output_dir = Path("all") / mode.name.lower() / dataset_name / dataset_seq
+        output_dir = Path(all_dir_name) / mode.name.lower() / dataset_name / dataset_seq
+
+    if only_heterogeneous:
+        robot_groups = [g for g in robot_groups if not all("drone" in r.lower() for r in g.robots)
+                                                and any("drone" in r.lower() for r in g.robots)]
 
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 

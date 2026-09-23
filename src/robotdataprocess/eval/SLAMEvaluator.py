@@ -244,14 +244,13 @@ class SLAMEvaluator:
         angle error, post-optimize merged RMS RTE, and post-optimize merged RMS
         relative rotation angle error — styled so that cells with no loop
         closures, or a value above ate_threshold_m (translation tables) / above
-        rot_threshold_deg (rotation tables), are highlighted in red. The
-        pre-optimize table is suppressed for multi-robot groups with zero total
-        inter-robot LC; the post-optimize ATE, rotation error, RTE, and relative
-        rotation error tables for multi-robot groups with zero inlier inter-robot
-        LC (both via ``results[...].lc_stats_by_mode``/``lc_inlier_stats_by_mode``
-        at ``LoopClosureFilterMode.ONLY_INTER_LC``). Single-robot (self-alignment) groups
-        are never suppressed on LC grounds, since they have no inter-robot LC by
-        definition.
+        rot_threshold_deg (rotation tables), are highlighted in red. All five
+        tables are suppressed for multi-robot groups with zero total inter-robot
+        LC (via ``results[...].lc_stats_by_mode`` at
+        ``LoopClosureFilterMode.ONLY_INTER_LC``) -- not on Kimera-RPGO inlier count,
+        since a non-inlier LC can still be used by Kimera-RPGO to align. Single-robot
+        (self-alignment) groups are never suppressed on LC grounds, since they have
+        no inter-robot LC by definition.
 
         Each table gets a trailing "Average" column (the row-wise mean across
         the pair columns, ignoring suppressed/NaN pairs), set off from the pair
@@ -271,7 +270,7 @@ class SLAMEvaluator:
             rot_threshold_deg: Red-highlight cutoff (deg) for the rotation-error tables
                 (absolute and relative).
         """
-        def make_raw_df(metric_fn, lc_stats_selector) -> pd.DataFrame:
+        def make_raw_df(metric_fn) -> pd.DataFrame:
             def value_fn(run, col):
                 result = results[run].get(col)
                 if result is None:
@@ -281,7 +280,7 @@ class SLAMEvaluator:
                 val = metric_fn(result)
                 no_inter_lc = False
                 if col in multi_robot_cols:
-                    lc_stats = lc_stats_selector(result)
+                    lc_stats = result.lc_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC)
                     if lc_stats is None:
                         raise ValueError(
                             f"Missing {LoopClosureFilterMode.ONLY_INTER_LC.name} LC stats for run={run!r}, col={col!r} -- "
@@ -293,9 +292,6 @@ class SLAMEvaluator:
             raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
             return raw_df
 
-        inter_lc = lambda r: r.lc_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC)
-        inter_lc_inlier = lambda r: r.lc_inlier_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC)
-
         color_fn_m = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m)
         color_fn_deg = TableData.color_fn_NAVY_RED_missing_or_above(rot_threshold_deg)
         fmt = TableData.fmt_fixed(3)
@@ -304,23 +300,23 @@ class SLAMEvaluator:
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
         first_stage_ate_table = SLAMEvaluator.make_highlighted_table(
-                    make_raw_df(lambda r: r.first_stage_metrics.APE.translation_part.rmse if r.first_stage_metrics else None, inter_lc),
+                    make_raw_df(lambda r: r.first_stage_metrics.APE.translation_part.rmse if r.first_stage_metrics else None),
                     "Merged RMS ATE (m) — Pre-Optimize",
                     color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
         ate_table = SLAMEvaluator.make_highlighted_table(
-                    make_raw_df(lambda r: r.merged_metrics.APE.translation_part.rmse, inter_lc_inlier),
+                    make_raw_df(lambda r: r.merged_metrics.APE.translation_part.rmse),
                     "Merged RMS ATE (m)",
                     color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
         rot_err_table = SLAMEvaluator.make_highlighted_table(
-                    make_raw_df(lambda r: r.merged_metrics.APE.rotation_angle_deg.rmse, inter_lc_inlier),
+                    make_raw_df(lambda r: r.merged_metrics.APE.rotation_angle_deg.rmse),
                     "Merged RMS Absolute Rotation Error (deg)",
                     color_fn=color_fn_deg, fmt=fmt, higher_is_better=False)
         rte_table = SLAMEvaluator.make_highlighted_table(
-                    make_raw_df(lambda r: r.merged_metrics.RPE.translation_part.rmse, inter_lc_inlier),
+                    make_raw_df(lambda r: r.merged_metrics.RPE.translation_part.rmse),
                     "Merged RMS RTE (m) - Δ5m",
                     color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
         rel_rot_err_table = SLAMEvaluator.make_highlighted_table(
-                    make_raw_df(lambda r: r.merged_metrics.RPE.rotation_angle_deg.rmse, inter_lc_inlier),
+                    make_raw_df(lambda r: r.merged_metrics.RPE.rotation_angle_deg.rmse),
                     "Merged RMS Relative Rotation Error (deg) - Δ5m",
                     color_fn=color_fn_deg, fmt=fmt, higher_is_better=False)
 
@@ -847,10 +843,11 @@ class SLAMEvaluator:
             stats_list: Interleaved per-run LC stats dicts as returned by
                 :meth:`LoopClosureData.visualize_error_scatter` (length
                 ``2 * len(run_names)``).  Even indices are all-LC; odd are inlier-LC.
-            results: ``DatasetSequenceResults`` keyed by run then column; the ATE
-                cell is suppressed where ``results[...].lc_inlier_stats_by_mode``
+            results: ``DatasetSequenceResults`` keyed by run then column; for multi-robot
+                ``group``\\ s, the ATE cell is suppressed where ``results[...].lc_stats_by_mode``
                 at ``LoopClosureFilterMode.ONLY_INTER_LC`` has zero loop closures, matching
-                :meth:`ROMANEvaluator._save_ate_tables`.
+                :meth:`ROMANEvaluator._save_ate_tables`. Single-robot (self-alignment) groups
+                are never suppressed on LC grounds, since they have no inter-robot LC by definition.
             run_names: Ordered list of run identifiers.
             save_dir: Directory in which to save ``lc_context_<col>.pdf``.
             ate_threshold_m: Red-highlight cutoff (m) for the ATE table, matching :meth:`ROMANEvaluator._save_ate_tables`.
@@ -920,8 +917,10 @@ class SLAMEvaluator:
             .append_TableData(make_combined_col(1, COL_CNT_INL), axis=1)
 
         def _ate_suppressed(rn: str) -> bool:
+            if len(group) == 1:
+                return False
             result = results[rn].get(col)
-            lc_stats = result.lc_inlier_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC) if result is not None else None
+            lc_stats = result.lc_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC) if result is not None else None
             return (lc_stats or {}).get('num_loop_closures', -1) == 0
 
         def _ate(rn: str) -> Optional[float]:
