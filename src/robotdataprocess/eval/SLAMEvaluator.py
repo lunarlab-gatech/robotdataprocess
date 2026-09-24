@@ -524,9 +524,9 @@ class SLAMEvaluator:
                             slam_data_by_run: Dict[str, Dict[str, SLAMData]],
                             save_path: Path) -> None:
         """
-        Build and save the estimated communication data size summary PDF table.
+        Build and save the estimated communication data size and objects-sent summary PDF tables.
 
-        Also saves a standalone ``.tex`` version of the table (same path with a
+        Also saves a standalone ``.tex`` version of the data size table (same path with a
         ``.tex`` suffix), ready to paste into Overleaf.
 
         Args:
@@ -536,10 +536,10 @@ class SLAMEvaluator:
             slam_data_by_run: Loaded SLAMData keyed by run then column.
             save_path: Destination PDF path.
         """
-        def make_raw_df() -> pd.DataFrame:
+        def make_raw_df(value_of_slam_data) -> pd.DataFrame:
             def value_fn(run, col):
                 slam_data = slam_data_by_run[run].get(col)
-                v = slam_data.data_size_mb if slam_data is not None else None
+                v = value_of_slam_data(slam_data) if slam_data is not None else None
                 return float('nan') if v is None else v
             raw_df = SLAMEvaluator._make_raw_df(run_names, run_display_names, lambda run: cols, value_fn)
             raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
@@ -547,16 +547,20 @@ class SLAMEvaluator:
 
         style = TableData.TableStyleName.GEORGIA_TECH
         color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
-        fmt = TableData.fmt_fixed(2)
         # The trailing "Average" column is a summary column, not another pair —
         # set it off from the pair columns with a heavy divider.
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
-        data_size_table = SLAMEvaluator.make_highlighted_table(make_raw_df(), "Estimated Communication Data Size (MB)",
-                            color_fn=color_fn, fmt=fmt, higher_is_better=False)
+        data_size_table = SLAMEvaluator.make_highlighted_table(
+            make_raw_df(lambda slam_data: slam_data.data_size_mb), "Estimated Communication Data Size (MB)",
+            color_fn=color_fn, fmt=TableData.fmt_fixed(2), higher_is_better=False)
+        num_objects_sent_table = SLAMEvaluator.make_highlighted_table(
+            make_raw_df(lambda slam_data: slam_data.data_num_objects_sent), "Total Number of Objects Sent",
+            color_fn=color_fn, fmt=TableData.fmt_fixed(0), higher_is_better=False)
+
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        TableData.to_pdf([data_size_table], str(save_path), row_height=2.4, h_pad=0.5, style=style,
-                        heavy_divider_before=heavy_divider_before)
+        TableData.to_pdf([data_size_table, num_objects_sent_table], str(save_path), row_height=2.4, h_pad=0.5,
+                        style=style, heavy_divider_before=heavy_divider_before)
         data_size_table.to_latex(str(save_path.with_suffix('.tex')),
                                 caption="Estimated Communication Data Size (MB)", label="tab:data_size")
 
@@ -1224,7 +1228,8 @@ class SLAMEvaluator:
         - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, one column per
             robot in each group
         - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
-        - ``data_size_table.pdf``, ``data_size_table.tex`` — estimated communication data size (MB) summary table
+        - ``data_size_table.pdf`` — estimated communication data size (MB) and total objects sent
+            summary tables; ``data_size_table.tex`` — standalone LaTeX version of the data size table
         - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
         - ``traj/``              — per-group estimated vs. GT trajectory plots
 

@@ -154,8 +154,8 @@ def main():
         robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
         output_dir = Path(all_dir_name) / mode.name.lower()
     else:
-        dataset_name = "hercules"
-        dataset_seq = "V2.4.F"
+        dataset_name = "airmuseum"
+        dataset_seq = "Scenario5"
         group_fns_by_dataset_name: Dict[str, Callable[[GroupingMode], List[RobotGroup]]] = {
             "airmuseum": _make_airmuseum_groups,
             "hercules": _make_hercules_groups,

@@ -115,7 +115,7 @@ class TestCalculateMergedAte(unittest.TestCase):
         alignment_lc, inlier_lc = SLAMData.load_LC_data(cls.MG_ROOT, system_params, sorted_names, {})
         return SLAMData(system_params, sorted_names, estimated_trajectories, alignment_lc, inlier_lc,
                         timing={"align": {}, "mapping": {}, "offline_rpgo": {}}, data_size_mb=0.0,
-                        pre_opt_est_trajectories=pre_opt_est_trajectories)
+                        data_num_objects_sent=0, pre_opt_est_trajectories=pre_opt_est_trajectories)
 
     def test_two_robot_group_pins_metrics(self):
         # calculate_merged_ate is purely computational -- save_merged_ate_figures is the

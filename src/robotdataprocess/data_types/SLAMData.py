@@ -25,6 +25,8 @@ class SLAMData(Data):
         timing: Runtime breakdown by category, then by the robot identity that produced it
             (see :meth:`load_timing_data`).
         data_size_mb: Estimated communication data size in decimal MB.
+        data_num_objects_sent: Total number of submap objects sent for communication, or ``None`` if
+            not recorded.
         mg_match: MG two-stage matcher stage-count/field stats, or ``None`` for non-MG runs.
     """
 
@@ -36,12 +38,13 @@ class SLAMData(Data):
     inlier_loop_closures: LoopClosureData
     timing: Dict[str, Dict[Any, float]]
     data_size_mb: float
+    data_num_objects_sent: Optional[int]
     mg_match: Optional[Dict]
 
     def __init__(self, system_params: Any, robot_names: List[str],
                 estimated_trajectories: List[OdometryData],
                 alignment_loop_closures: LoopClosureData, inlier_loop_closures: LoopClosureData,
-                timing: Dict[str, Dict[Any, float]], data_size_mb: float,
+                timing: Dict[str, Dict[Any, float]], data_size_mb: float, data_num_objects_sent: Optional[int],
                 pre_opt_est_trajectories: Optional[List[OdometryData]] = None,
                 mg_match: Optional[Dict] = None):
         super().__init__(frame_id='')
@@ -52,6 +55,7 @@ class SLAMData(Data):
         self.inlier_loop_closures = inlier_loop_closures
         self.timing = timing
         self.data_size_mb = data_size_mb
+        self.data_num_objects_sent = data_num_objects_sent
         self.pre_opt_est_trajectories = pre_opt_est_trajectories if pre_opt_est_trajectories is not None else []
         self.mg_match = mg_match
 
@@ -275,15 +279,16 @@ class SLAMData(Data):
 
     @staticmethod
     def load_data_size(mg_root: Path, system_params: Any,
-                            robot_names: List[str], critical_invocation_params: Dict[str, Any]) -> float:
+                            robot_names: List[str], critical_invocation_params: Dict[str, Any]) -> Tuple[float, Optional[int]]:
         """
         Load the total estimated communication data size (decimal MB, 1 MB = 1,000,000 bytes)
-        for a ROMAN run across a group of robots.
+        and total number of submap objects sent for a ROMAN run across a group of robots.
 
-        Sums ``align.data_size.txt`` (a single ``"Total submap data size (bytes): <value>"``
-        line) across every inter-robot combination within the group -- unlike
-        :meth:`load_timing_data`'s pairing, self-pairs are excluded, since a robot doesn't send
-        itself any data.
+        Sums ``align.data_size.txt`` (one ``"Total submap data size (bytes): <value>"`` line and
+        an optional ``"Total number of objects sent: <value>"`` line) across every inter-robot
+        combination within the group -- unlike :meth:`load_timing_data`'s pairing, self-pairs are
+        excluded, since a robot doesn't send itself any data. If any combination's file lacks the
+        optional line, the group's objects-sent total is ``None``.
 
         Args:
             mg_root: Path to the MeronomyGraph repo checkout (with corresponding results).
@@ -292,10 +297,12 @@ class SLAMData(Data):
             critical_invocation_params: Other data-affecting args from the original run invocation.
 
         Returns:
-            The total data size in decimal MB (not MiB).
+            (total data size in decimal MB (not MiB), total number of objects sent or ``None``).
 
         Raises:
             FileNotFoundError: If any combination's data size file is missing.
+            ValueError: If any combination's data size file has an unrecognized line label, or
+                is missing the data size line.
         """
         SLAMData._assert_sorted_robot_names(robot_names)
         results_root = mg_root / "results"
@@ -310,8 +317,34 @@ class SLAMData(Data):
         if missing:
             raise FileNotFoundError(f"Missing data size file: {missing[0]}")
 
-        total_bytes = sum(float(p.read_text().strip().split(':')[-1]) for p in data_size_paths)
-        return total_bytes / 1_000_000
+        total_bytes = 0.0
+        total_num_objects_sent: Optional[int] = 0
+        for path in data_size_paths:
+            # Each file has one "Total submap data size (bytes): <value>" line and an optional
+            # "Total number of objects sent: <value>" line, in either order.
+            bytes_value: Optional[float] = None
+            num_objects_sent_value: Optional[int] = None
+            for line in path.read_text().strip().splitlines():
+                label, value = line.split(':')
+                label = label.strip()
+                value = value.strip()
+                if label == 'Total submap data size (bytes)':
+                    bytes_value = float(value)
+                elif label == 'Total number of objects sent':
+                    num_objects_sent_value = int(value)
+                else:
+                    raise ValueError(f"Unrecognized line label {label!r} in {path}")
+
+            if bytes_value is None:
+                raise ValueError(f"Data size file {path} is missing the data size line")
+
+            total_bytes += bytes_value
+            if num_objects_sent_value is None or total_num_objects_sent is None:
+                total_num_objects_sent = None
+            else:
+                total_num_objects_sent += num_objects_sent_value
+
+        return total_bytes / 1_000_000, total_num_objects_sent
 
     @staticmethod
     def load_mg_match_stats(mg_root: Path, system_params: Any,
@@ -439,11 +472,12 @@ class SLAMData(Data):
         alignment_loop_closures, inlier_loop_closures = cls.load_LC_data(
             mg_root, system_params, sorted_robot_names, critical_invocation_params)
         timing = cls.load_timing_data(mg_root, system_params, sorted_robot_names, critical_invocation_params)
-        data_size_mb = cls.load_data_size(mg_root, system_params, sorted_robot_names, critical_invocation_params)
+        data_size_mb, data_num_objects_sent = cls.load_data_size(
+            mg_root, system_params, sorted_robot_names, critical_invocation_params)
         mg_match = cls.load_mg_match_stats(mg_root, system_params, sorted_robot_names, critical_invocation_params)
 
         return cls(system_params, sorted_robot_names, estimated_trajectories,
-                   alignment_loop_closures, inlier_loop_closures, timing, data_size_mb,
+                   alignment_loop_closures, inlier_loop_closures, timing, data_size_mb, data_num_objects_sent,
                    pre_opt_est_trajectories=pre_opt_est_trajectories, mg_match=mg_match)
 
     # =========================================================================
