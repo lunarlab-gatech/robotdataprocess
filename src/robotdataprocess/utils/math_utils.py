@@ -6,9 +6,11 @@ from scipy.spatial.transform import Slerp
 from typing import Sequence, Union
 
 
-def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> int:
+def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]],
+                   t: Union[float, np.ndarray, Sequence[float]]) -> Union[int, np.ndarray]:
     """
-    Index of the entry in a sorted timestamp array closest to a query time.
+    Index (or indices) of the entry/entries in a sorted timestamp array closest to
+    query time(s).
 
     Snaps a time onto an existing sample grid -- e.g. anchoring a loop closure's
     timestamp onto the pose-graph vertices it must reference. A query outside the
@@ -17,10 +19,11 @@ def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> in
 
     Args:
         sorted_ts: (N,) timestamps, sorted ascending.
-        t: Query timestamp.
+        t: A single query timestamp, or an (M,) array of query timestamps.
 
     Returns:
-        Index into sorted_ts of the closest timestamp.
+        A python int for a scalar t, or an (M,) int array for an array t -- the
+        index/indices into sorted_ts of the closest timestamp(s).
 
     Raises:
         ValueError: If sorted_ts is empty.
@@ -29,12 +32,15 @@ def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> in
     if ts.size == 0:
         raise ValueError("sorted_ts must not be empty.")
 
-    k = int(np.searchsorted(ts, t, side='left'))
-    if k == 0:
-        return 0
-    if k >= ts.size:
-        return ts.size - 1
-    return k if abs(ts[k] - t) < abs(ts[k - 1] - t) else k - 1
+    is_scalar = np.ndim(t) == 0
+    queries = np.atleast_1d(np.asarray(t, dtype=np.float64))
+
+    right_idx = np.clip(np.searchsorted(ts, queries, side='left'), 0, ts.size - 1)
+    left_idx = np.clip(right_idx - 1, 0, ts.size - 1)
+    use_right = np.abs(ts[right_idx] - queries) < np.abs(ts[left_idx] - queries)
+    indices = np.where(use_right, right_idx, left_idx)
+
+    return int(indices[0]) if is_scalar else indices
 
 
 def interpolate_poses(ts: np.ndarray, pos: np.ndarray,

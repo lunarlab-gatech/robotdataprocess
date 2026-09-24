@@ -123,6 +123,21 @@ class SequentialData(Data):
     # ============================ Data Analysis ==============================
     # =========================================================================
 
+    def get_rate_hz(self) -> float:
+        """
+        Computes this sequential data's average rate, from its first to last timestamp.
+
+        Returns:
+            The average rate, in Hz.
+
+        Raises:
+            ValueError: If there are fewer than 2 data samples.
+        """
+        if self.len() < 2:
+            raise ValueError(f"Not enough data samples to compute rate.")
+        duration = float(self.timestamps[-1] - self.timestamps[0])
+        return (self.len() - 1) / duration
+
     def compute_hertz_stats(self, trim_outliers: bool = True) -> tuple[List, List, int]:
         """
         Compute hertz statistics from timestamps.
