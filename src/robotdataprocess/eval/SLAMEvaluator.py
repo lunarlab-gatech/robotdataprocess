@@ -124,6 +124,11 @@ class SLAMEvaluator:
         return '-'.join(abbrev(n) for n in names)
 
     @staticmethod
+    def label_to_filename(label: str) -> str:
+        """Converts a group label (which may contain display newlines) into a filename-safe string."""
+        return label.replace('\n', '_')
+
+    @staticmethod
     def make_robot_groups(dataset_name: str, dataset_seq: str,
                         robot_name_groups: List[Tuple[str, ...]], viz_config: RobotGroupViz) -> List[RobotGroup]:
         """
@@ -419,6 +424,7 @@ class SLAMEvaluator:
         base_dir = Path(base_dir)
         traj_dir = base_dir / 'traj'
         traj_dir.mkdir(parents=True, exist_ok=True)
+        file_label: str = SLAMEvaluator.label_to_filename(label)
 
         # Plot the results in 2D (Configuration for Figure 10) — LC-independent, saved once
         dataList  = [d for est, gt in zip(est_data_align_list, gt_data_align_list) for d in (est, gt)]
@@ -429,7 +435,7 @@ class SLAMEvaluator:
                         background_image_path=image_path, background_image_x_edge=x_edge,
                         background_image_extent_offsets=image_extent_offsets,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{label}_{method}.pdf'))
+                        save_path=str(traj_dir / f'traj_{file_label}_{method}.pdf'))
 
         # Plot only GT in 2D
         dataList  = gt_data_align_list
@@ -441,7 +447,7 @@ class SLAMEvaluator:
                         background_image_extent_offsets=image_extent_offsets,
                         gt_color_lightness_range_val=8,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{label}_{method}_onlyGT.pdf'))
+                        save_path=str(traj_dir / f'traj_{file_label}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
         gt_dict_display = {name_map[rn]: gt for rn, gt in zip(robot_names, gt_data_lst)}
@@ -461,7 +467,7 @@ class SLAMEvaluator:
             PathData.visualize_2D(est_dataList, est_isGTList, est_colorList, est_nameList, no_background=True, line_width=1.0, show_grid=True,
                             loop_closure_data=lc_data_inlier, lc_line_width=2.0, lc_errors_vmax=2.0,
                             title=f"{method} LC overlaid on trajectory",
-                            save_path=str(traj_lc_dir / f'traj_lc_{label}_{method}.pdf'))
+                            save_path=str(traj_lc_dir / f'traj_lc_{file_label}_{method}.pdf'))
 
     @staticmethod
     def _save_timing_table(run_names: List[str], cols: List[str],
@@ -968,7 +974,7 @@ class SLAMEvaluator:
         table_ate.render_onto_ax(fig, ax_ate, tbl_bbox=_bbox_ate, font_size=16, data_font_size=20)
 
         save_dir.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_dir / f'lc_context_{col}.pdf'), bbox_inches='tight')
+        fig.savefig(str(save_dir / f'lc_context_{SLAMEvaluator.label_to_filename(col)}.pdf'), bbox_inches='tight')
         plt.close(fig)
 
     @staticmethod
@@ -1047,7 +1053,7 @@ class SLAMEvaluator:
                 fontsize=40, fontweight='bold', va='top', color=TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).HeaderColor)
 
         save_dir.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(save_dir / f'lc_side_by_side_{col}.pdf'), bbox_inches='tight')
+        fig.savefig(str(save_dir / f'lc_side_by_side_{SLAMEvaluator.label_to_filename(col)}.pdf'), bbox_inches='tight')
         plt.close(fig)
 
     @staticmethod
@@ -1130,7 +1136,8 @@ class SLAMEvaluator:
                 fontsize=40, fontweight='bold', va='top', color=TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).HeaderColor)
 
         save_dir.mkdir(parents=True, exist_ok=True)
-        filename = f'lc_sep_inl_{col}.pdf' if inliers_only else f'lc_sep_{col}.pdf'
+        file_col: str = SLAMEvaluator.label_to_filename(col)
+        filename = f'lc_sep_inl_{file_col}.pdf' if inliers_only else f'lc_sep_{file_col}.pdf'
         fig.savefig(str(save_dir / filename), bbox_inches='tight')
         plt.close(fig)
 
@@ -1162,7 +1169,7 @@ class SLAMEvaluator:
         slide_page = slide_doc.new_page(width=slide_width, height=slide_height)
 
         for i, run_name in enumerate(run_names):
-            src_doc = fitz.open(str(traj_lc_dir / f'traj_lc_{col}_{run_name}.pdf'))
+            src_doc = fitz.open(str(traj_lc_dir / f'traj_lc_{SLAMEvaluator.label_to_filename(col)}_{run_name}.pdf'))
             src_rect = src_doc[0].rect
 
             row, grid_col = divmod(i, ncols)
@@ -1176,7 +1183,7 @@ class SLAMEvaluator:
             src_doc.close()
 
         save_dir.mkdir(parents=True, exist_ok=True)
-        slide_doc.save(str(save_dir / f'traj_lc_comb_{col}.pdf'))
+        slide_doc.save(str(save_dir / f'traj_lc_comb_{SLAMEvaluator.label_to_filename(col)}.pdf'))
         slide_doc.close()
 
     # =========================================================================
@@ -1356,13 +1363,13 @@ class SLAMEvaluator:
                 _, stats = LoopClosureData.visualize_error_scatter(
                     lc_data_list, labels_list, group_indices=group_indices,
                     max_rotation_frac=1.0, max_translation_frac=1.0, show_plots=False,
-                    save_path=str(subdirs['lc'] / f'lc_{group.label}.pdf') if is_every else None)
+                    save_path=str(subdirs['lc'] / f'lc_{SLAMEvaluator.label_to_filename(group.label)}.pdf') if is_every else None)
 
                 if is_every:
                     fig_sr = LoopClosureData.visualize_success_rate(
                         lc_data_list[::2], labels_list[::2], show_plots=False,
                         max_translation_frac=0.01, max_rotation_frac=0.035, include_rate_plots=False)
-                    fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{group.label}_success_rate.pdf'))
+                    fig_sr.savefig(str(subdirs['lc_success_rate'] / f'lc_{SLAMEvaluator.label_to_filename(group.label)}_success_rate.pdf'))
                     plt.close(fig_sr)
 
                 for i, run_name in enumerate(run_names):
