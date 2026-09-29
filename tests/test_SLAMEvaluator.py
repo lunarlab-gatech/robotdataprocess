@@ -1,17 +1,20 @@
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 from pathlib import Path
-from robotdataprocess import CoordinateFrame, OdometryData
+from robotdataprocess import CoordinateFrame, OdometryData, PathData
 from robotdataprocess.data_types.SLAMData import SLAMData
 from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
 from scipy.spatial.transform import Rotation as R
 import shutil
 import tempfile
 from typing import List
 import unittest
+import unittest.mock
 
 
 class _FakeOfflineRPGOParams:
@@ -138,6 +141,24 @@ class TestCalculateMergedAte(unittest.TestCase):
         self.assertAlmostEqual(result.robot_metrics[1].APE.translation_part.rmse, 0.014142135626144931, places=8)
         self.assertAlmostEqual(result.robot_metrics[1].APE.rotation_angle_deg.rmse, 2.4494692640072846, places=6)
 
+        # Aligned trajectories are stored per robot, in robot name order, with est/GT time-matched
+        self.assertEqual(len(result.est_align_list), 2)
+        self.assertEqual(len(result.gt_align_list), 2)
+        for est, gt in zip(result.est_align_list, result.gt_align_list):
+            np.testing.assert_array_equal(est.timestamps.astype(float), gt.timestamps.astype(float))
+
+        # GT is the noise-free fixture curve (x = t, y = +/-0.02 sin t about 0 or 5), robotA then robotB
+        gt_y_A = [0.0, 0.016829, 0.018186, 0.002822, -0.015136]
+        np.testing.assert_allclose(result.gt_align_list[0].positions[:, 0].astype(float), [0, 1, 2, 3, 4], atol=1e-6)
+        np.testing.assert_allclose(result.gt_align_list[0].positions[:, 1].astype(float), gt_y_A, atol=1e-6)
+        np.testing.assert_allclose(result.gt_align_list[1].positions[:, 1].astype(float), [5.0 - y for y in gt_y_A], atol=1e-6)
+
+        # Estimates are aligned: the unaligned 1.01x drift ([0, 1.01, ...]) shifted by -0.02 in x, unlike GT or raw
+        aligned_x = [-0.02, 0.99, 2.0, 3.01, 4.02]
+        np.testing.assert_allclose(result.est_align_list[0].positions[:, 0].astype(float), aligned_x, atol=1e-6)
+        np.testing.assert_allclose(result.est_align_list[1].positions[:, 0].astype(float), aligned_x, atol=1e-6)
+        np.testing.assert_allclose(result.est_align_list[1].positions[:, 1].astype(float), [5.0 - y for y in gt_y_A], atol=1e-6)
+
     def test_single_robot_self_alignment_with_missing_first_stage_file(self):
         def load_gt_data_fn_single(dataset_seq, robot_names):
             return [self._make_gt_odometry(0.0, 0.0, 0.02, 1.0)]
@@ -180,12 +201,13 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
             image_path=None, image_x_edge=None, image_extent_offsets=None,
         )
         slam_data = self._build_slam_data(['robotA', 'robotB'])
+        result = SLAMEvaluator.calculate_merged_ate(slam_data, self._load_gt_data_fn, rpe_delta=1.0)
         SLAMEvaluator.save_merged_ate_figures(
-            slam_data, self.METHOD, 'RA-RB', self._load_gt_data_fn, self.figures_dir, viz_config)
+            slam_data, result, self.METHOD, 'RA-RB', self._load_gt_data_fn, self.figures_dir, viz_config)
 
         expected_files = [
-            'traj/traj_RA-RB_ROMAN.pdf',
-            'traj/traj_RA-RB_ROMAN_onlyGT.pdf',
+            'traj/est_and_gt/individual_methods/traj_RA-RB_ROMAN.pdf',
+            'traj/gt/traj_RA-RB_ROMAN_onlyGT.pdf',
             'ALL/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
             'ONLY_INTER_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
             'ONLY_INTRA_LC/traj_lc/traj_lc_RA-RB_ROMAN.pdf',
@@ -203,19 +225,93 @@ class TestVisualizeMergedAte(TestCalculateMergedAte):
             image_path=None, image_x_edge=None, image_extent_offsets=None,
         )
         slam_data = self._build_slam_data(['robotA'])
+        load_gt_data_fn_single = lambda dataset_seq, robot_names: [self._make_gt_odometry(0.0, 0.0, 0.02, 1.0)]
+        result = SLAMEvaluator.calculate_merged_ate(slam_data, load_gt_data_fn_single, rpe_delta=1.0)
         SLAMEvaluator.save_merged_ate_figures(
-            slam_data, self.METHOD, 'RA',
-            lambda dataset_seq, robot_names: [self._make_gt_odometry(0.0, 0.0, 0.02, 1.0)],
-            self.figures_dir, viz_config)
+            slam_data, result, self.METHOD, 'RA', load_gt_data_fn_single, self.figures_dir, viz_config)
 
         expected_files = [
-            'traj/traj_RA_ROMAN.pdf',
-            'traj/traj_RA_ROMAN_onlyGT.pdf',
+            'traj/est_and_gt/individual_methods/traj_RA_ROMAN.pdf',
+            'traj/gt/traj_RA_ROMAN_onlyGT.pdf',
         ]
         for rel_path in expected_files:
             path = self.figures_dir / rel_path
             self.assertTrue(path.is_file(), f"Expected figure not saved: {path}")
             self.assertGreater(path.stat().st_size, 0, f"Figure saved but empty: {path}")
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveAllMethodsTrajFigure(unittest.TestCase):
+    """Tests SLAMEvaluator._save_all_methods_traj_figure by keeping its figure open (``plt.close``
+    patched out) and inspecting the drawn lines and legend directly."""
+
+    # Drawn colors are the input hue at visualize_2D's lightness 9/19 (est) or 3/19 (GT)
+    RED_EST = (18 / 19, 0.0, 0.0)
+    BLUE_EST = (0.0, 0.0, 18 / 19)
+    GT_GRAY = (3 / 19, 3 / 19, 3 / 19)
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp())
+        self.viz_config = RobotGroupViz(name_map=None, robot_name_to_color={}, image_path=None,
+                                        image_x_edge=None, image_extent_offsets=None)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _make_path(y: float, num_poses: int = 2) -> PathData:
+        """Straight line along x at height y, so each trajectory is identifiable by its y value."""
+        return PathData('map', np.arange(num_poses, dtype=float).astype(object),
+                        np.array([[float(x), y, 0.0] for x in range(num_poses)], dtype=object),
+                        np.array([[0, 0, 0, 1]] * num_poses, dtype=object), CoordinateFrame.NONE)
+
+    def _make_result(self, ys: List[float]) -> SLAMResult:
+        # Stored gt_align_list is 2 poses long, unlike the 3-pose full GT, to tell them apart
+        return SLAMResult(None, None, [], [self._make_path(y) for y in ys], [self._make_path(-9.0) for _ in ys])
+
+    def _save_and_get_figure(self, run_names, results_by_run, gt_data_lst, run_to_color, run_display_names, save_dir):
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.plt.close') as mock_close:
+            SLAMEvaluator._save_all_methods_traj_figure(run_names, results_by_run, gt_data_lst, 'G\nRA-RB',
+                                        self.viz_config, run_to_color, run_display_names, save_dir)
+        fig = mock_close.call_args[0][0]
+        self.addCleanup(plt.close, fig)
+        return fig.axes[0]
+
+    def test_two_runs_two_robots(self):
+        # RUN_C is in results_by_run but not run_names, so must not be drawn
+        results_by_run = {'RUN_A': self._make_result([0.0, 1.0]), 'RUN_B': self._make_result([2.0, 3.0]),
+                          'RUN_C': self._make_result([7.0, 8.0])}
+        gt_data_lst = [self._make_path(-1.0, 3), self._make_path(-2.0, 3)]
+        save_dir = self.tmp_dir / 'not_yet_created'
+        ax = self._save_and_get_figure(['RUN_A', 'RUN_B'], results_by_run, gt_data_lst,
+                                       {'RUN_A': '#FF0000', 'RUN_B': '#0000FF', 'RUN_C': '#00FF00'},
+                                       {'RUN_A': 'Run A Display'}, save_dir)
+
+        # Saved into a freshly created directory under the sanitized label
+        saved = save_dir / "traj_G_RA-RB.pdf"
+        self.assertTrue(saved.is_file(), f"Expected figure not saved: {saved}")
+        self.assertGreater(saved.stat().st_size, 0)
+
+        # One legend entry per run (display name, falling back to run name), then GT
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["Run A Display", "RUN_B", "GT"])
+
+        # Each drawn line, in order: (y value, color, dotted, num points)
+        lines = ax.get_lines()
+        self.assertEqual(len(lines), 6)
+        expected = [(0.0, self.RED_EST, False, 2), (1.0, self.RED_EST, False, 2),
+                    (2.0, self.BLUE_EST, False, 2), (3.0, self.BLUE_EST, False, 2),
+                    (-1.0, self.GT_GRAY, True, 3), (-2.0, self.GT_GRAY, True, 3)]
+        for line, (y, color, dotted, num_points) in zip(lines, expected):
+            ydata = np.asarray(line.get_ydata(), dtype=float)
+            np.testing.assert_allclose(ydata, [y] * num_points)
+            np.testing.assert_allclose(line.get_color(), color, atol=1e-9)
+            self.assertEqual(line.get_linestyle() == ':', dotted)
+
+    def test_single_run_single_robot(self):
+        ax = self._save_and_get_figure(['X'], {'X': self._make_result([4.0])}, [self._make_path(-1.0, 3)],
+                                       {'X': '#FF0000'}, {}, self.tmp_dir)
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["X", "GT"])
+        self.assertEqual(len(ax.get_lines()), 2)
 
 
 if __name__ == '__main__':

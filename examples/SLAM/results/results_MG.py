@@ -147,15 +147,15 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.PAIRWISE
-    only_heterogeneous = True
+    only_heterogeneous = False
     all_dir_name = "all_heterogeneous" if only_heterogeneous else "all"
 
     if mode == GroupingMode.GLOBAL:
         robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
         output_dir = Path(all_dir_name) / mode.name.lower()
     else:
-        dataset_name = "airmuseum"
-        dataset_seq = "Scenario5"
+        dataset_name = "hercules"
+        dataset_seq = "V2.3.AP"
         group_fns_by_dataset_name: Dict[str, Callable[[GroupingMode], List[RobotGroup]]] = {
             "airmuseum": _make_airmuseum_groups,
             "hercules": _make_hercules_groups,
@@ -171,6 +171,7 @@ def main():
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
+    run_to_color = {"ROMAN_O": "#FF7F0E", "MG_TS_SM": "#1F77B4", "MG_SM": "#2CA02C"}
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
@@ -179,7 +180,7 @@ def main():
     SLAMEvaluator.run_evaluation(roman_root, output_dir, run_names, robot_groups,
                              critical_invocation_params, figures_base_dir,
                              _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0,
-                             figure_output_level=FigureOutputLevel.ESSENTIAL)
+                             figure_output_level=FigureOutputLevel.ESSENTIAL, run_to_color=run_to_color)
 
 if __name__ == "__main__":
     if "--profile" in sys.argv:
