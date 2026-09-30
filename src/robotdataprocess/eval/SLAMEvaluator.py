@@ -3,6 +3,7 @@ from evo.core.units import Unit
 import fitz
 import math
 import matplotlib
+import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -148,8 +149,7 @@ class SLAMEvaluator:
         """
         Merges and rigidly aligns per-robot estimated/ground-truth trajectories for a group of
         any size (including a single robot, i.e. self-alignment), without computing any error
-        metrics. Shared by :meth:`calculate_merged_ate`, which computes metrics on top of this,
-        and :meth:`save_merged_ate_figures`, which only needs the aligned trajectories to plot.
+        metrics. Used by :meth:`calculate_merged_ate`, which computes metrics on top of this.
 
         Args:
             robot_names: Robot names in this group, in the same order as
@@ -231,7 +231,7 @@ class SLAMEvaluator:
             for gt_align, est_align in zip(gt_data_align_list, est_data_align_list)
         ]
         
-        return SLAMResult(first_stage_metrics, metrics_dictionary, robot_metrics)
+        return SLAMResult(first_stage_metrics, metrics_dictionary, robot_metrics, est_data_align_list, gt_data_align_list)
 
     # =========================================================================
     # ========================== Table Generation =============================
@@ -270,8 +270,7 @@ class SLAMEvaluator:
             results: ``DatasetSequenceResults`` keyed by run then column.
             save_path: Destination PDF path.
             ate_threshold_m: Red-highlight cutoff (m) for the translation-error tables
-                (ATE pre/post-optimize, RTE). Dataset-specific (e.g. smaller for a
-                smaller-area dataset like AirMuseum than for Hercules).
+                (ATE pre/post-optimize, RTE).
             rot_threshold_deg: Red-highlight cutoff (deg) for the rotation-error tables
                 (absolute and relative).
         """
@@ -331,7 +330,7 @@ class SLAMEvaluator:
 
         color_fn_latex = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m, style=TableData.TableStyleName.LATEX)
         ate_table.format_and_color_cells(color_fn=color_fn_latex, fmt=fmt)
-        ate_table.highlight_best_and_worst_results_by_column(higher_is_better=False, rank_styles=[TableData.TextStyle.BOLD])
+        ate_table.highlight_best_and_worst_results_by_column(higher_is_better=False)
         ate_table.set_title("Method")
         ate_table.to_latex(str(save_path.parent / f"{save_path.stem}_ate.tex"),
             caption="RMS ATE (m).",
@@ -385,34 +384,30 @@ class SLAMEvaluator:
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, font_size=8, data_font_size=10)
 
     @staticmethod
-    def save_merged_ate_figures(slam_data: SLAMData, method: str, label: str,
+    def save_merged_ate_figures(slam_data: SLAMData, result: SLAMResult, method: str, label: str,
                                 load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                                 base_dir: Path, viz_config: RobotGroupViz) -> None:
         """
         Generate and save the 2D trajectory and LC-overlay PDFs for one run/group -- the
-        visualization counterpart of :meth:`calculate_merged_ate`, split out so it can be run
-        independently of ATE computation (e.g. sequentially, outside the parallel ``Pool`` used
-        for metrics in :meth:`run_evaluation`).
-
-        Aligns the trajectories the same way :meth:`calculate_merged_ate` does (via
-        :meth:`align_merged_trajectories`), but computes no error metrics.
+        visualization counterpart of :meth:`calculate_merged_ate`, plotting the aligned
+        trajectories it stored on ``result`` so the figures match the reported metrics.
 
         Args:
             slam_data: The loaded data for this run/robot group.
+            result: This run/group's :meth:`calculate_merged_ate` output, holding the aligned trajectories.
             method: Run name, used for figure/file naming only.
             label: This group's column/figure-filename label (``RobotGroup.label``).
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``,
-                dataset-specific.
+                dataset-specific. Its full (uncropped) GT is used for the LC error overlay.
             base_dir: Directory under which ``traj/`` and ``<LoopClosureFilterMode.name>/traj_lc/``
                 outputs are saved -- the same one :meth:`run_evaluation` uses for this group's
                 other outputs, not derived from ``slam_data``'s own dataset.
             viz_config: This group's background-image config.
         """
         robot_names = slam_data.robot_names
-        est_data_lst: List[OdometryData] = slam_data.estimated_trajectories
         gt_data_lst: List[OdometryData] = load_gt_data_fn(slam_data.system_params.dataset_version, robot_names)
-        _, _, est_data_align_list, gt_data_align_list = \
-            SLAMEvaluator.align_merged_trajectories(robot_names, est_data_lst, gt_data_lst)
+        est_data_align_list: List[PathData] = result.est_align_list
+        gt_data_align_list: List[PathData] = result.gt_align_list
 
         image_path = viz_config.image_path
         x_edge = viz_config.image_x_edge
@@ -422,8 +417,10 @@ class SLAMEvaluator:
         yaw_rotation_deg = viz_config.yaw_rotation_deg
 
         base_dir = Path(base_dir)
-        traj_dir = base_dir / 'traj'
-        traj_dir.mkdir(parents=True, exist_ok=True)
+        est_and_gt_dir = base_dir / 'traj' / 'est_and_gt' / 'individual_methods'
+        gt_dir = base_dir / 'traj' / 'gt'
+        est_and_gt_dir.mkdir(parents=True, exist_ok=True)
+        gt_dir.mkdir(parents=True, exist_ok=True)
         file_label: str = SLAMEvaluator.label_to_filename(label)
 
         # Plot the results in 2D (Configuration for Figure 10) — LC-independent, saved once
@@ -435,9 +432,10 @@ class SLAMEvaluator:
                         background_image_path=image_path, background_image_x_edge=x_edge,
                         background_image_extent_offsets=image_extent_offsets,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{file_label}_{method}.pdf'))
+                        save_path=str(est_and_gt_dir / f'traj_{file_label}_{method}.pdf'))
 
         # Plot only GT in 2D
+        # TODO: Save once per group from the full GT, since this only differs per method in its cropping
         dataList  = gt_data_align_list
         isGTList  = [True] * len(robot_names)
         nameList  = [name_map[rn] for rn in robot_names]
@@ -447,7 +445,7 @@ class SLAMEvaluator:
                         background_image_extent_offsets=image_extent_offsets,
                         gt_color_lightness_range_val=8,
                         yaw_rotation_deg=yaw_rotation_deg,
-                        save_path=str(traj_dir / f'traj_{file_label}_{method}_onlyGT.pdf'))
+                        save_path=str(gt_dir / f'traj_{file_label}_{method}_onlyGT.pdf'))
 
         # Plot estimated trajectories with LC overlay (no background, no GT), once per LC filter mode.
         gt_dict_display = {name_map[rn]: gt for rn, gt in zip(robot_names, gt_data_lst)}
@@ -468,6 +466,67 @@ class SLAMEvaluator:
                             loop_closure_data=lc_data_inlier, lc_line_width=2.0, lc_errors_vmax=2.0,
                             title=f"{method} LC overlaid on trajectory",
                             save_path=str(traj_lc_dir / f'traj_lc_{file_label}_{method}.pdf'))
+
+    @staticmethod
+    def _save_all_methods_traj_figure(run_names: List[str], results_by_run: Dict[str, SLAMResult],
+                                      gt_data_lst: List[OdometryData], label: str, viz_config: RobotGroupViz,
+                                      run_to_color: Dict[str, str], run_display_names: Dict[str, str],
+                                      save_dir: Path) -> None:
+        """
+        Save one 2D figure overlaying every method's aligned estimated trajectories for one group on
+        top of the full GT, with each method's robots all drawn in that method's color, GT in black,
+        and one legend entry per method plus one for GT.
+
+        Args:
+            run_names: Ordered list of run identifiers to overlay.
+            results_by_run: This group's :class:`SLAMResult` for each run, holding its aligned trajectories.
+            gt_data_lst: This group's full (uncropped) per-robot GT trajectories.
+            label: This group's column/figure-filename label (``RobotGroup.label``).
+            viz_config: This group's background-image config.
+            run_to_color: Maps each run identifier to a hex color.
+            run_display_names: Maps each run identifier to its legend name.
+            save_dir: Directory in which to save ``traj_<label>.pdf``.
+        """
+        dataList: List[PathData] = []
+        isGTList: List[bool] = []
+        colorList: List[str] = []
+        nameList: List[str] = []
+
+        # Add each method's estimated trajectories, with all of its robots sharing one name and color
+        for run in run_names:
+            for est in results_by_run[run].est_align_list:
+                dataList.append(est)
+                isGTList.append(False)
+                colorList.append(run_to_color[run])
+                nameList.append(run_display_names.get(run, run))
+
+        # Add GT last so it draws on top
+        for gt in gt_data_lst:
+            dataList.append(gt)
+            isGTList.append(True)
+            colorList.append("#000000")
+            nameList.append("GT")
+
+        fig, ax = plt.subplots(1, 1)
+        PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True,
+                        legend=False, label_suffixes=False, ax=ax,
+                        background_image_path=viz_config.image_path, background_image_x_edge=viz_config.image_x_edge,
+                        background_image_extent_offsets=viz_config.image_extent_offsets,
+                        yaw_rotation_deg=viz_config.yaw_rotation_deg)
+
+        # Keep one legend entry per method (plus GT) instead of one per robot line
+        handles, labels = ax.get_legend_handles_labels()
+        unique_handles: List[Any] = []
+        unique_labels: List[str] = []
+        for handle, label_text in zip(handles, labels):
+            if label_text not in unique_labels:
+                unique_handles.append(handle)
+                unique_labels.append(label_text)
+        ax.legend(unique_handles, unique_labels)
+
+        save_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(save_dir / f'traj_{SLAMEvaluator.label_to_filename(label)}.pdf'), format="pdf", bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
 
     @staticmethod
     def _save_timing_table(run_names: List[str], cols: List[str],
@@ -1197,7 +1256,8 @@ class SLAMEvaluator:
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0,
-                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
+                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY,
+                        run_to_color: Optional[Dict[str, str]] = None) -> None:
         """
         Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
         its own dataset and its own background-image ``viz_config``, so one call can group results
@@ -1205,8 +1265,9 @@ class SLAMEvaluator:
         or several dataset sequences that each need their own background image). Use
         :meth:`make_robot_groups` for the common case of one dataset (and viz_config) shared by
         every group. With ``figure_output_level=FigureOutputLevel.ESSENTIAL``, only the grouping-root
-        summary tables and one ``lc_tables.pdf`` per ``LoopClosureFilterMode`` are written, skipping
-        every per-group figure (``traj/``, ``traj_lc/``, ``lc/``, ``lc_success_rate/``,
+        summary tables, the ``traj/est_and_gt/all_methods/`` figures, and one ``lc_tables.pdf`` per
+        ``LoopClosureFilterMode`` are written, skipping every other per-group figure
+        (``traj/est_and_gt/individual_methods/``, ``traj/gt/``, ``traj_lc/``, ``lc/``, ``lc_success_rate/``,
         ``lc_with_context/``, ``lc_side_by_side/``, ``lc_sep/``, ``lc_sep_inl/``, ``traj_lc_comb/``,
         and the ``ALL``-only ``lc_success_rate_table.tex``/``lc_successful_total_table.tex``).
 
@@ -1229,6 +1290,8 @@ class SLAMEvaluator:
             ate_threshold_m: Red-highlight cutoff (m) for every translation-error table.
             rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
             figure_output_level: Whether to write every figure/table or only the essential ones.
+            run_to_color: Maps each run identifier to its hex color in the ``all_methods`` figures.
+                None assigns matplotlib's ``tab10`` colors in ``run_names`` order.
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
@@ -1238,7 +1301,9 @@ class SLAMEvaluator:
         - ``data_size_table.pdf`` — estimated communication data size (MB) and total objects sent
             summary tables; ``data_size_table.tex`` — standalone LaTeX version of the data size table
         - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
-        - ``traj/``              — per-group estimated vs. GT trajectory plots
+        - ``traj/est_and_gt/individual_methods/`` — per-group, per-method estimated vs. GT trajectory plots
+        - ``traj/est_and_gt/all_methods/``        — per-group overlay of every method's estimated trajectories on GT
+        - ``traj/gt/``                            — per-group, per-method GT-only trajectory plots
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/<LoopClosureFilterMode.name>/``, once per LC filter mode:
         - ``lc_tables.pdf``      — LC success rate and count summary tables
@@ -1310,8 +1375,16 @@ class SLAMEvaluator:
         if figure_output_level == FigureOutputLevel.EVERY:
             for run_name in run_names:
                 for col, slam_data in slam_data_by_run[run_name].items():
-                    SLAMEvaluator.save_merged_ate_figures(slam_data, run_name, col, load_gt_data_fn,
-                                                          base_dir, group_by_label[col].viz_config)
+                    SLAMEvaluator.save_merged_ate_figures(slam_data, results[run_name][col], run_name, col,
+                                                          load_gt_data_fn, base_dir, group_by_label[col].viz_config)
+
+        # Overlay every method's trajectories per group, at every figure output level
+        if run_to_color is None:
+            run_to_color = {run: mcolors.to_hex(plt.cm.tab10(i % 10)) for i, run in enumerate(run_names)}
+        for group in robot_groups:
+            SLAMEvaluator._save_all_methods_traj_figure(run_names, {run: results[run][group.label] for run in run_names},
+                                    load_gt_data_fn(group.dataset_seq, list(group.robots)), group.label, group.viz_config,
+                                    run_to_color, run_display_names, base_dir / 'traj' / 'est_and_gt' / 'all_methods')
 
         # Define group column names
         cols = [group.label for group in robot_groups]
