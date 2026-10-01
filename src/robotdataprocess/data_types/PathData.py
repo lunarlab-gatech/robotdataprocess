@@ -695,7 +695,8 @@ class PathData(SequentialData):
                      background_image_extent_offsets: Union[Tuple[float, float], None] = None,
                      loop_closure_data=None, lc_line_width: float = 0.8,
                      title: str | None = None, lc_errors_vmax: float = 50.0,
-                     yaw_rotation_deg: float = 0.0, label_suffixes: bool = True):
+                     yaw_rotation_deg: float = 0.0, label_suffixes: bool = True,
+                     gt_linestyle: Union[str, Tuple] = "dotted"):
         """
         Plot all PathData objects on a 2D XY plane.
 
@@ -737,6 +738,8 @@ class PathData(SequentialData):
                 itself is not rotated.
             label_suffixes: If true, legend labels are ``"<name> (GT)"`` / ``"<name> (Est.)"``;
                 otherwise just ``"<name>"``.
+            gt_linestyle: Matplotlib linestyle for GT trajectories, a named style or an
+                ``(offset, (on, off, ...))`` dash tuple.
         """
 
         # Check lengths of arguments
@@ -835,7 +838,7 @@ class PathData(SequentialData):
         # Plot the trajectories
         for i in range(num_data_objs):
             label = nameList[i] + ((" (GT)" if isGTList[i] else " (Est.)") if label_suffixes else "")
-            linestyle = ("dotted" if isGTList[i] else None)
+            linestyle = (gt_linestyle if isGTList[i] else None)
             color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
             axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
                      label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)

@@ -56,21 +56,26 @@ class _LoadGtDataMG:
         return _LOAD_GT_DATA_BY_DATASET_NAME[dataset_name](dataset_seq, robot_names)
 
 class GroupingMode(Enum):
-    """Whether to align all of a sequence's robots together, or evaluate every pair separately."""
+    """
+    Whether to align all of a sequence's robots together (``GLOBAL``), or evaluate every pair
+    separately, either for one selected sequence (``PAIRWISE_SEQ``) or for every sequence of every
+    dataset (``PAIRWISE_EVERY``).
+    """
     GLOBAL = 0
-    PAIRWISE = 1
+    PAIRWISE_SEQ = 1
+    PAIRWISE_EVERY = 2
 
 def _make_groups(dataset_name: str, seqs: List[tuple], mode: GroupingMode) -> List[RobotGroup]:
     """
     Builds one dataset's ``RobotGroup``\\ s from a list of ``(dataset_seq, seq_label, robots,
     viz_config, excluded_pairs)`` entries: one all-robots-aligned group per entry under
-    ``GroupingMode.GLOBAL``, or one group per pair under ``GroupingMode.PAIRWISE`` (skipping any
+    ``GroupingMode.GLOBAL``, or one group per pair under either pairwise mode (skipping any
     pair listed in ``excluded_pairs``, e.g. pairs with no ground-truth overlap, which would make
     evaluating them unfair -- each pair is sorted before comparing, so ``excluded_pairs`` entries
     don't need to match a particular order). ``seq_label`` is a short display name for
     ``dataset_seq`` (they may be the same string). Every label starts with
-    ``"<dataset_name>_<seq_label>"``, with the pair's abbreviation appended under
-    ``GroupingMode.PAIRWISE``, since sequences sharing a robot roster would otherwise collide.
+    ``"<dataset_name>_<seq_label>"``, with the pair's abbreviation appended under either pairwise
+    mode, since sequences sharing a robot roster would otherwise collide.
     """
     groups = []
     for dataset_seq, seq_label, robots, viz_config, excluded_pairs in seqs:
@@ -90,15 +95,14 @@ def _make_groups(dataset_name: str, seqs: List[tuple], mode: GroupingMode) -> Li
 
 def _make_airmuseum_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds AirMuseum's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
-    viz_config = _airmuseum.make_viz_config()
     robots = ("drone", "robotA", "robotB", "robotC")
     scenario3_excluded_pairs = [("robotA", "robotC")] # No Overlap
     scenario4_excluded_pairs = [("drone", "robotA")]  # No Overlap
     scenario5_excluded_pairs = [] # All overlap
     seqs = [
-        ("Scenario3", "Scenario3", robots, viz_config, scenario3_excluded_pairs),
-        ("Scenario4", "Scenario4", robots, viz_config, scenario4_excluded_pairs),
-        ("Scenario5", "Scenario5", robots, viz_config, scenario5_excluded_pairs),
+        ("Scenario3", "Scenario3", robots, _airmuseum.make_viz_config("Scenario3"), scenario3_excluded_pairs),
+        ("Scenario4", "Scenario4", robots, _airmuseum.make_viz_config("Scenario4"), scenario4_excluded_pairs),
+        ("Scenario5", "Scenario5", robots, _airmuseum.make_viz_config("Scenario5"), scenario5_excluded_pairs),
     ]
     return _make_groups("airmuseum", seqs, mode)
 
@@ -139,21 +143,22 @@ def main():
     single run_evaluation call -- unlike each dataset's own results_ROMAN.py, which instead
     groups only some of a dataset sequence's robots together at a time. Under
     ``GroupingMode.GLOBAL``, all robots of all sequences of all three datasets are aligned
-    together. Under ``GroupingMode.PAIRWISE``, a single dataset and sequence is selected instead,
-    with every robot pair of that sequence its own group. Requires AirMuseum's "ROMAN_O_SM"
+    together. Under ``GroupingMode.PAIRWISE_SEQ``, a single dataset and sequence is selected instead,
+    with every robot pair of that sequence its own group; ``GroupingMode.PAIRWISE_EVERY`` does the
+    same for every sequence of all three datasets at once. Requires AirMuseum's "ROMAN_O_SM"
     results directory to be renamed/aliased to "ROMAN_O" beforehand, to match
     HERCULES/Kimera-Multi's run name.
 
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
-    mode = GroupingMode.PAIRWISE
+    mode = GroupingMode.GLOBAL
     only_heterogeneous = False
-    all_dir_name = "all_heterogeneous" if only_heterogeneous else "all"
+    all_dir_name = "heterogeneous" if only_heterogeneous else "all"
 
-    if mode == GroupingMode.GLOBAL:
+    if mode == GroupingMode.GLOBAL or mode == GroupingMode.PAIRWISE_EVERY:
         robot_groups = _make_airmuseum_groups(mode) + _make_hercules_groups(mode) + _make_kimera_multi_groups(mode)
         output_dir = Path(all_dir_name) / mode.name.lower()
-    else:
+    elif mode == GroupingMode.PAIRWISE_SEQ:
         dataset_name = "hercules"
         dataset_seq = "V2.3.AP"
         group_fns_by_dataset_name: Dict[str, Callable[[GroupingMode], List[RobotGroup]]] = {
@@ -170,8 +175,8 @@ def main():
 
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
-    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
-    run_to_color = {"ROMAN_O": "#FF7F0E", "MG_TS_SM": "#1F77B4", "MG_SM": "#2CA02C"}
+    run_names = ["ROMAN_O", "MG_SM", "MG_TS_SM"]
+    run_to_color = {"ROMAN_O": "#FF0000", "MG_SM": "#0000FF", "MG_TS_SM": "#008000"}
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')

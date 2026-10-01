@@ -35,22 +35,25 @@ def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData
         gt_data.append(data)
     return gt_data
 
-def make_viz_config() -> RobotGroupViz:
-    """Builds the AirMuseum environment image / robot display config, shared across all its scenarios."""
-    user = getpass.getuser()
+def make_viz_config(dataset_seq: str) -> RobotGroupViz:
+    """Builds the AirMuseum robot display config (no background image) for one dataset_seq."""
+    if dataset_seq == "Scenario3":   yaw_rotation_deg: float = 25.0
+    elif dataset_seq == "Scenario4": yaw_rotation_deg = 220.0
+    else:                            yaw_rotation_deg = 280.0
+
     robot_name_to_color: Dict = {
         "drone": "#FFA501",
         "robotA": "#FF0101",
         "robotB": "#008000",
         "robotC": "#0014FF",
     }
-    return RobotGroupViz( # TODO: This is off
+    return RobotGroupViz(
         name_map=None,
         robot_name_to_color=robot_name_to_color,
-        image_path='/media/' + user + '/T73/AirMuseum_dataset/environment.png',
-        image_x_edge=39,
-        image_extent_offsets=(-12.5, 3),
-        yaw_rotation_deg=280.0,
+        image_path=None,
+        image_x_edge=None,
+        image_extent_offsets=None,
+        yaw_rotation_deg=yaw_rotation_deg,
     )
 
 def main():
@@ -64,7 +67,7 @@ def main():
     robot_groups = list(itertools.combinations(all_robots, 2))
     run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
     dataset_seq = "Scenario3"
-    viz_config = make_viz_config()
+    viz_config = make_viz_config(dataset_seq)
 
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
