@@ -295,17 +295,19 @@ class TestSaveAllMethodsTrajFigure(unittest.TestCase):
         # One legend entry per run (display name, falling back to run name), then GT
         self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["Run A Display", "RUN_B", "GT"])
 
-        # Each drawn line, in order: (y value, color, dotted, num points)
+        # Each drawn line, in order: (y value, color, unscaled dash pattern, num points)
         lines = ax.get_lines()
         self.assertEqual(len(lines), 6)
-        expected = [(0.0, self.RED_EST, False, 2), (1.0, self.RED_EST, False, 2),
-                    (2.0, self.BLUE_EST, False, 2), (3.0, self.BLUE_EST, False, 2),
-                    (-1.0, self.GT_GRAY, True, 3), (-2.0, self.GT_GRAY, True, 3)]
-        for line, (y, color, dotted, num_points) in zip(lines, expected):
+        solid = (0, None)
+        gt_dash = (0, (4, 1.65))
+        expected = [(0.0, self.RED_EST, solid, 2), (1.0, self.RED_EST, solid, 2),
+                    (2.0, self.BLUE_EST, solid, 2), (3.0, self.BLUE_EST, solid, 2),
+                    (-1.0, self.GT_GRAY, gt_dash, 3), (-2.0, self.GT_GRAY, gt_dash, 3)]
+        for line, (y, color, dash_pattern, num_points) in zip(lines, expected):
             ydata = np.asarray(line.get_ydata(), dtype=float)
             np.testing.assert_allclose(ydata, [y] * num_points)
             np.testing.assert_allclose(line.get_color(), color, atol=1e-9)
-            self.assertEqual(line.get_linestyle() == ':', dotted)
+            self.assertEqual(line._unscaled_dash_pattern, dash_pattern)
 
     def test_single_run_single_robot(self):
         ax = self._save_and_get_figure(['X'], {'X': self._make_result([4.0])}, [self._make_path(-1.0, 3)],
