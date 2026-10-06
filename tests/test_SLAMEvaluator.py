@@ -117,8 +117,8 @@ class TestCalculateMergedAte(unittest.TestCase):
             pre_opt_est_trajectories = []
         alignment_lc, inlier_lc = SLAMData.load_LC_data(cls.MG_ROOT, system_params, sorted_names, {})
         return SLAMData(system_params, sorted_names, estimated_trajectories, alignment_lc, inlier_lc,
-                        timing={"align": {}, "mapping": {}, "offline_rpgo": {}}, data_size_mb=0.0,
-                        data_num_objects_sent=0, pre_opt_est_trajectories=pre_opt_est_trajectories)
+                        timing={"align": {}, "mapping": {}, "offline_rpgo": {}}, data_size={},
+                        pre_opt_est_trajectories=pre_opt_est_trajectories)
 
     def test_two_robot_group_pins_metrics(self):
         # calculate_merged_ate is purely computational -- save_merged_ate_figures is the
@@ -312,6 +312,62 @@ class TestSaveAllMethodsTrajFigure(unittest.TestCase):
                                        {'X': '#FF0000'}, {}, self.tmp_dir)
         self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["X", "GT"])
         self.assertEqual(len(ax.get_lines()), 2)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveTimingTable(unittest.TestCase):
+    """SLAMEvaluator._save_timing_table: the alignment row and the total use each group's align_time_used (SlideSLAM
+    stops searching connected pairs), not the summed actual compute; mapping and RPGO come from get_timing_totals."""
+
+    def _group(self, connection_attempts) -> SLAMData:
+        slam_data = object.__new__(SLAMData)
+        slam_data.timing = {'align': {('ds', 's', 'a', 'b'): [1.0, 2.0], ('ds', 's', 'a', 'c'): [10.0, 20.0, 40.0]},
+                            'mapping': {('ds', 's', 'a'): 100.0}, 'offline_rpgo': {('ds', 's', 'a', 'b', 'c'): 1000.0}}
+        slam_data.connection_attempts = connection_attempts
+        return slam_data
+
+    def test_alignment_and_total_use_time_used(self):
+        tables = {}
+        def capture(raw_df, title, **kwargs):
+            tables[title] = raw_df
+        slam_data_by_run = {'SM': {'g1': self._group({('a', 'c'): 2})}, 'ROMAN': {'g1': self._group(None)}}
+        with unittest.mock.patch.object(SLAMEvaluator, 'make_highlighted_table', side_effect=capture), \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_timing_table(['SM', 'ROMAN'], ['g1'], {}, slam_data_by_run, Path(tmp_dir) / 'timing.pdf')
+
+        align, total = tables["Alignment Runtime (s)"], tables["Total Runtime (s)"]
+        self.assertEqual(align.loc['SM', 'g1'], 3.0 + 30.0)       # a-c truncated to its first 2 attempts
+        self.assertEqual(align.loc['ROMAN', 'g1'], 3.0 + 70.0)    # no chaining: every attempt
+        self.assertEqual(total.loc['SM', 'g1'], 33.0 + 100.0 + 1000.0)
+        self.assertEqual(tables["Mapping Runtime (s)"].loc['SM', 'g1'], 100.0)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveDataSizeTable(unittest.TestCase):
+    """SLAMEvaluator._save_data_size_table: both tables use each group's data_size_used (SlideSLAM stops searching
+    connected pairs), i.e. the cumulative values at each pair's last counted attempt."""
+
+    def _group(self, connection_attempts) -> SLAMData:
+        slam_data = object.__new__(SLAMData)
+        slam_data.data_size = {('ds', 's', 'a', 'b'): ([1e6, 3e6], [10, 30]), ('ds', 's', 'a', 'c'): ([2e6], [20])}
+        slam_data.connection_attempts = connection_attempts
+        return slam_data
+
+    def test_tables_use_data_size_used(self):
+        tables = {}
+        def capture(raw_df, title, **kwargs):
+            tables[title] = raw_df
+            return unittest.mock.MagicMock()  # stands in for the table object whose .to_latex is called
+        slam_data_by_run = {'SM': {'g1': self._group({('a', 'b'): 1})}, 'ROMAN': {'g1': self._group(None)}}
+        with unittest.mock.patch.object(SLAMEvaluator, 'make_highlighted_table', side_effect=capture), \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_data_size_table(['SM', 'ROMAN'], ['g1'], {}, slam_data_by_run, Path(tmp_dir) / 'data_size.pdf')
+
+        size, objects = tables["Estimated Communication Data Size (MB)"], tables["Total Number of Objects Sent"]
+        self.assertEqual((size.loc['SM', 'g1'], objects.loc['SM', 'g1']), (1.0 + 2.0, 10 + 20))     # a-b read at attempt 1
+        self.assertEqual((size.loc['ROMAN', 'g1'], objects.loc['ROMAN', 'g1']), (3.0 + 2.0, 30 + 20))  # every attempt
 
 
 if __name__ == '__main__':

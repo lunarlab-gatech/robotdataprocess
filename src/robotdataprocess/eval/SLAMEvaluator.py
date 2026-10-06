@@ -628,10 +628,15 @@ class SLAMEvaluator:
         """
         def get_val(run: str, col: str, key: str):
             slam_data = slam_data_by_run[run].get(col)
-            entry = SLAMData.get_timing_totals([slam_data]) if slam_data is not None else None
+            if slam_data is None:
+                return None
+
+            # Alignment is the time the method would have used in this group (SlideSLAM stops searching connected pairs)
+            entry = SLAMData.get_timing_totals([slam_data])
+            entry["align"] = slam_data.align_time_used()
             if key == "total":
-                return None if entry is None else entry["align"] + entry["mapping"] + entry["offline_rpgo"]
-            return None if entry is None else entry[key]
+                return entry["align"] + entry["mapping"] + entry["offline_rpgo"]
+            return entry[key]
 
         def make_raw_df(key: str) -> pd.DataFrame:
             def value_fn(run, col):
@@ -695,11 +700,12 @@ class SLAMEvaluator:
         # set it off from the pair columns with a heavy divider.
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
+        # Data each group's method would have sent (SlideSLAM stops searching connected pairs)
         data_size_table = SLAMEvaluator.make_highlighted_table(
-            make_raw_df(lambda slam_data: slam_data.data_size_mb), "Estimated Communication Data Size (MB)",
+            make_raw_df(lambda slam_data: slam_data.data_size_used()[0]), "Estimated Communication Data Size (MB)",
             color_fn=color_fn, fmt=TableData.fmt_fixed(2), higher_is_better=False)
         num_objects_sent_table = SLAMEvaluator.make_highlighted_table(
-            make_raw_df(lambda slam_data: slam_data.data_num_objects_sent), "Total Number of Objects Sent",
+            make_raw_df(lambda slam_data: slam_data.data_size_used()[1]), "Total Number of Objects Sent",
             color_fn=color_fn, fmt=TableData.fmt_fixed(0), higher_is_better=False)
 
         save_path.parent.mkdir(parents=True, exist_ok=True)
