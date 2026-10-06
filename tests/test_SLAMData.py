@@ -750,6 +750,24 @@ class TestGetTimingTotals(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestTimingAcrossGroups(unittest.TestCase):
+    """A pair shared by two groups has one measurement (deduplicated across groups by get_timing_totals) while its
+    SlideSLAM time used differs per group, since each group's chaining connects the pair at a different attempt."""
+
+    def _group(self, connection_attempts: dict) -> SLAMData:
+        slam_data = object.__new__(SLAMData)
+        slam_data.timing = {'align': {('ds', 's', 'a', 'b'): [1.0, 2.0, 4.0]}, 'mapping': {}, 'offline_rpgo': {}}
+        slam_data.connection_attempts = connection_attempts
+        return slam_data
+
+    def test_shared_measurement_per_group_time_used(self):
+        group_1 = self._group({('a', 'b'): 1})  # robots a and b connected through others at attempt 1
+        group_2 = self._group({('a', 'b'): 3})  # only connected by the pair's own loop closure at attempt 3
+        self.assertEqual(SLAMData.get_timing_totals([group_1, group_2])['align'], 7.0)  # actual compute, counted once
+        self.assertEqual((group_1.align_time_used(), group_2.align_time_used()), (1.0, 7.0))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestFromMeronomyGraphConnectionAttempts(unittest.TestCase):
     """SLAMData.from_MeronomyGraph loads the group's connection attempts only for SlideSLAM methods (None otherwise)."""
 
