@@ -90,7 +90,8 @@ class SLAMData(Data):
             sys.path.insert(0, str(mg_root))
 
     @staticmethod
-    def load_system_params(mg_root: Path, dataset_name: str, dataset_seq: str, method: str) -> Any:
+    def load_system_params(mg_root: Path, dataset_name: str, dataset_seq: str, method: str,
+                           param_overrides: Optional[Dict[str, Any]] = None) -> Any:
         """
         Loads the SystemParams for one experiment config, used to reconstruct hash-addressed result
         directories. dataset_name/dataset_seq are stored on the returned SystemParams.
@@ -100,6 +101,8 @@ class SLAMData(Data):
             dataset_name: The dataset used.
             dataset_seq: The dataset version/sequence.
             method: Run name identifying which experiment config to load.
+            param_overrides: Dot-notation param overrides the run was generated with, applied before
+                the result directory hashes are computed; None for none.
 
         Returns:
             The loaded SystemParams.
@@ -107,7 +110,8 @@ class SLAMData(Data):
         SLAMData.ensure_MeronomyGraph_importable(mg_root)
         SystemParams = ModuleImporter.get_module_attribute('MeronomyGraph.params.system_params', 'SystemParams')
 
-        return SystemParams.from_experiment_config(str(mg_root / "params"), dataset_name, dataset_seq, method)
+        return SystemParams.from_experiment_config(str(mg_root / "params"), dataset_name, dataset_seq, method,
+                                                   overrides=param_overrides)
 
     @staticmethod
     def load_est_data(mg_root: Path, system_params: Any,
@@ -545,7 +549,8 @@ class SLAMData(Data):
     # =========================================================================
     @classmethod
     def from_MeronomyGraph(cls, mg_root: Path, dataset_name: str, dataset_seq: str, method: str,
-                           robot_names: List[str], critical_invocation_params: Dict[str, Any]) -> 'SLAMData':
+                           robot_names: List[str], critical_invocation_params: Dict[str, Any],
+                           param_overrides: Optional[Dict[str, Any]] = None) -> 'SLAMData':
         """
         Loads a SLAMData instance from a MeronomyGraph result tree, for one run (method) on one
         robot group. This is the only method on this class that accepts unsorted robot_names.
@@ -557,6 +562,7 @@ class SLAMData(Data):
             method: Run name identifying which experiment config to load.
             robot_names: Robot names in this group, in any order.
             critical_invocation_params: Other data-affecting args from the original run invocation.
+            param_overrides: Dot-notation param overrides the run was generated with; None for none.
 
         Returns:
             A populated SLAMData instance. ``pre_opt_est_trajectories`` is ``[]`` if the
@@ -564,7 +570,7 @@ class SLAMData(Data):
         """
         sorted_robot_names = sorted(robot_names)
 
-        system_params = cls.load_system_params(mg_root, dataset_name, dataset_seq, method)
+        system_params = cls.load_system_params(mg_root, dataset_name, dataset_seq, method, param_overrides)
         estimated_trajectories = cls.load_est_data(mg_root, system_params, sorted_robot_names,
                                                    critical_invocation_params)
 

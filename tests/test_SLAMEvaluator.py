@@ -6,9 +6,10 @@ import os
 from pathlib import Path
 from robotdataprocess import CoordinateFrame, OdometryData, PathData
 from robotdataprocess.data_types.SLAMData import SLAMData
-from robotdataprocess.eval.RobotGroup import RobotGroupViz
+from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 from scipy.spatial.transform import Rotation as R
 import shutil
 import tempfile
@@ -370,6 +371,27 @@ class TestSaveDataSizeTable(unittest.TestCase):
         size, objects = tables["Estimated Communication Data Size (MB)"], tables["Total Number of Objects Sent"]
         self.assertEqual((size.loc['SM', 'g1'], objects.loc['SM', 'g1']), (1.0 + 2.0, 10 + 20))     # a-b read at attempt 1
         self.assertEqual((size.loc['ROMAN', 'g1'], objects.loc['ROMAN', 'g1']), (3.0 + 2.0, 30 + 20))  # every attempt
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestRunEvaluationDuplicateMethodNames(unittest.TestCase):
+    """SLAMEvaluator.run_evaluation rejects methods sharing a name (they'd overwrite each other's results), naming
+    only the duplicated one, before loading any data."""
+
+    def test_duplicate_method_names_raise_before_loading(self):
+        viz_config = RobotGroupViz(name_map=None, robot_name_to_color={}, image_path=None,
+                                   image_x_edge=None, image_extent_offsets=None)
+        robot_groups = [RobotGroup(('a', 'b'), 'ds', 'seq', 'g1', viz_config)]
+        methods = [SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#0000FF"),
+                   SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#FF0000"),
+                   SLAMMethod("MG_SM", "MeronomyGraph (HMO, Max Size 35)", "MG_SM", "#FF8C00",
+                              {"submap_align_params.submap_max_size": 35})]
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.Pool') as pool:
+            with self.assertRaises(ValueError) as ctx:
+                SLAMEvaluator.run_evaluation(Path('/unused'), Path('out'), methods, robot_groups, {}, Path('/unused'),
+                                             unittest.mock.MagicMock(), ate_threshold_m=20.0)
+        self.assertIn("['MG_SM']", str(ctx.exception))
+        pool.assert_not_called()
 
 
 if __name__ == '__main__':

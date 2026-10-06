@@ -3,7 +3,6 @@ from evo.core.units import Unit
 import fitz
 import math
 import matplotlib
-import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -17,6 +16,7 @@ from robotdataprocess import LoopClosureData, LoopClosureFilterMode, OdometryDat
 from robotdataprocess.data_types.SLAMData import SLAMData
 from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 import seaborn as sns
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -1335,14 +1335,13 @@ class SLAMEvaluator:
     # =========================================================================
 
     @staticmethod
-    def run_evaluation(mg_root: Path, output_dir: Path, run_names: List[str],
+    def run_evaluation(mg_root: Path, output_dir: Path, methods: List[SLAMMethod],
                         robot_groups: List[RobotGroup],
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
                         ate_threshold_m: float, rot_threshold_deg: float = 10.0,
-                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY,
-                        run_to_color: Optional[Dict[str, str]] = None) -> None:
+                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
         """
         Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
         its own dataset and its own background-image ``viz_config``, so one call can group results
@@ -1367,7 +1366,7 @@ class SLAMEvaluator:
         Args:
             mg_root: Path to the MeronomyGraph repo checkout (with corresponding results).
             output_dir: Path, relative to ``figures_base_dir``, under which this grouping's outputs are saved.
-            run_names: Ordered list of run/method identifiers to evaluate.
+            methods: Ordered list of ``SLAMMethod`` to evaluate (the table rows), each with a unique name.
             robot_groups: Explicit list of ``RobotGroup`` to evaluate.
             critical_invocation_params: Other data-affecting args from the original run invocation.
             figures_base_dir: Directory under which ``<output_dir>/`` outputs are saved.
@@ -1376,8 +1375,6 @@ class SLAMEvaluator:
                 ATE above which a group counts as a failure in ``robustness_table.pdf``.
             rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
             figure_output_level: Whether to write every figure/table or only the essential ones.
-            run_to_color: Maps each run identifier to its hex color in the ``all_methods`` figures.
-                None assigns matplotlib's ``tab10`` colors in ``run_names`` order.
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
@@ -1417,26 +1414,25 @@ class SLAMEvaluator:
         if collisions:
             raise ValueError(f"group_label collisions for {output_dir}: {collisions}")
 
+        # Methods are keyed by name below as well, so a repeated name would also silently overwrite results
+        run_names: List[str] = [method.name for method in methods]
+        duplicate_run_names = sorted({name for name in run_names if run_names.count(name) > 1})
+        if duplicate_run_names:
+            raise ValueError(f"Duplicate method names for {output_dir}: {duplicate_run_names}")
+
         # Force the headless Agg backend regardless of whatever backend an earlier import may have
         # already selected -- safe here since this function never shows interactive figures (every
         # plot is saved via save_path), and avoids any attempt to open a display.
         matplotlib.use("Agg", force=True)
 
         # Define mapping between run name and display name
-        run_display_names = {
-            "ROMAN": "ROMAN (HERCULES replication)",
-            "ROMAN_O": "ROMAN",
-            "ROMAN_NM": "NM + ROMAN",
-            "MG": "MeronomyGraph (Holonym Matching Only) [Deprecated]",
-            "MG_TS": "MeronomyGraph [Deprecated]",
-            "MG_SM": "MeronomyGraph (HMO)",
-            "MG_TS_SM": "MeronomyGraph"
-        }
+        run_display_names: Dict[str, str] = {method.name: method.display_name for method in methods}
 
         # Load every run/group's data, then compute its RMS ATE, both in parallel
-        load_tasks = [(mg_root, group.dataset_name, group.dataset_seq, run_name, list(group.robots), critical_invocation_params)
+        load_tasks = [(mg_root, group.dataset_name, group.dataset_seq, method.base_param_config, list(group.robots),
+                       critical_invocation_params, method.param_overrides)
                 for group in robot_groups
-                for run_name in run_names]
+                for method in methods]
         task_row_col = [(run_name, group.label) for group in robot_groups for run_name in run_names]
 
         # Must happen here in the parent (not only inside the forked workers) so unpickling
@@ -1468,8 +1464,7 @@ class SLAMEvaluator:
                                                           load_gt_data_fn, base_dir, group_by_label[col].viz_config)
 
         # Overlay every method's trajectories per group, at every figure output level
-        if run_to_color is None:
-            run_to_color = {run: mcolors.to_hex(plt.cm.tab10(i % 10)) for i, run in enumerate(run_names)}
+        run_to_color: Dict[str, str] = {method.name: method.color for method in methods}
         for group in robot_groups:
             SLAMEvaluator._save_all_methods_traj_figure(run_names, {run: results[run][group.label] for run in run_names},
                                     load_gt_data_fn(group.dataset_seq, list(group.robots)), group.label, group.viz_config,

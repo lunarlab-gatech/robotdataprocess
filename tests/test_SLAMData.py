@@ -612,6 +612,34 @@ class TestEnsureMeronomyGraphImportable(unittest.TestCase):
         self.assertEqual(sys.path.count(str(mg_root)), expected_count)
 
 
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoadSystemParams(unittest.TestCase):
+    """SLAMData.load_system_params forwards the params dir, dataset, sequence, method, and param overrides (None when
+    omitted) to SystemParams.from_experiment_config, and returns its result."""
+
+    def _load(self, *param_overrides_arg):
+        system_params_cls = MagicMock()
+        with patch.object(SLAMData, 'ensure_MeronomyGraph_importable') as ensure_importable, \
+             patch('robotdataprocess.data_types.SLAMData.ModuleImporter.get_module_attribute',
+                   return_value=system_params_cls):
+            system_params = SLAMData.load_system_params(Path('/mg_root'), 'airmuseum', 'Scenario3', 'MG_SM',
+                                                        *param_overrides_arg)
+        ensure_importable.assert_called_once_with(Path('/mg_root'))
+        return system_params, system_params_cls.from_experiment_config
+
+    def test_forwards_param_overrides(self):
+        system_params, from_experiment_config = self._load({"submap_align_params.submap_max_size": 35})
+        from_experiment_config.assert_called_once_with('/mg_root/params', 'airmuseum', 'Scenario3', 'MG_SM',
+                                                       overrides={"submap_align_params.submap_max_size": 35})
+        self.assertIs(system_params, from_experiment_config.return_value)
+
+    def test_no_param_overrides_forwards_none(self):
+        system_params, from_experiment_config = self._load()
+        from_experiment_config.assert_called_once_with('/mg_root/params', 'airmuseum', 'Scenario3', 'MG_SM',
+                                                       overrides=None)
+        self.assertIs(system_params, from_experiment_config.return_value)
+
+
 class TestLoadSlideslamAcceptedAttempt(unittest.TestCase):
     """SLAMData.load_slideslam_accepted_attempt: the 'attempt' of a SlideSLAM pair's single align.json entry, None if
     the pair has no loop closure, an error for non-SlideSLAM methods and for a missing file."""
@@ -768,13 +796,14 @@ class TestTimingAcrossGroups(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestFromMeronomyGraphConnectionAttempts(unittest.TestCase):
-    """SLAMData.from_MeronomyGraph loads the group's connection attempts only for SlideSLAM methods (None otherwise)."""
+class TestFromMeronomyGraph(unittest.TestCase):
+    """SLAMData.from_MeronomyGraph forwards the run's param overrides (None when omitted) to load_system_params, and
+    loads the group's connection attempts only for SlideSLAM methods (None otherwise)."""
 
-    def _load(self, alignment_method: str):
+    def _load(self, alignment_method: str, *param_overrides_arg):
         system_params = _FakeSystemParams(dataset_name='ds', dataset_version='seq', method='M', sparsified=False,
                                           alignment_method=alignment_method)
-        with patch.object(SLAMData, 'load_system_params', return_value=system_params), \
+        with patch.object(SLAMData, 'load_system_params', return_value=system_params) as load_system_params, \
              patch.object(SLAMData, 'load_est_data', return_value=[]), \
              patch.object(SLAMData, 'load_kimera_rpgo_first_stage_est_data', return_value=[]), \
              patch.object(SLAMData, 'load_LC_data', return_value=(MagicMock(), MagicMock())), \
@@ -782,16 +811,25 @@ class TestFromMeronomyGraphConnectionAttempts(unittest.TestCase):
              patch.object(SLAMData, 'load_data_size', return_value={}), \
              patch.object(SLAMData, 'load_mg_match_stats', return_value=None), \
              patch.object(SLAMData, '_slideslam_connection_attempts', return_value={('a', 'b'): 1}) as connection:
-            slam_data = SLAMData.from_MeronomyGraph(Path('/unused'), 'ds', 'seq', 'M', ['b', 'a'], {})
-        return slam_data, connection
+            slam_data = SLAMData.from_MeronomyGraph(Path('/unused'), 'ds', 'seq', 'M', ['b', 'a'], {}, *param_overrides_arg)
+        return slam_data, connection, load_system_params
+
+    def test_forwards_param_overrides(self):
+        _, _, load_system_params = self._load('ROMAN_BASE', {"submap_align_params.submap_max_size": 35})
+        load_system_params.assert_called_once_with(Path('/unused'), 'ds', 'seq', 'M',
+                                                   {"submap_align_params.submap_max_size": 35})
+
+    def test_no_param_overrides_forwards_none(self):
+        _, _, load_system_params = self._load('ROMAN_BASE')
+        load_system_params.assert_called_once_with(Path('/unused'), 'ds', 'seq', 'M', None)
 
     def test_slideslam_loads_connection_attempts(self):
-        slam_data, connection = self._load('SLIDEMATCH')
+        slam_data, connection, _ = self._load('SLIDEMATCH')
         self.assertEqual(slam_data.connection_attempts, {('a', 'b'): 1})
         self.assertEqual(connection.call_args.args[2], ['a', 'b'])  # sorted robot names
 
     def test_other_methods_have_none(self):
-        slam_data, connection = self._load('ROMAN_BASE')
+        slam_data, connection, _ = self._load('ROMAN_BASE')
         self.assertIsNone(slam_data.connection_attempts)
         connection.assert_not_called()
 

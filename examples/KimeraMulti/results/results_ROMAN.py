@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
 DATASET_NAME = "kimera_multi"
 TUNNELS_SEQ = "campus_tunnels_1207_compressed"
@@ -66,7 +67,9 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
 
-    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"]
+    methods = [SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#1f77b4"),
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#ff7f0e"),
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#2ca02c")]
     viz_config = make_viz_config()
 
     user = getpass.getuser()
@@ -97,7 +100,7 @@ def main():
     ]
 
     for output_name, robot_groups in [("Easy", easy), ("Medium", medium), ("Difficult", difficult)]:
-        SLAMEvaluator.run_evaluation(roman_root, Path(DATASET_NAME) / output_name, run_names, robot_groups,
+        SLAMEvaluator.run_evaluation(roman_root, Path(DATASET_NAME) / output_name, methods, robot_groups,
                                  critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=10.0)
 
 if __name__ == "__main__":

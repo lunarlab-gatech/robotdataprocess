@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.RobotGroup import RobotGroup
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator, FigureOutputLevel
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
 _EXAMPLES_DIR = Path(__file__).parent.parent.parent
 
@@ -110,7 +111,7 @@ def _make_hercules_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds HERCULES's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     robots = ("Husky1", "Husky2", "Drone1", "Drone2")
     excluded_pairs = [] # All overlap
-    seq_names = ["V2.3.AC", "V2.3.AP", "V2.4.C", "V2.4.F"] 
+    seq_names = ["V2.3.AC", "V2.3.AP", "V2.4.C", "V2.4.F"] #"V2.4.F"] 
     viz_configs = [_hercules.make_viz_config(seq) for seq in seq_names]
     seqs = [(seq, seq, robots, viz_config, excluded_pairs) for seq, viz_config in zip(seq_names, viz_configs)]
     return _make_groups("hercules", seqs, mode)
@@ -152,7 +153,7 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.GLOBAL
-    only_heterogeneous = False
+    only_heterogeneous = True
     all_dir_name = "heterogeneous" if only_heterogeneous else "all"
 
     if mode == GroupingMode.GLOBAL or mode == GroupingMode.PAIRWISE_EVERY:
@@ -175,17 +176,23 @@ def main():
 
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
-    run_names = ["ROMAN_O", "MG_SM", "MG_TS_SM"]
-    run_to_color = {"ROMAN_O": "#FF0000", "MG_SM": "#0000FF", "MG_TS_SM": "#008000"}
+    max_size_35 = {"submap_align_params.submap_max_size": 35}
+    methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#8B4513"),
+               SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#FF1493"),
+               SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#FF0000"),
+               #SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#0000FF"),
+               #SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#008000"),
+               SLAMMethod("MG_SM_MS35", "MeronomyGraph (HMO, Max Size 35)", "MG_SM", "#FF8C00", max_size_35),
+               SLAMMethod("MG_TS_SM_MS35", "MeronomyGraph (Max Size 35)", "MG_TS_SM", "#800080", max_size_35)]
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
-    SLAMEvaluator.run_evaluation(roman_root, output_dir, run_names, robot_groups,
+    SLAMEvaluator.run_evaluation(roman_root, output_dir, methods, robot_groups,
                              critical_invocation_params, figures_base_dir,
                              _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0,
-                             figure_output_level=FigureOutputLevel.ESSENTIAL, run_to_color=run_to_color)
+                             figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":
     if "--profile" in sys.argv:
