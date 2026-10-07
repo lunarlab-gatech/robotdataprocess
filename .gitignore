@@ -21,3 +21,6 @@ __pycache__/
 
 # Ignore venv environments 
 robotdataprocess_env/
+
+# Ignore AI model files
+CLAUDE.md

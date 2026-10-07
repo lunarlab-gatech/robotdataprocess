@@ -7,7 +7,9 @@ from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import run_ROMAN_evaluation
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator, FigureOutputLevel
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
 NAME_TO_FRAME_MAP: dict = {
     "drone": CoordinateFrame.FLU,
@@ -16,7 +18,7 @@ NAME_TO_FRAME_MAP: dict = {
     "robotC": CoordinateFrame.FUR
 }
 
-def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryData]:
+def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
     """
     Load ground truth trajectories for a set of robots from <robot_name>.txt.
 
@@ -27,29 +29,18 @@ def load_gt_data_ROMAN(dataset_name: str, robot_names: List) -> List[OdometryDat
     user = getpass.getuser()
     gt_data: List[OdometryData] = []
     for rn in robot_names:
-        data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_name + '/data/'
+        data = OdometryData.from_txt('/media/' + user + '/T73/AirMuseum_dataset/' + dataset_seq + '/data/'
                               + rn + '/body_stamped_groundtruth.txt', 'world', 'robot',
                               CoordinateFrame.NONE, True, [0, 1, 2, 3, 7, 4, 5, 6])
         data.redefine_local_axes(NAME_TO_FRAME_MAP[rn], CoordinateFrame.FLU)
         gt_data.append(data)
     return gt_data
 
-def main():
-    """
-    Generate all evaluation figures and tables for the AirMuseum dataset.
-
-    See :func:`utils.results_ROMAN.run_ROMAN_evaluation` for the outputs produced.
-    """
-
-    all_robots = ["drone", "robotA", "robotB", "robotC"]
-    robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O", "MG_TS", "MG"]
-    dataset_name = "Scenario5"
-
-    # Environment image / robot display config
-    user = getpass.getuser()
-    image_path = '/media/' + user + '/T73/AirMuseum_dataset/environment.png'
-    x_edge: float = 39 # TODO: This is off
+def make_viz_config(dataset_seq: str) -> RobotGroupViz:
+    """Builds the AirMuseum robot display config (no background image) for one dataset_seq."""
+    if dataset_seq == "Scenario3":   yaw_rotation_deg: float = 25.0
+    elif dataset_seq == "Scenario4": yaw_rotation_deg = 220.0
+    else:                            yaw_rotation_deg = 280.0
 
     robot_name_to_color: Dict = {
         "drone": "#FFA501",
@@ -57,20 +48,39 @@ def main():
         "robotB": "#008000",
         "robotC": "#0014FF",
     }
-    viz_config = { # TODO: This is off
-        "image_path": image_path,
-        "x_edge": x_edge,
-        "robot_name_to_color": robot_name_to_color,
-        "background_image_extent_offsets": (-12.5, 3),
-        "yaw_rotation_deg": 280.0,
-    }
+    return RobotGroupViz(
+        name_map=None,
+        robot_name_to_color=robot_name_to_color,
+        image_path=None,
+        image_x_edge=None,
+        image_extent_offsets=None,
+        yaw_rotation_deg=yaw_rotation_deg,
+    )
 
-    figures_base_dir = Path('/home/dbutterfield3/Research/robotdataprocess/figures')
-    roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
-    critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
+def main():
+    """
+    Generate all evaluation figures and tables for the AirMuseum dataset.
 
-    run_ROMAN_evaluation(roman_root, "airmuseum", dataset_name, run_names, robot_groups, critical_invocation_params,
-                         figures_base_dir, load_gt_data_ROMAN, viz_config, ate_threshold_m=10.0)
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
+    """
+
+    all_robots = ["drone", "robotA", "robotB", "robotC"]
+    robot_groups = list(itertools.combinations(all_robots, 2))
+    methods = [SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#1f77b4"), # "MG_TS_SM", "MG_SM"
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#ff7f0e"),
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#2ca02c")]
+    dataset_seq = "Scenario3"
+    viz_config = make_viz_config(dataset_seq)
+
+    user = getpass.getuser()
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
+
+    robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups, viz_config)
+    SLAMEvaluator.run_evaluation(roman_root, Path("TEMP") / dataset_seq, methods, robot_groups,
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, 10.0, 
+                             figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":
     main()

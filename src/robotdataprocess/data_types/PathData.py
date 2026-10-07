@@ -210,21 +210,17 @@ class PathData(SequentialData):
             print(f"Data already in {target_frame.name} coordinate frame, returning...")
             return
 
-        if target_frame == CoordinateFrame.FLU and self.frame in (CoordinateFrame.NED, CoordinateFrame.LDB):
-            R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
+        R_frame = CoordinateFrame.get_rotation(self.frame, target_frame)
 
-            if transform_type == TransformType.CHANGE_OF_BASIS:
-                self._convert_frame(R_frame)
-            elif transform_type == TransformType.ROTATION:
-                R_frame_Q = R.from_matrix(R_frame)
-                self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
-                self._ori_apply_rotation_left_side(R_frame_Q)
+        if transform_type == TransformType.CHANGE_OF_BASIS:
+            self._convert_frame(R_frame)
+        elif transform_type == TransformType.ROTATION:
+            R_frame_Q = R.from_matrix(R_frame)
+            self.positions = col_to_dec_arr((R_frame @ self.positions.T).T)
+            self._ori_apply_rotation_left_side(R_frame_Q)
 
-            self.frame = CoordinateFrame.FLU
-            self._invalidate_cache()
-
-        else:
-            raise NotImplementedError(f"Transformation from {self.frame} to {target_frame} is not implemented.")
+        self.frame = target_frame
+        self._invalidate_cache()
         
     def redefine_local_axes(self, curr_local_frame: CoordinateFrame, target_local_frame: CoordinateFrame):
         """
@@ -699,7 +695,8 @@ class PathData(SequentialData):
                      background_image_extent_offsets: Union[Tuple[float, float], None] = None,
                      loop_closure_data=None, lc_line_width: float = 0.8,
                      title: str | None = None, lc_errors_vmax: float = 50.0,
-                     yaw_rotation_deg: float = 0.0):
+                     yaw_rotation_deg: float = 0.0, label_suffixes: bool = True,
+                     gt_linestyle: Union[str, Tuple] = "dotted"):
         """
         Plot all PathData objects on a 2D XY plane.
 
@@ -739,6 +736,10 @@ class PathData(SequentialData):
                 image that isn't exactly aligned with the GT's XY axes). Operates on copies,
                 so it has no effect on the original PathData objects. The background image
                 itself is not rotated.
+            label_suffixes: If true, legend labels are ``"<name> (GT)"`` / ``"<name> (Est.)"``;
+                otherwise just ``"<name>"``.
+            gt_linestyle: Matplotlib linestyle for GT trajectories, a named style or an
+                ``(offset, (on, off, ...))`` dash tuple.
         """
 
         # Check lengths of arguments
@@ -836,8 +837,8 @@ class PathData(SequentialData):
 
         # Plot the trajectories
         for i in range(num_data_objs):
-            label = nameList[i] + (" (GT)" if isGTList[i] else " (Est.)")
-            linestyle = ("dotted" if isGTList[i] else None)
+            label = nameList[i] + ((" (GT)" if isGTList[i] else " (Est.)") if label_suffixes else "")
+            linestyle = (gt_linestyle if isGTList[i] else None)
             color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
             axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
                      label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)

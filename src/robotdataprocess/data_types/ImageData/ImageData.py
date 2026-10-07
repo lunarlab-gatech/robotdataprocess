@@ -6,6 +6,7 @@ import cv2
 import decimal
 from decimal import Decimal
 from enum import Enum
+from ...utils.math_utils import nearest_index
 from ...utils.ModuleImporter import ModuleImporter
 import numpy as np
 from numpy.lib.format import open_memmap
@@ -215,64 +216,54 @@ class ImageData(SequentialData):
     # =========================================================================
 
     @staticmethod
-    def _decode_image_msg(msg: Any, encoding: 'ImageData.ImageEncoding', height: int, width: int) -> np.ndarray:
+    def decode_image_msg(msg: Any, encoding: Optional['ImageData.ImageEncoding'] = None,
+                          height: Optional[int] = None, width: Optional[int] = None) -> np.ndarray:
         """
-        Decodes raw pixel data from a ROS Image message into a numpy array.
+        Decodes raw pixel data from a ROS Image message into a contiguous numpy array,
+        honouring ``msg.step`` (row padding) and ``msg.is_bigendian`` when present.
 
         Args:
-            msg: A ROS Image message with a ``data`` field.
-            encoding: The image encoding to interpret the bytes as.
-            height: Image height in pixels.
-            width: Image width in pixels.
+            msg: A ROS Image message with a ``data`` field, and (unless passed explicitly)
+                ``encoding``, ``height`` and ``width`` fields. ``step`` and ``is_bigendian``
+                are read when present and otherwise assumed to be unpadded/little-endian.
+            encoding: The image encoding to interpret the bytes as; None reads ``msg.encoding``.
+            height: Image height in pixels; None reads ``msg.height``.
+            width: Image width in pixels; None reads ``msg.width``.
         Returns:
             np.ndarray: Decoded image array. Shape is (H, W, C) for multi-channel
                 encodings or (H, W) for single-channel.
-        """
-        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
-        if channels > 1:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width, channels))
-        else:
-            return np.frombuffer(msg.data, dtype=dtype).reshape((height, width))
-
-    @staticmethod
-    def image_from_ros_msg(msg: Any, to_encoding: Optional['ImageData.ImageEncoding'] = None) -> np.ndarray:
-        """
-        Decodes one live sensor_msgs/Image into a contiguous numpy array.
-
-        Unlike ``_decode_image_msg``, this reads the encoding and geometry off the message
-        itself and honours ``msg.step``, so a publisher that pads rows to an alignment
-        boundary is decoded correctly rather than skewed. Intended for subscribers holding a
-        single message, where the bulk loaders' whole-sequence machinery does not apply.
-
-        Args:
-            msg: A ROS Image message with ``height``, ``width``, ``step``, ``encoding`` and
-                ``data`` fields.
-            to_encoding: Encoding to convert the decoded image to; None keeps the message's
-                own encoding.
-        Returns:
-            np.ndarray: Decoded image. Shape is (H, W, C) for multi-channel encodings or
-                (H, W) for single-channel.
         Raises:
-            ValueError: If ``msg.step`` is not a whole number of pixels wide.
+            ValueError: If ``msg.step`` is not a whole number of pixels wide, or is too
+                narrow to hold one row of ``width * channels`` pixels.
         """
-        encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+        # Load in parameters if passed
+        if encoding is None:
+            encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
+        if height is None:
+            height = msg.height
+        if width is None:
+            width = msg.width
+
+        # Sanity check values
         dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(encoding)
+        itemsize: int = np.dtype(dtype).itemsize
+        row_pixels: int = width * channels
+        step: int = getattr(msg, 'step', row_pixels * itemsize)
+        if step % itemsize != 0:
+            raise ValueError(f"Image step {step} is not a multiple of the {dtype} itemsize {itemsize}.")
+        if step // itemsize < row_pixels:
+            raise ValueError(f"Image step {step} is too narrow to hold one row of {row_pixels} "
+                              f"pixels ({itemsize} bytes each).")
 
-        itemsize = np.dtype(dtype).itemsize
-        if msg.step % itemsize != 0:
-            raise ValueError(f"Image step {msg.step} is not a multiple of the {dtype} itemsize {itemsize}.")
+        # Get dtype to handle endianness
+        read_dtype: np.dtype = np.dtype(dtype).newbyteorder('>') if getattr(msg, 'is_bigendian', 0) else np.dtype(dtype)
 
-        # Rows are `step` BYTES apart, which is >= width*channels when the publisher pads.
-        rows = np.frombuffer(msg.data, dtype=dtype).reshape(msg.height, msg.step // itemsize)
-        image = rows[:, :msg.width * channels]
+        # Decode the image data handling padding if necessary
+        rows: np.ndarray = np.frombuffer(msg.data, dtype=read_dtype).reshape(height, step // itemsize)
+        image: np.ndarray = rows[:, :row_pixels]
         if channels > 1:
-            image = image.reshape(msg.height, msg.width, channels)
-        image = np.ascontiguousarray(image)
-
-        if to_encoding is not None and to_encoding != encoding:
-            convert = ImageData.ImageEncoding.get_encoding_conversion(encoding, to_encoding)
-            image = np.ascontiguousarray(convert(image))
-        return image
+            image = image.reshape(height, width, channels)
+        return np.ascontiguousarray(image, dtype=dtype)
 
     @staticmethod
     def _decode_compressed_image_msg(msg: Any) -> Tuple[np.ndarray, 'ImageData.ImageEncoding']:
@@ -281,7 +272,7 @@ class ImageData(SequentialData):
 
         Parses the encoding from ``msg.format`` via
         ``ImageEncoding.from_compressed_ros1_str``, decompresses the payload with
-        ``cv2.imdecode``, then calls ``_decode_image_msg`` for consistent
+        ``cv2.imdecode``, then calls ``decode_image_msg`` for consistent
         dtype/shape handling.
 
         Args:
@@ -312,7 +303,7 @@ class ImageData(SequentialData):
         class _RawProxy:
             data = decoded.tobytes()
 
-        return ImageData._decode_image_msg(_RawProxy(), encoding, height, width), encoding
+        return ImageData.decode_image_msg(_RawProxy(), encoding, height, width), encoding
 
     @classmethod
     def from_image_files(cls, image_folder_path: Union[Path, str], frame_id: str) -> ImageData:
@@ -329,8 +320,26 @@ class ImageData(SequentialData):
         NotImplementedError("This method needs to be overwritten by the child Data class!")
     
     # =========================================================================
-    # ========================= Manipulation Methods ========================== 
-    # =========================================================================  
+    # ========================= Manipulation Methods ==========================
+    # =========================================================================
+
+    @staticmethod
+    def convert_image_encoding(image: np.ndarray, from_encoding: 'ImageData.ImageEncoding',
+                                to_encoding: 'ImageData.ImageEncoding') -> np.ndarray:
+        """
+        Converts a single decoded image array from from_encoding to to_encoding.
+
+        Args:
+            image: The image array, in from_encoding.
+            from_encoding: The image's current encoding.
+            to_encoding: The encoding to convert the image to.
+        Returns:
+            np.ndarray: A contiguous array holding the image in to_encoding.
+        Raises:
+            NotImplementedError: If the conversion between the two encodings is not supported.
+        """
+        convert = ImageData.ImageEncoding.get_encoding_conversion(from_encoding, to_encoding)
+        return np.ascontiguousarray(convert(image))
 
     def crop_data(self, start: Decimal, end: Union[Decimal, None] = None):
         """
@@ -479,14 +488,10 @@ class ImageData(SequentialData):
         scale = video_duration_sec / (source_times[-1] - source_times[0])
         scaled_source_times = (source_times - source_times[0]) * scale
 
-        # Build the evenly-spaced output sample times, and find each one's nearest
-        # source frame via searchsorted (scaled_source_times is sorted ascending)
+        # Build the evenly-spaced output sample times, and find each one's nearest source frame
         num_output_frames = max(int(round(fps * video_duration_sec)), 1)
         output_times = np.linspace(0.0, video_duration_sec, num_output_frames, endpoint=False)
-        right_idx = np.clip(np.searchsorted(scaled_source_times, output_times), 0, len(scaled_source_times) - 1)
-        left_idx = np.clip(right_idx - 1, 0, len(scaled_source_times) - 1)
-        use_right = np.abs(scaled_source_times[right_idx] - output_times) < np.abs(scaled_source_times[left_idx] - output_times)
-        frame_indices = np.where(use_right, right_idx, left_idx)
+        frame_indices = nearest_index(scaled_source_times, output_times)
 
         gaps = np.abs(scaled_source_times[frame_indices] - output_times)
         if np.any(gaps > max_frame_time_margin_sec):
@@ -549,25 +554,16 @@ class ImageData(SequentialData):
             raise ValueError(f"Index {i} is out of bounds!")
 
         # Calculate the step
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            step = 3 * self.width
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            step = 4 * self.width
-        else:
-            raise NotImplementedError(f"Unsupported encoding {self.encoding} for rosbag_get_ros_msg!")
+        dtype, channels = ImageData.ImageEncoding.to_dtype_and_channels(self.encoding)
+        step = np.dtype(dtype).itemsize * channels * self.width
 
         # Get the seconds and nanoseconds
         seconds = int(self.timestamps[i])
         nanoseconds = int((self.timestamps[i] - self.timestamps[i].to_integral_value(rounding=decimal.ROUND_DOWN)) * Decimal("1e9").to_integral_value(decimal.ROUND_HALF_EVEN))
 
         # Calculate the ROS2 Image data
-        if self.encoding == ImageData.ImageEncoding.RGB8:
-            data = self.images[i].flatten()
-        elif self.encoding == ImageData.ImageEncoding._32FC1:
-            data = self.images[i].flatten().view(np.uint8)
-            # TODO: Check endianness for _32FC1
-        else:
-            raise NotImplementedError(f"Unsupported encoding {self.encoding} for rosbag_get_ros_msg!")
+        data = self.images[i].flatten().view(np.uint8)
+        # TODO: Check endianness for multi-byte encodings (_32FC1, _16UC1)
 
         # Write the data into the new class
         if lib_type == ROSMsgLibType.ROSBAGS:
