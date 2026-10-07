@@ -3,8 +3,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pandas as pd
 from pathlib import Path
-from robotdataprocess import CoordinateFrame, OdometryData, PathData
+from robotdataprocess import CoordinateFrame, LoopClosureFilterMode, OdometryData, PathData, TableData
 from robotdataprocess.data_types.SLAMData import SLAMData
 from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
@@ -333,6 +334,7 @@ class TestSaveTimingTable(unittest.TestCase):
         tables = {}
         def capture(raw_df, title, **kwargs):
             tables[title] = raw_df
+            return unittest.mock.MagicMock()  # stands in for the table object whose .to_latex is called
         slam_data_by_run = {'SM': {'g1': self._group({('a', 'c'): 2})}, 'ROMAN': {'g1': self._group(None)}}
         with unittest.mock.patch.object(SLAMEvaluator, 'make_highlighted_table', side_effect=capture), \
              unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
@@ -344,6 +346,23 @@ class TestSaveTimingTable(unittest.TestCase):
         self.assertEqual(align.loc['ROMAN', 'g1'], 3.0 + 70.0)    # no chaining: every attempt
         self.assertEqual(total.loc['SM', 'g1'], 33.0 + 100.0 + 1000.0)
         self.assertEqual(tables["Mapping Runtime (s)"].loc['SM', 'g1'], 100.0)
+
+    def test_tex_holds_only_uncolored_alignment_table(self):
+        slam_data_by_run = {'SM': {'g1': self._group({('a', 'c'): 2})}, 'ROMAN': {'g1': self._group(None)}}
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_timing_table(['SM', 'ROMAN'], ['g1'], {}, slam_data_by_run, Path(tmp_dir) / 'timing.pdf')
+            with open(Path(tmp_dir) / 'timing.tex') as f:
+                content = f.read()
+
+        self.assertEqual(content.count(r"\begin{table*}"), 1)
+        self.assertIn(r"\caption{Alignment Runtime (s).}", content)
+        self.assertIn(r"    \textbf{Method} & \textbf{g1} & \textbf{Average} \\", content)
+        self.assertIn(r"    SM & \textbf{33.0} & \textbf{33.0} \\", content)
+        self.assertIn(r"    ROMAN & \underline{73.0} & \underline{73.0} \\", content)
+        for other_value in ("100.0", "1000.0", "1133.0", "1173.0"):  # mapping, RPGO, and totals stay out
+            self.assertNotIn(other_value, content)
+        self.assertNotIn(r"\textcolor", content)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -371,6 +390,144 @@ class TestSaveDataSizeTable(unittest.TestCase):
         size, objects = tables["Estimated Communication Data Size (MB)"], tables["Total Number of Objects Sent"]
         self.assertEqual((size.loc['SM', 'g1'], objects.loc['SM', 'g1']), (1.0 + 2.0, 10 + 20))     # a-b read at attempt 1
         self.assertEqual((size.loc['ROMAN', 'g1'], objects.loc['ROMAN', 'g1']), (3.0 + 2.0, 30 + 20))  # every attempt
+
+    def test_tex_holds_both_uncolored_tables_in_order(self):
+        slam_data_by_run = {'SM': {'g1': self._group({('a', 'b'): 1})}, 'ROMAN': {'g1': self._group(None)}}
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_data_size_table(['SM', 'ROMAN'], ['g1'], {}, slam_data_by_run, Path(tmp_dir) / 'data_size.pdf')
+            with open(Path(tmp_dir) / 'data_size.tex') as f:
+                content = f.read()
+
+        self.assertEqual(content.count(r"\begin{table*}"), 2)
+        size_tex, objects_tex = content.split("\n\n" + r"\begin{table*}")
+        self.assertIn(r"\label{tab:data_size}", size_tex)
+        self.assertIn(r"    SM & \textbf{3.00} & \textbf{3.00} \\", size_tex)
+        self.assertIn(r"    ROMAN & \underline{5.00} & \underline{5.00} \\", size_tex)
+        self.assertIn(r"\label{tab:num_objects_sent}", objects_tex)
+        self.assertIn(r"    SM & \textbf{30} & \textbf{30} \\", objects_tex)
+        self.assertIn(r"    ROMAN & \underline{50} & \underline{50} \\", objects_tex)
+        self.assertNotIn(r"\textcolor", content)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestStyleCombinedColumns(unittest.TestCase):
+    """SLAMEvaluator._style_combined_columns colors its separator by the given style."""
+
+    def _separator(self, **kwargs) -> TableData.FormattedTextSegment:
+        df = pd.DataFrame({'g1': [1.0]}, index=['R'])
+        return SLAMEvaluator._style_combined_columns(df, df, "T", fmt=TableData.fmt_fixed(0), **kwargs).df.iat[0, 0][1]
+
+    def test_default_separator_is_georgia_tech_colored(self):
+        self.assertEqual(self._separator(), TableData.FormattedTextSegment('/', color='#1A3055'))
+
+    def test_latex_separator_is_uncolored(self):
+        self.assertEqual(self._separator(style=TableData.TableStyleName.LATEX, separator=' '),
+                         TableData.FormattedTextSegment(' ', color=None))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveRobustnessTable(unittest.TestCase):
+    """SLAMEvaluator._save_robustness_table: one "failures (rate %)" cell per run and dataset, failing on ATE strictly
+    above the threshold or a suppressed multi-robot cell, with each dataset subheaded by its group count."""
+
+    def _result(self, ate: float, num_inter_lc: int) -> SLAMResult:
+        merged_metrics = unittest.mock.MagicMock()
+        merged_metrics.APE.translation_part.rmse = ate
+        return SLAMResult(None, merged_metrics, [], [], [],
+                          lc_stats_by_mode={LoopClosureFilterMode.ONLY_INTER_LC: {'num_loop_closures': num_inter_lc}})
+
+    def setUp(self):
+        # Datasets interleave (DsA, DsB, DsA, DsB) to check first-appearance column order; DsB's singleton makes it "groups"
+        self.groups = [RobotGroup(('a', 'b'), 'DsA', 's', 'g1', None), RobotGroup(('c', 'd'), 'DsB', 's', 'g2', None),
+                       RobotGroup(('a', 'c'), 'DsA', 's', 'g3', None), RobotGroup(('e',), 'DsB', 's', 'g4', None)]
+        self.results = {
+            # g1 above threshold fails, g3 exactly at threshold passes, singleton g4 above threshold fails
+            'R': {'g1': self._result(25.0, 3), 'g2': self._result(1.0, 3), 'g3': self._result(20.0, 3), 'g4': self._result(99.0, 0)},
+            # g2 suppressed (no inter-robot LC) fails; singleton g4 with no LC is never suppressed, so passes
+            'M': {'g1': self._result(1.0, 3), 'g2': self._result(1.0, 0), 'g3': self._result(1.0, 3), 'g4': self._result(1.0, 0)},
+            'H': {'g1': self._result(30.0, 3), 'g2': self._result(1.0, 3), 'g3': self._result(40.0, 3), 'g4': self._result(1.0, 0)},
+        }
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.save_path = Path(self.tmp_dir.name) / 'robustness_table.pdf'
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf:
+            SLAMEvaluator._save_robustness_table(['R', 'M', 'H'], self.groups, {'g1', 'g2', 'g3'}, {'R': 'ROMAN [6]'},
+                                                 self.results, self.save_path, 20.0)
+        self.pdf_tables = to_pdf.call_args[0][0]
+        with open(self.save_path.with_suffix('.tex')) as f:
+            self.tex_lines = f.read().split("\n")
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def test_tex_cells_ranked_lower_is_better(self):
+        self.assertIn(r"    ROMAN [6] & \underline{1} \underline{(50.0\%)} & \underline{1} \underline{(50.0\%)} \\", self.tex_lines)
+        self.assertIn(r"    M & \textbf{0} \textbf{(0.0\%)} & \underline{1} \underline{(50.0\%)} \\", self.tex_lines)
+        self.assertIn(r"    H & 2 (100.0\%) & \textbf{0} \textbf{(0.0\%)} \\", self.tex_lines)
+
+    def test_tex_layout_matches_paper_table(self):
+        header_idx = self.tex_lines.index(r"    \textbf{Method} & \textbf{DsA} & \textbf{DsB} \\")
+        self.assertEqual(self.tex_lines[header_idx + 1:header_idx + 3],
+                         [r"    \cline{2-3}", r"     & \textit{2 pairs} & \textit{2 groups} \\"])
+        self.assertEqual(self.tex_lines[0], r"\begin{table}[ht]")
+        self.assertIn(r"    \begin{tabular}{||l|c|c||}", self.tex_lines)
+        self.assertIn(r"    \caption{Alignment failures. Best bold, second underlined.}", self.tex_lines)
+        self.assertFalse(any(r"\textcolor" in line for line in self.tex_lines))
+
+    def test_pdf_is_one_table_with_stacked_subheaders(self):
+        self.assertEqual(len(self.pdf_tables), 1)
+        self.assertEqual(list(self.pdf_tables[0].df.columns), ["DsA\n2 pairs", "DsB\n2 groups"])
+        self.assertEqual([seg.text for seg in self.pdf_tables[0].df.iat[2, 0]], ["2", " ", "(100.0%)"])
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveLCTables(unittest.TestCase):
+    """SLAMEvaluator._save_lc_tables: PDF tables titled by precision, plus a .tex of only the all-LC precision and
+    successful/total tables, written for every LC filter mode."""
+
+    def setUp(self):
+        mode = LoopClosureFilterMode.ONLY_INTER_LC
+        all_lc = {'R': (40.0, 2, 5), 'M': (80.0, 4, 5), 'Z': (0.0, 0, 3)}
+        inlier_lc = {'R': (11.0, 1, 9), 'M': (22.0, 2, 9), 'Z': (33.0, 3, 9)}  # distinct values that must stay out of the .tex
+        def stats(rate: float, successful: int, total: int) -> dict:
+            return {'success_rate': rate, 'num_successful_loop_closures': successful, 'num_loop_closures': total}
+        results = {run: {'g1': SLAMResult(None, None, [], [], [],
+                                          lc_stats_by_mode={mode: stats(*all_lc[run])},
+                                          lc_inlier_stats_by_mode={mode: stats(*inlier_lc[run])})}
+                   for run in all_lc}
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        save_path = Path(self.tmp_dir.name) / 'lc_tables.pdf'
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf:
+            SLAMEvaluator._save_lc_tables(['R', 'M', 'Z'], {}, results, mode, save_path)
+        self.pdf_tables = to_pdf.call_args[0][0]
+        with open(save_path.with_suffix('.tex')) as f:
+            self.content = f.read()
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def test_pdf_titles_use_precision(self):
+        self.assertEqual([table.df.attrs["title"] for table in self.pdf_tables],
+                         ["LC Precision", "LC Successful / Total", "Inlier LC Precision", "Inlier LC Successful / Total"])
+
+    def test_tex_precision_table(self):
+        precision_tex, _ = self.content.split("\n\n" + r"\begin{table*}")
+        self.assertIn(r"\label{tab:lc_precision_only_inter_lc}", precision_tex)
+        self.assertIn(r"    R & \underline{40.0\%} & \underline{40.0\%} \\", precision_tex)
+        self.assertIn(r"    M & \textbf{80.0\%} & \textbf{80.0\%} \\", precision_tex)
+        self.assertIn(r"    Z & \textcolor[HTML]{CC2222}{0.0\%} & \textcolor[HTML]{CC2222}{0.0\%} \\", precision_tex)
+
+    def test_tex_successful_total_table_has_uncolored_separator(self):
+        _, counts_tex = self.content.split("\n\n" + r"\begin{table*}")
+        self.assertIn(r"\label{tab:lc_successful_total_only_inter_lc}", counts_tex)
+        self.assertIn(r"    R & \underline{2}/\textbf{5} \\", counts_tex)
+        self.assertIn(r"    M & \textbf{4}/\textbf{5} \\", counts_tex)
+        self.assertIn(r"    Z & \textcolor[HTML]{CC2222}{0}/\underline{3} \\", counts_tex)
+
+    def test_tex_excludes_inlier_tables(self):
+        self.assertEqual(self.content.count(r"\begin{table*}"), 2)
+        for inlier_value in ("11.0", "22.0", "33.0", "/9"):
+            self.assertNotIn(inlier_value, self.content)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

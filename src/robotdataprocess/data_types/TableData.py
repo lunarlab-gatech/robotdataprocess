@@ -277,13 +277,13 @@ class TableData:
     # =========================================================================
 
     @staticmethod
-    def fmt_fixed(precision: int = 2, suffix: str = "", missing_str: str = "---") -> Callable[[float], str]:
+    def fmt_fixed(precision: int = 2, suffix: str = "", missing_str: str = "---", prefix: str = "") -> Callable[[float], str]:
         """
-        Build a fmt: NaN renders as missing_str, otherwise fixed-point with precision decimals plus suffix.
+        Build a fmt: NaN renders as missing_str, otherwise prefix plus fixed-point with precision decimals plus suffix.
         Use ``precision=0`` for plain integer display (e.g. counts).
         """
         def fmt(value: float) -> str:
-            return missing_str if math.isnan(value) else f"{value:.{precision}f}{suffix}"
+            return missing_str if math.isnan(value) else f"{prefix}{value:.{precision}f}{suffix}"
         return fmt
 
     # =========================================================================
@@ -315,7 +315,8 @@ class TableData:
         return ''.join(parts)
 
     def to_latex(self, save_path: str, caption: str, label: str,
-        column_format: Optional[str] = None, use_star_env: bool = True) -> None:
+        column_format: Optional[str] = None, use_star_env: bool = True,
+        subheader: Optional[List[str]] = None, append: bool = False) -> None:
         """
         Render this table as LaTeX and save it to ``save_path``, ready to paste into Overleaf.
 
@@ -336,7 +337,16 @@ class TableData:
                 column).
             use_star_env: If True, use the two-column-spanning ``table*``
                 environment; otherwise the single-column ``table`` environment.
+            subheader: One italic entry per data column (e.g. ``"16 pairs"``), rendered as a second
+                header row beneath the column names, separated from them by a ``\\cline`` over the
+                data columns. Defaults to no subheader row.
+            append: If True, append this table (after a blank line) to ``save_path`` instead of
+                overwriting it, so one file can hold several tables.
+        Raises:
+            ValueError: If ``subheader`` doesn't have one entry per data column.
         """
+        if subheader is not None and len(subheader) != len(self.df.columns):
+            raise ValueError(f"subheader has {len(subheader)} entries, but the table has {len(self.df.columns)} data columns.")
 
         # Fill in default arguments that can't be default parameters
         if column_format is None:
@@ -361,6 +371,9 @@ class TableData:
         # Header row: the table's title labels the row-index column, plain column names follow
         header_cells: List[str] = [str(self.df.attrs.get("title", ""))] + [str(c) for c in self.df.columns]
         lines.append("    " + " & ".join(f"\\textbf{{{TableData._escape_latex(h)}}}" for h in header_cells) + r" \\")
+        if subheader is not None:
+            lines.append(f"    \\cline{{2-{len(header_cells)}}}")
+            lines.append("    " + " & ".join([""] + [f"\\textit{{{TableData._escape_latex(s)}}}" for s in subheader]) + r" \\")
         lines.append("    \\hline")
 
         # Data rows: row_name is plain text (escape only), cells hold FormattedTextSegments (escape + style)
@@ -373,7 +386,9 @@ class TableData:
         lines.append("    \\end{tabular}")
         lines.append(f"\\end{{{env}}}")
 
-        with open(save_path, 'w') as f:
+        with open(save_path, 'a' if append else 'w') as f:
+            if append:
+                f.write("\n\n")
             f.write("\n".join(lines))
         print(f"\nLatex table saved to {save_path}")
 

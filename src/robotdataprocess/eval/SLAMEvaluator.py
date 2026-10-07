@@ -80,12 +80,14 @@ class SLAMEvaluator:
     def _style_combined_columns(raw_df_a: pd.DataFrame, raw_df_b: pd.DataFrame, title: str,
                                 color_fn=None, fmt=None,
                                 highlight: bool = True, higher_is_better: bool = True,
-                                separator: str = '/') -> TableData:
+                                separator: str = '/',
+                                style: TableData.TableStyleName = TableData.TableStyleName.GEORGIA_TECH) -> TableData:
         """Resolve two raw numeric DataFrames into one merged-segment TableData.
 
         Each column's two values (e.g. successful/total counts) are ranked
-        independently and combined into a single "A<separator>B" cell. The
-        table's title is stored in the returned TableData's ``df.attrs["title"]``.
+        independently and combined into a single "A<separator>B" cell, with the
+        separator colored by ``style``. The table's title is stored in the
+        returned TableData's ``df.attrs["title"]``.
         """
         table_a = TableData.from_DataFrame(raw_df_a)
         table_a.format_and_color_cells(color_fn=color_fn, fmt=fmt)
@@ -95,7 +97,7 @@ class SLAMEvaluator:
         table_b.format_and_color_cells(color_fn=color_fn, fmt=fmt)
         if highlight:
             table_b.highlight_best_and_worst_results_by_column(higher_is_better=higher_is_better)
-        merged = TableData.merge_TableData(table_a, table_b, separator=separator)
+        merged = TableData.merge_TableData(table_a, table_b, separator=separator, style=style)
         merged.df.attrs["title"] = title
         return merged
 
@@ -365,11 +367,12 @@ class SLAMEvaluator:
                                results: Dict[str, Dict[str, SLAMResult]],
                                save_path: Path, ate_threshold_m: float) -> None:
         """
-        Build and save the failure robustness summary PDF tables, with one row per run and one
-        column per dataset (``RobotGroup.dataset_name``): failures / total groups, and failure rate
-        %. A group fails exactly when its ``metrics_table`` post-optimize merged RMS ATE cell is
-        red: the ATE is > ``ate_threshold_m`` or the cell is suppressed (see
-        :meth:`_metric_or_nan_if_suppressed`).
+        Build and save the failure robustness summary table as a PDF and as a standalone ``.tex``
+        (same path with a ``.tex`` suffix), with one row per run and one column per dataset
+        (``RobotGroup.dataset_name``, subheaded by its group count, e.g. "16 pairs"), each cell
+        holding "failures (failure rate %)". A group fails exactly when its ``metrics_table``
+        post-optimize merged RMS ATE cell is red: the ATE is > ``ate_threshold_m`` or the cell is
+        suppressed (see :meth:`_metric_or_nan_if_suppressed`).
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -385,6 +388,12 @@ class SLAMEvaluator:
         for group in robot_groups:
             if group.dataset_name not in dataset_names:
                 dataset_names.append(group.dataset_name)
+
+        # Subheader each dataset with its group count ("pairs" only when every group has two robots)
+        subheader: List[str] = []
+        for dataset_name in dataset_names:
+            group_sizes: List[int] = [len(group.robots) for group in robot_groups if group.dataset_name == dataset_name]
+            subheader.append(f"{len(group_sizes)} {'pairs' if all(size == 2 for size in group_sizes) else 'groups'}")
 
         # Count each run's failures and total groups per dataset
         failures: Dict[str, Dict[str, float]] = {}
@@ -405,15 +414,24 @@ class SLAMEvaluator:
         totals_df: pd.DataFrame = pd.DataFrame(totals).T
         failure_rate_df: pd.DataFrame = failures_df / totals_df * 100.0
 
-        color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
-        dfs = [
-            SLAMEvaluator._style_combined_columns(failures_df, totals_df, f"Failures / Total (RMS ATE > {ate_threshold_m:g} m)",
-                        color_fn=color_fn, fmt=TableData.fmt_fixed(0), highlight=False),
-            SLAMEvaluator.make_highlighted_table(failure_rate_df, "Failure Rate %",
-                        color_fn=color_fn, fmt=TableData.fmt_fixed(1, suffix='%'), higher_is_better=False),
-        ]
+        # Combine each cell into "failures (failure rate %)", ranking each part independently
+        def make_table(style: TableData.TableStyleName) -> TableData:
+            color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=style)
+            failures_table = SLAMEvaluator.make_highlighted_table(failures_df, "Method", color_fn=color_fn,
+                                    fmt=TableData.fmt_fixed(0), higher_is_better=False)
+            failure_rate_table = SLAMEvaluator.make_highlighted_table(failure_rate_df, "Method", color_fn=color_fn,
+                                    fmt=TableData.fmt_fixed(1, prefix='(', suffix='%)'), higher_is_better=False)
+            return TableData.merge_TableData(failures_table, failure_rate_table, separator=' ', style=style)
+
+        # The PDF has no subheader row, so stack each subheader under its dataset name instead
+        pdf_table: TableData = make_table(TableData.TableStyleName.GEORGIA_TECH)
+        pdf_table.df.columns = [f"{name}\n{sub}" for name, sub in zip(dataset_names, subheader)]
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5)
+        TableData.to_pdf([pdf_table], str(save_path), row_height=2.4, h_pad=0.5)
+
+        make_table(TableData.TableStyleName.LATEX).to_latex(str(save_path.with_suffix('.tex')),
+            caption="Alignment failures. Best bold, second underlined.", label="tab:robustness",
+            column_format="||l|" + "c|" * len(dataset_names) + "|", use_star_env=False, subheader=subheader)
 
     @staticmethod
     def _save_ate_split_table(run_names: List[str], robot_groups: List[RobotGroup],
@@ -617,7 +635,8 @@ class SLAMEvaluator:
 
         Produces one table per run and robot pair for each of the alignment
         runtime, the mapping runtime, the offline RPGO runtime, and their
-        per-pair total.
+        per-pair total. Also saves a standalone ``.tex`` version of just the
+        alignment runtime table (same path with a ``.tex`` suffix).
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -652,11 +671,12 @@ class SLAMEvaluator:
         # The trailing "Average" column is a summary column, not another pair —
         # set it off from the pair columns with a heavy divider.
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
+        align_df: pd.DataFrame = make_raw_df("align")
 
         dfs = [
             SLAMEvaluator.make_highlighted_table(make_raw_df("mapping"), "Mapping Runtime (s)",
                         color_fn=color_fn, fmt=fmt, higher_is_better=False),
-            SLAMEvaluator.make_highlighted_table(make_raw_df("align"), "Alignment Runtime (s)",
+            SLAMEvaluator.make_highlighted_table(align_df, "Alignment Runtime (s)",
                         color_fn=color_fn, fmt=fmt, higher_is_better=False),
             SLAMEvaluator.make_highlighted_table(make_raw_df("offline_rpgo"), "Offline RPGO Runtime (s)",
                         color_fn=color_fn, fmt=fmt, higher_is_better=False),
@@ -667,6 +687,10 @@ class SLAMEvaluator:
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=style,
                         heavy_divider_before=heavy_divider_before)
 
+        latex_color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=TableData.TableStyleName.LATEX)
+        SLAMEvaluator.make_highlighted_table(align_df, "Method", color_fn=latex_color_fn, fmt=fmt, higher_is_better=False) \
+            .to_latex(str(save_path.with_suffix('.tex')), caption="Alignment Runtime (s).", label="tab:alignment_runtime")
+
     @staticmethod
     def _save_data_size_table(run_names: List[str], cols: List[str],
                             run_display_names: Dict[str, str],
@@ -675,8 +699,8 @@ class SLAMEvaluator:
         """
         Build and save the estimated communication data size and objects-sent summary PDF tables.
 
-        Also saves a standalone ``.tex`` version of the data size table (same path with a
-        ``.tex`` suffix), ready to paste into Overleaf.
+        Also saves a standalone ``.tex`` version of both tables (same path with a ``.tex``
+        suffix), ready to paste into Overleaf.
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -701,38 +725,41 @@ class SLAMEvaluator:
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
         # Data each group's method would have sent (SlideSLAM stops searching connected pairs)
-        data_size_table = SLAMEvaluator.make_highlighted_table(
-            make_raw_df(lambda slam_data: slam_data.data_size_used()[0]), "Estimated Communication Data Size (MB)",
+        data_size_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_size_used()[0])
+        num_objects_sent_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_size_used()[1])
+        data_size_table = SLAMEvaluator.make_highlighted_table(data_size_df, "Estimated Communication Data Size (MB)",
             color_fn=color_fn, fmt=TableData.fmt_fixed(2), higher_is_better=False)
-        num_objects_sent_table = SLAMEvaluator.make_highlighted_table(
-            make_raw_df(lambda slam_data: slam_data.data_size_used()[1]), "Total Number of Objects Sent",
+        num_objects_sent_table = SLAMEvaluator.make_highlighted_table(num_objects_sent_df, "Total Number of Objects Sent",
             color_fn=color_fn, fmt=TableData.fmt_fixed(0), higher_is_better=False)
 
         save_path.parent.mkdir(parents=True, exist_ok=True)
         TableData.to_pdf([data_size_table, num_objects_sent_table], str(save_path), row_height=2.4, h_pad=0.5,
                         style=style, heavy_divider_before=heavy_divider_before)
-        data_size_table.to_latex(str(save_path.with_suffix('.tex')),
-                                caption="Estimated Communication Data Size (MB)", label="tab:data_size")
+
+        latex_color_fn = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=TableData.TableStyleName.LATEX)
+        tex_path: str = str(save_path.with_suffix('.tex'))
+        SLAMEvaluator.make_highlighted_table(data_size_df, "Method", color_fn=latex_color_fn,
+            fmt=TableData.fmt_fixed(2), higher_is_better=False) \
+            .to_latex(tex_path, caption="Estimated Communication Data Size (MB).", label="tab:data_size")
+        SLAMEvaluator.make_highlighted_table(num_objects_sent_df, "Method", color_fn=latex_color_fn,
+            fmt=TableData.fmt_fixed(0), higher_is_better=False) \
+            .to_latex(tex_path, caption="Total Number of Objects Sent.", label="tab:num_objects_sent", append=True)
 
     @staticmethod
     def _save_lc_tables(run_names: List[str], run_display_names: Dict[str, str],
                         results: Dict[str, Dict[str, SLAMResult]],
                         lc_filter: LoopClosureFilterMode,
-                        save_path: Path,
-                        figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
+                        save_path: Path) -> None:
         """
         Build and save the LC summary PDF tables.
 
-        Produces four tables: success rate and successful/total counts for all LC
+        Produces four tables: precision and successful/total counts for all LC
         and for inlier LC, across all run names and robot pairs. The all-LC
-        success rate table gets a trailing "Average" column (the row-wise mean
+        precision table gets a trailing "Average" column (the row-wise mean
         across the pair columns, ignoring suppressed/NaN pairs), set off from the
-        pair columns by a heavy divider — matching ``_save_ate_tables``.
-
-        When ``lc_filter`` is ``LoopClosureFilterMode.ALL`` and ``figure_output_level`` is
-        ``FigureOutputLevel.EVERY``, the all-LC success rate and successful/total tables are
-        additionally saved as standalone ``.tex`` files (``lc_success_rate_table.tex``,
-        ``lc_successful_total_table.tex``) next to ``save_path``, ready to paste into Overleaf.
+        pair columns by a heavy divider — matching ``_save_ate_tables``. The all-LC
+        precision and successful/total tables are also saved together as a standalone
+        ``.tex`` (same path with a ``.tex`` suffix), ready to paste into Overleaf.
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -741,7 +768,6 @@ class SLAMEvaluator:
                 read from ``.lc_stats_by_mode``/``.lc_inlier_stats_by_mode`` at ``lc_filter``.
             lc_filter: Which ``LoopClosureFilterMode`` to pull stats for.
             save_path: Destination PDF path.
-            figure_output_level: Whether to also save the ``ALL``-only ``.tex`` tables.
         """
         def make_raw_df(stats_selector, key: str) -> pd.DataFrame:
             return SLAMEvaluator._make_raw_df(run_names, run_display_names, lambda run: results[run].keys(),
@@ -764,22 +790,15 @@ class SLAMEvaluator:
         # heavy divider (matches _save_ate_tables).
         heavy_divider_before = lambda col_idx: col_idx == len(list(results[run_names[0]].keys()))
 
-        all_lc_success_rate_table = SLAMEvaluator.make_highlighted_table(make_success_rate_df(all_lc), "LC Success Rate %",
-                    color_fn=color_fn, fmt=percent_fmt)
-        all_lc_successful_total_table = SLAMEvaluator._style_combined_columns(make_raw_df(all_lc, "num_successful_loop_closures"),
-                                make_raw_df(all_lc, "num_loop_closures"),
-                                "LC Successful / Total", color_fn=color_fn, fmt=int_fmt)
-
-        all_lc_success_rate_table_latex = SLAMEvaluator.make_highlighted_table(make_success_rate_df(all_lc), "LC Success Rate %",
-                    color_fn=latex_color_fn, fmt=percent_fmt)
-        all_lc_successful_total_table_latex = SLAMEvaluator._style_combined_columns(make_raw_df(all_lc, "num_successful_loop_closures"),
-                                make_raw_df(all_lc, "num_loop_closures"),
-                                "LC Successful / Total", color_fn=latex_color_fn, fmt=int_fmt)
+        all_lc_precision_df: pd.DataFrame = make_success_rate_df(all_lc)
+        all_lc_successful_df: pd.DataFrame = make_raw_df(all_lc, "num_successful_loop_closures")
+        all_lc_total_df: pd.DataFrame = make_raw_df(all_lc, "num_loop_closures")
 
         dfs = [
-            all_lc_success_rate_table,
-            all_lc_successful_total_table,
-            SLAMEvaluator.make_highlighted_table(make_raw_df(inlier_lc, "success_rate"), "Inlier LC Success Rate %",
+            SLAMEvaluator.make_highlighted_table(all_lc_precision_df, "LC Precision", color_fn=color_fn, fmt=percent_fmt),
+            SLAMEvaluator._style_combined_columns(all_lc_successful_df, all_lc_total_df,
+                                    "LC Successful / Total", color_fn=color_fn, fmt=int_fmt),
+            SLAMEvaluator.make_highlighted_table(make_raw_df(inlier_lc, "success_rate"), "Inlier LC Precision",
                         color_fn=color_fn, fmt=percent_fmt),
             SLAMEvaluator._style_combined_columns(make_raw_df(inlier_lc, "num_successful_loop_closures"),
                                     make_raw_df(inlier_lc, "num_loop_closures"),
@@ -789,11 +808,13 @@ class SLAMEvaluator:
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, style=TableData.TableStyleName.GEORGIA_TECH,
                         heavy_divider_before=heavy_divider_before)
 
-        if lc_filter == LoopClosureFilterMode.ALL and figure_output_level == FigureOutputLevel.EVERY:
-            all_lc_success_rate_table_latex.to_latex(str(save_path.parent / 'lc_success_rate_table.tex'),
-                                                caption="LC Success Rate \%", label="tab:lc_success_rate")
-            all_lc_successful_total_table_latex.to_latex(str(save_path.parent / 'lc_successful_total_table.tex'),
-                                                    caption="LC Successful / Total", label="tab:lc_successful_total")
+        tex_path: str = str(save_path.with_suffix('.tex'))
+        mode_name: str = lc_filter.name.lower()
+        SLAMEvaluator.make_highlighted_table(all_lc_precision_df, "Method", color_fn=latex_color_fn, fmt=percent_fmt) \
+            .to_latex(tex_path, caption="LC Precision.", label=f"tab:lc_precision_{mode_name}")
+        SLAMEvaluator._style_combined_columns(all_lc_successful_df, all_lc_total_df, "Method", color_fn=latex_color_fn,
+                                    fmt=int_fmt, style=TableData.TableStyleName.LATEX) \
+            .to_latex(tex_path, caption="LC Successful / Total.", label=f"tab:lc_successful_total_{mode_name}", append=True)
 
     @staticmethod
     def _save_mg_match_histogram_grid_figure(run_names: List[str], run_display_names: Dict[str, str],
@@ -973,10 +994,10 @@ class SLAMEvaluator:
 
         - **Top-left**: pair name label (golden).
         - **Left**: "After Alignment" — combined all-LC table with columns
-            ``"LC Success Rate %"`` and ``"LC Successful / Total"`` per run.
+            ``"LC Precision"`` and ``"LC Successful / Total"`` per run.
         - **Center**: LC error scatter plot (log-log).
         - **Right**: ``"RMS ATE (m)"`` table (top) followed by "After Kimera-RPGO"
-            — combined inlier-LC table with ``"Inlier LC Success Rate %"`` and
+            — combined inlier-LC table with ``"Inlier LC Precision"`` and
             ``"Inlier LC Successful / Total"`` per run.
 
         Table styling is applied via :meth:`TableData.render_onto_ax`.  Column names
@@ -1034,9 +1055,9 @@ class SLAMEvaluator:
         ax_ate.axis('off')
 
         # Column name constants matching the PDF table titles
-        COL_SR_ALL     = "LC Success \n Rate %"
+        COL_SR_ALL     = "LC \nPrecision"
         COL_CNT_ALL    = "LC Successful \n/ Total"
-        COL_SR_INL     = "Inlier LC \nSuccess Rate %"
+        COL_SR_INL     = "Inlier LC \nPrecision"
         COL_CNT_INL    = "Inlier LC \nSuccessful / Total"
         COL_ATE        = "RMS ATE (m)"
 
@@ -1349,11 +1370,10 @@ class SLAMEvaluator:
         or several dataset sequences that each need their own background image). Use
         :meth:`make_robot_groups` for the common case of one dataset (and viz_config) shared by
         every group. With ``figure_output_level=FigureOutputLevel.ESSENTIAL``, only the grouping-root
-        summary tables, the ``traj/est_and_gt/all_methods/`` figures, and one ``lc_tables.pdf`` per
-        ``LoopClosureFilterMode`` are written, skipping every other per-group figure
+        summary tables, the ``traj/est_and_gt/all_methods/`` figures, and one ``lc_tables.pdf``/``lc_tables.tex``
+        per ``LoopClosureFilterMode`` are written, skipping every other per-group figure
         (``traj/est_and_gt/individual_methods/``, ``traj/gt/``, ``traj_lc/``, ``lc/``, ``lc_success_rate/``,
-        ``lc_with_context/``, ``lc_side_by_side/``, ``lc_sep/``, ``lc_sep_inl/``, ``traj_lc_comb/``,
-        and the ``ALL``-only ``lc_success_rate_table.tex``/``lc_successful_total_table.tex``).
+        ``lc_with_context/``, ``lc_side_by_side/``, ``lc_sep/``, ``lc_sep_inl/``, ``traj_lc_comb/``).
 
         For each robot group across all run names:
         - Loads its :class:`SLAMData` and computes merged RMS ATE (pre- and post-optimize) in parallel.
@@ -1378,22 +1398,23 @@ class SLAMEvaluator:
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
-        - ``robustness_table.pdf`` — per-dataset failure count and rate, from the post-optimize RMS ATE
+        - ``robustness_table.pdf`` — per-dataset failure count and rate, from the post-optimize RMS ATE;
+            ``robustness_table.tex`` — standalone LaTeX version
         - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, one column per
             robot in each group
-        - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables
+        - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables;
+            ``timing_table.tex`` — standalone LaTeX version of the alignment runtime table
         - ``data_size_table.pdf`` — estimated communication data size (MB) and total objects sent
-            summary tables; ``data_size_table.tex`` — standalone LaTeX version of the data size table
+            summary tables; ``data_size_table.tex`` — standalone LaTeX version of both tables
         - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
         - ``traj/est_and_gt/individual_methods/`` — per-group, per-method estimated vs. GT trajectory plots
         - ``traj/est_and_gt/all_methods/``        — per-group overlay of every method's estimated trajectories on GT
         - ``traj/gt/``                            — per-group, per-method GT-only trajectory plots
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/<LoopClosureFilterMode.name>/``, once per LC filter mode:
-        - ``lc_tables.pdf``      — LC success rate and count summary tables
-        - ``lc_success_rate_table.tex``, ``lc_successful_total_table.tex`` — under
-            ``LoopClosureFilterMode.ALL`` only, standalone LaTeX versions of the all-LC
-            success rate and successful/total tables
+        - ``lc_tables.pdf``      — LC precision and count summary tables
+        - ``lc_tables.tex``      — standalone LaTeX versions of the all-LC precision and
+            successful/total tables
         - ``lc/<group>.pdf``     — per-group LC error scatter plots
         - ``lc_success_rate/``   — per-group LC success rate plots
         - ``lc_with_context/``   — per-group composite slide figures
@@ -1544,8 +1565,7 @@ class SLAMEvaluator:
                                             run_names, run_display_names, subdirs['lc_sep_inl'], inliers_only=True)
                     SLAMEvaluator._save_traj_lc_comb_figure(group.label, run_names, subdirs['traj_lc'], subdirs['traj_lc_comb'])
 
-            SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf',
-                                          figure_output_level)
+            SLAMEvaluator._save_lc_tables(run_names, run_display_names, results, lc_filter, mode_dir / 'lc_tables.pdf')
 
         # ATE table is LC-independent, so it's saved once at the grouping root. Cell suppression
         # (no LC present) is based on inter-robot LC only, since only inter-robot closures actually
