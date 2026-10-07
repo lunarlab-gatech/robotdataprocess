@@ -111,9 +111,12 @@ def _make_hercules_groups(mode: GroupingMode) -> List[RobotGroup]:
     """Builds HERCULES's robot groups per scenario: all 4 robots aligned, or all 6 pairs."""
     robots = ("Husky1", "Husky2", "Drone1", "Drone2")
     excluded_pairs = [] # All overlap
-    seq_names = ["V2.3.AC", "V2.3.AP", "V2.4.C", "V2.4.F"] #"V2.4.F"] 
-    viz_configs = [_hercules.make_viz_config(seq) for seq in seq_names]
-    seqs = [(seq, seq, robots, viz_config, excluded_pairs) for seq, viz_config in zip(seq_names, viz_configs)]
+    seqs = [
+        ("V2.4.C", "City", robots, _hercules.make_viz_config("V2.4.C"), excluded_pairs),
+        ("V2.3.AP", "Desert-Perimeter", robots, _hercules.make_viz_config("V2.3.AP"), excluded_pairs),
+        ("V2.3.AC", "Desert-Center", robots, _hercules.make_viz_config("V2.3.AC"), excluded_pairs),
+        ("V2.4.F", "Forest", robots, _hercules.make_viz_config("V2.4.F"), excluded_pairs),
+    ]
     return _make_groups("hercules", seqs, mode)
 
 def _make_kimera_multi_groups(mode: GroupingMode) -> List[RobotGroup]:
@@ -180,10 +183,10 @@ def main():
     methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#8B4513"),
                SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#FF1493"),
                SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#FF0000"),
-               #SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#0000FF"),
-               #SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#008000"),
-               SLAMMethod("MG_SM_MS35", "MeronomyGraph (HMO, Max Size 35)", "MG_SM", "#FF8C00", max_size_35),
-               SLAMMethod("MG_TS_SM_MS35", "MeronomyGraph (Max Size 35)", "MG_TS_SM", "#800080", max_size_35)]
+               #SLAMMethod("MG_SM", "MeronomyGraph (HMO, Max Size 40)", "MG_SM", "#0000FF"),
+               #SLAMMethod("MG_TS_SM", "MeronomyGraph (Max Size 40)", "MG_TS_SM", "#008000"),
+               SLAMMethod("MG_TS_SM_MS35", "MeronomyGraph", "MG_TS_SM", "#800080", max_size_35),
+               SLAMMethod("MG_SM_MS35", "MeronomyGraph (HMO)", "MG_SM", "#FF8C00", max_size_35)]
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
