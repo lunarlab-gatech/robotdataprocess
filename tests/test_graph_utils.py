@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 import os
-from robotdataprocess.utils.graph_utils import kruskal_connection_weights, kruskal_spanning_forest
+from robotdataprocess.utils.graph_utils import kruskal_connection_weights, kruskal_spanning_forest, maximum_matching_size
 import unittest
 
 
@@ -103,6 +103,59 @@ class TestKruskalConnectionWeights(unittest.TestCase):
                 chosen = [all_edges[k] for k in rng.choice(len(all_edges), size=rng.randint(1, len(all_edges)), replace=False)]
                 edge_weights = {edge: int(rng.randint(1, 5)) for edge in chosen}
                 self.assertEqual(kruskal_connection_weights(edge_weights), self._brute_force(edge_weights))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestMaximumMatchingSize(unittest.TestCase):
+    """ maximum_matching_size: the size of the largest subset of (left, right) index pairs in which no left and
+    no right index repeats, i.e. a maximum bipartite matching. """
+
+    def _brute_force(self, pairs: list) -> int:
+        """ Largest one-to-one subset by trying every subset (independent of the code under test). """
+        distinct = sorted(set(pairs))
+        for size in range(len(distinct), 0, -1):
+            for subset in itertools.combinations(distinct, size):
+                if len({a for a, _ in subset}) == size and len({b for _, b in subset}) == size:
+                    return size
+        return 0
+
+    def test_empty(self):
+        self.assertEqual(maximum_matching_size(np.empty((0, 2), dtype=np.int32)), 0)
+
+    def test_one_to_one_counts_every_pair(self):
+        self.assertEqual(maximum_matching_size(np.array([[3, 1], [0, 4], [1, 0], [4, 2], [2, 3]])), 5)
+
+    def test_exact_duplicates_count_once(self):
+        self.assertEqual(maximum_matching_size(np.array([[0, 0], [0, 0], [1, 1]])), 2)
+
+    def test_many_to_one_on_either_side(self):
+        self.assertEqual(maximum_matching_size(np.array([[0, 0], [1, 0], [2, 0]])), 1)
+        self.assertEqual(maximum_matching_size(np.array([[0, 0], [0, 1], [0, 2]])), 1)
+
+    def test_crossed_sharing_is_not_min_of_distinct_counts(self):
+        # (a,b1), (a,b2), (c,b3), (d,b3): 3 distinct objects on each side, but only 2 can be kept one-to-one
+        self.assertEqual(maximum_matching_size(np.array([[0, 0], [0, 1], [1, 2], [2, 2]])), 2)
+
+    def test_not_greedy(self):
+        # Taking (0,0) first would leave only one pair; the maximum keeps (0,1) and (1,0)
+        self.assertEqual(maximum_matching_size(np.array([[0, 0], [0, 1], [1, 0]])), 2)
+
+    def test_large_non_contiguous_indices(self):
+        self.assertEqual(maximum_matching_size(np.array([[10, 50], [3, 7]])), 2)
+
+    def test_int32_and_int64_agree(self):
+        # CLIPPER returns int32 associations, numpy defaults to int64
+        pairs = [[0, 0], [0, 1], [1, 0], [2, 2], [2, 2]]
+        self.assertEqual(maximum_matching_size(np.array(pairs, dtype=np.int32)),
+                         maximum_matching_size(np.array(pairs, dtype=np.int64)))
+
+    def test_random_inputs_match_brute_force(self):
+        rng = np.random.RandomState(2)
+        for trial in range(100):
+            with self.subTest(trial=trial):
+                pairs = [(int(rng.randint(0, 5)), int(rng.randint(0, 5))) for _ in range(rng.randint(0, 9))]
+                self.assertEqual(maximum_matching_size(np.array(pairs, dtype=np.int32).reshape(-1, 2)),
+                                 self._brute_force(pairs))
 
 
 if __name__ == '__main__':
