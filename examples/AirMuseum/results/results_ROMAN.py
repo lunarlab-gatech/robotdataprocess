@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator, FigureOutputLevel
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
 NAME_TO_FRAME_MAP: dict = {
     "drone": CoordinateFrame.FLU,
@@ -65,7 +66,9 @@ def main():
 
     all_robots = ["drone", "robotA", "robotB", "robotC"]
     robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O", "MG_TS_SM", "MG_SM"] # "MG_TS_SM", "MG_SM"
+    methods = [SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#1f77b4"), # "MG_TS_SM", "MG_SM"
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#ff7f0e"),
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#2ca02c")]
     dataset_seq = "Scenario3"
     viz_config = make_viz_config(dataset_seq)
 
@@ -75,7 +78,7 @@ def main():
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
     robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups, viz_config)
-    SLAMEvaluator.run_evaluation(roman_root, Path("TEMP") / dataset_seq, run_names, robot_groups,
+    SLAMEvaluator.run_evaluation(roman_root, Path("TEMP") / dataset_seq, methods, robot_groups,
                              critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, 10.0, 
                              figure_output_level=FigureOutputLevel.ESSENTIAL)
 

@@ -424,6 +424,92 @@ class TestFmtFixed(unittest.TestCase):
         fmt = TableData.fmt_fixed()
         self.assertEqual(fmt(float('nan')), "---")
 
+    def test_prefix_applied_before_number(self):
+        fmt = TableData.fmt_fixed(precision=1, prefix='(', suffix='%)')
+        self.assertEqual(fmt(12.5), "(12.5%)")
+
+    def test_prefix_not_applied_to_missing_str(self):
+        fmt = TableData.fmt_fixed(precision=1, prefix='(', suffix='%)')
+        self.assertEqual(fmt(float('nan')), "---")
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestToLatex(unittest.TestCase):
+    """Test TableData.to_latex, including its subheader row and append mode."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.path = str(Path(self.tmp_dir.name) / 'table.tex')
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def _table(self, title: str = "Method") -> TableData:
+        df = pd.DataFrame({'A': [1.0, 2.0], 'B': [3.0, 4.0]}, index=['r1', 'r2'])
+        df.attrs["title"] = title
+        return TableData.from_DataFrame(df)
+
+    def _read(self) -> str:
+        with open(self.path) as f:
+            return f.read()
+
+    def test_no_subheader_has_no_cline(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        lines = self._read().split("\n")
+        header_idx = lines.index(r"    \textbf{Method} & \textbf{A} & \textbf{B} \\")
+        self.assertEqual(lines[header_idx + 1], r"    \hline")
+        self.assertEqual(lines[header_idx + 2], r"    r1 & 1.0 & 3.0 \\")
+        self.assertNotIn(r"\cline", self._read())
+
+    def test_subheader_row_under_cline(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["16 pairs", "5% x"])
+        lines = self._read().split("\n")
+        header_idx = lines.index(r"    \textbf{Method} & \textbf{A} & \textbf{B} \\")
+        self.assertEqual(lines[header_idx + 1:header_idx + 5], [
+            r"    \cline{2-3}",
+            r"     & \textit{16 pairs} & \textit{5\% x} \\",
+            r"    \hline",
+            r"    r1 & 1.0 & 3.0 \\",
+        ])
+
+    def test_subheader_too_short_raises(self):
+        with self.assertRaises(ValueError):
+            self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["16 pairs"])
+        self.assertFalse(Path(self.path).exists())
+
+    def test_subheader_too_long_raises(self):
+        with self.assertRaises(ValueError):
+            self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["a", "b", "c"])
+
+    def test_default_overwrites_existing_file(self):
+        with open(self.path, 'w') as f:
+            f.write("JUNK")
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        content = self._read()
+        self.assertNotIn("JUNK", content)
+        self.assertTrue(content.startswith(r"\begin{table*}[ht]"))
+
+    def test_append_keeps_previous_table(self):
+        self._table().to_latex(self.path, caption="First", label="tab:first")
+        first = self._read()
+        self._table().to_latex(self.path, caption="Second", label="tab:second", append=True)
+        content = self._read()
+        self.assertTrue(content.startswith(first + "\n\n" + r"\begin{table*}[ht]"))
+        self.assertEqual(content.count(r"\begin{table*}"), 2)
+        self.assertLess(content.index(r"\caption{First}"), content.index(r"\caption{Second}"))
+
+    def test_non_star_env_and_custom_column_format(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x", column_format="||l|c|c||", use_star_env=False)
+        content = self._read()
+        self.assertTrue(content.startswith(r"\begin{table}[ht]"))
+        self.assertTrue(content.endswith(r"\end{table}"))
+        self.assertIn(r"\begin{tabular}{||l|c|c||}", content)
+        self.assertNotIn("table*", content)
+
+    def test_default_column_format(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        self.assertIn(r"\begin{tabular}{|l|c|c|}", self._read())
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestRenderOntoAx(unittest.TestCase):

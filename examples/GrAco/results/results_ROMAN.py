@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 from robotdataprocess.eval.RobotGroup import RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
 def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
     """
@@ -34,7 +35,7 @@ def main():
 
     all_robots = ["ground-06", "aerial-08"]
     robot_groups = list(itertools.combinations(all_robots, 2))
-    run_names = ["ROMAN_O"]
+    methods = [SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#1f77b4")]
     dataset_seq = "V1.0"
 
     # Environment image / robot display config
@@ -61,7 +62,7 @@ def main():
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
 
     robot_groups = SLAMEvaluator.make_robot_groups("graco", dataset_seq, robot_groups, viz_config)
-    SLAMEvaluator.run_evaluation(roman_root, Path("graco") / dataset_seq, run_names, robot_groups,
+    SLAMEvaluator.run_evaluation(roman_root, Path("graco") / dataset_seq, methods, robot_groups,
                              critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=20.0)
 
 if __name__ == "__main__":
