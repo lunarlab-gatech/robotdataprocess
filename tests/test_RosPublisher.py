@@ -84,6 +84,8 @@ class TestRosPublisher(unittest.TestCase):
             rclpy.shutdown()
 
         
+    # TODO: _SingleDataPublisher.PublishMode.PUB_ALL is currently untested; add a
+    # regression test (e.g. bursty IMU data) once there's time to verify it.
     def test__run_ROS2_publisher_process(self):
         """ Test that we can publish to ROS2 without losing data."""
 

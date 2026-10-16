@@ -69,7 +69,7 @@ class ImageDataInMemory(ImageData):
                 height = msg.height
                 width = msg.width
                 encoding = ImageData.ImageEncoding.from_ros2_str(msg.encoding)
-                img = ImageData._decode_image_msg(msg, encoding, height, width)
+                img = ImageData.decode_image_msg(msg, encoding, height, width)
                 image_shape = img.shape
                 break
         
@@ -92,7 +92,7 @@ class ImageDataInMemory(ImageData):
                 # Extract images (skipping malformed ones)
                 img = None
                 try:
-                    img = ImageData._decode_image_msg(msg, encoding, height, width)
+                    img = ImageData.decode_image_msg(msg, encoding, height, width)
                 except Exception as e:
                     print("Failure decoding image msg: ", e)
                 if img is not None and img.shape == image_shape: 
@@ -117,7 +117,7 @@ class ImageDataInMemory(ImageData):
             f.write(f"encoding: {encoding}\n")
 
         # Create an ImageData class
-        return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
+        return cls(frame_id, timestamps_np, height, width, encoding, np.load(imgs_path, mmap_mode='r'))
     
     @classmethod
     def from_npy(cls, folder_path: Union[Path, str]):
@@ -152,7 +152,7 @@ class ImageDataInMemory(ImageData):
         encoding = ImageData.ImageEncoding.from_str(attr_data["encoding"])
 
         # Create an ImageData class
-        return cls(frame_id, np.load(ts_path), height, width, encoding, np.load(imgs_path, mmap_mode='r+'))
+        return cls(frame_id, np.load(ts_path), height, width, encoding, np.load(imgs_path, mmap_mode='r'))
 
     @classmethod
     def from_npy_files(cls, npy_folder_path: Union[Path, str], frame_id: str):
