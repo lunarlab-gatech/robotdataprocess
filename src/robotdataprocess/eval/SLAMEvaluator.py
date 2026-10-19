@@ -650,9 +650,7 @@ class SLAMEvaluator:
             if slam_data is None:
                 return None
 
-            # Alignment is the time the method would have used in this group (SlideSLAM stops searching connected pairs)
             entry = SLAMData.get_timing_totals([slam_data])
-            entry["align"] = slam_data.align_time_used()
             if key == "total":
                 return entry["align"] + entry["mapping"] + entry["offline_rpgo"]
             return entry[key]
@@ -724,9 +722,8 @@ class SLAMEvaluator:
         # set it off from the pair columns with a heavy divider.
         heavy_divider_before = lambda col_idx: col_idx == len(cols)
 
-        # Data each group's method would have sent (SlideSLAM stops searching connected pairs)
-        data_size_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_size_used()[0])
-        num_objects_sent_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_size_used()[1])
+        data_size_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_size_mb)
+        num_objects_sent_df: pd.DataFrame = make_raw_df(lambda slam_data: slam_data.data_num_objects_sent)
         data_size_table = SLAMEvaluator.make_highlighted_table(data_size_df, "Estimated Communication Data Size (MB)",
             color_fn=color_fn, fmt=TableData.fmt_fixed(2), higher_is_better=False)
         num_objects_sent_table = SLAMEvaluator.make_highlighted_table(num_objects_sent_df, "Total Number of Objects Sent",

@@ -1,5 +1,4 @@
 import itertools
-import json
 import numpy as np
 import os
 from pathlib import Path
@@ -16,13 +15,6 @@ from unittest.mock import MagicMock, patch
 class _FakeOfflineRPGOParams:
     def __init__(self, sparsified: bool):
         self.sparsified = sparsified
-
-
-class _FakeAlignmentMethod:
-    """Stand-in for MeronomyGraph's AlignmentMethod enum: SLAMData only reads ``name`` and ``is_slideslam``."""
-    def __init__(self, name: str):
-        self.name = name
-        self.is_slideslam = name in ('SLIDEMATCH', 'SLIDEGRAPH')
 
 
 class _FakeSystemParams:
@@ -43,20 +35,16 @@ class _FakeSystemParams:
         dataset_version: The dataset version/sequence; also used here for the results
             directory layout.
         offline_rpgo_params: Holds ``sparsified``, read by ``SLAMData.load_LC_data``.
-        submap_align_params: Holds ``alignment_method``, read to decide whether SlideSLAM chaining applies.
     """
 
     dataset_name: str
     dataset_version: str
     offline_rpgo_params: _FakeOfflineRPGOParams
-    submap_align_params: SimpleNamespace
 
-    def __init__(self, dataset_name: str, dataset_version: str, method: str, sparsified: bool,
-                 alignment_method: str = 'ROMAN_BASE'):
+    def __init__(self, dataset_name: str, dataset_version: str, method: str, sparsified: bool):
         self.dataset_name = dataset_name
         self.dataset_version = dataset_version
         self.offline_rpgo_params = _FakeOfflineRPGOParams(sparsified)
-        self.submap_align_params = SimpleNamespace(alignment_method=_FakeAlignmentMethod(alignment_method))
         self.method: str = method
 
     def _method_dir(self, results_root) -> Path:
@@ -640,42 +628,6 @@ class TestLoadSystemParams(unittest.TestCase):
         self.assertIs(system_params, from_experiment_config.return_value)
 
 
-class TestLoadSlideslamAcceptedAttempt(unittest.TestCase):
-    """SLAMData.load_slideslam_accepted_attempt: the 'attempt' of a SlideSLAM pair's single align.json entry, None if
-    the pair has no loop closure, an error for non-SlideSLAM methods and for a missing file."""
-
-    SLIDEMATCH = _FakeAlignmentMethod('SLIDEMATCH')
-    ROMAN_BASE = _FakeAlignmentMethod('ROMAN_BASE')
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self._tmpdir.name, 'align.json')
-
-    def tearDown(self):
-        self._tmpdir.cleanup()
-
-    def _write(self, entries: list) -> None:
-        with open(self.path, 'w') as f:
-            json.dump(entries, f)
-
-    def test_returns_attempt(self):
-        self._write([{'attempt': 3, 'names': ['a', 'b']}])
-        self.assertEqual(SLAMData.load_slideslam_accepted_attempt(self.path, self.SLIDEMATCH), 3)
-
-    def test_no_loop_closure_is_none(self):
-        self._write([])
-        self.assertIsNone(SLAMData.load_slideslam_accepted_attempt(self.path, self.SLIDEMATCH))
-
-    def test_non_slideslam_method_rejected(self):
-        self._write([{'attempt': 1}])
-        with self.assertRaises(ValueError):
-            SLAMData.load_slideslam_accepted_attempt(self.path, self.ROMAN_BASE)
-
-    def test_missing_file_raises(self):
-        with self.assertRaises(FileNotFoundError):
-            SLAMData.load_slideslam_accepted_attempt(self.path, self.SLIDEMATCH)
-
-
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestParseAlignRuntime(unittest.TestCase):
     """SLAMData._parse_align_runtime: seconds per attempt from the per-attempt format (load averages ignored), or
@@ -692,66 +644,6 @@ class TestParseAlignRuntime(unittest.TestCase):
                 "a_b attempt 2: 4.123456789 load 1.23 0.01 10.00\n"
                 "a_b attempt 3: 0.000000001 load 0.00 0.00 0.00\n  \n")
         self.assertEqual(SLAMData._parse_align_runtime(text), [3.0, 4.123456789, 0.000000001])
-
-
-@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestSlideslamConnectionAttempts(unittest.TestCase):
-    """SLAMData._slideslam_connection_attempts: replays chaining over each inter pair's accepted attempt (pairs with no
-    loop closure add no edge) to give every connected pair's connecting attempt; raises for other methods."""
-
-    ROBOT_NAMES = ['a', 'b', 'c', 'd']
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.mg_root = Path(self._tmpdir.name)
-
-    def tearDown(self):
-        self._tmpdir.cleanup()
-
-    def _system_params(self, alignment_method: str) -> _FakeSystemParams:
-        system_params = _FakeSystemParams(dataset_name='fake_dataset', dataset_version='seq', method='SM',
-                                          sparsified=False, alignment_method=alignment_method)
-        attempts = {('a', 'b'): 1, ('b', 'c'): 2, ('a', 'c'): 3, ('a', 'd'): None, ('b', 'd'): None, ('c', 'd'): None}
-        for (name_a, name_b), attempt in attempts.items():
-            align_dir = system_params.align_result_dir(self.mg_root / 'results', name_a, name_b, {})
-            align_dir.mkdir(parents=True, exist_ok=True)
-            (align_dir / 'align.json').write_text(json.dumps([] if attempt is None else [{'attempt': attempt}]))
-        return system_params
-
-    def test_connecting_attempts(self):
-        connection_attempts = SLAMData._slideslam_connection_attempts(self.mg_root, self._system_params('SLIDEGRAPH'),
-                                                                      self.ROBOT_NAMES, {})
-        # a-c is reached through a-b and b-c at attempt 2, before its own acceptance at 3; d is never connected
-        self.assertEqual(connection_attempts, {('a', 'b'): 1, ('a', 'c'): 2, ('b', 'c'): 2})
-
-    def test_non_slideslam_method_rejected(self):
-        with self.assertRaises(ValueError):
-            SLAMData._slideslam_connection_attempts(self.mg_root, self._system_params('ROMAN_BASE'), self.ROBOT_NAMES, {})
-
-
-@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestAlignTimeUsed(unittest.TestCase):
-    """SLAMData.align_time_used: every attempt of every pair, except a SlideSLAM pair connected through the group's
-    chaining stops at its connecting attempt."""
-
-    def _slam_data(self, connection_attempts) -> SLAMData:
-        slam_data = object.__new__(SLAMData)
-        slam_data.timing = {'align': {('ds', 'seq', 'a', 'a'): [0.0],
-                                      ('ds', 'seq', 'a', 'b'): [1.0, 2.0],
-                                      ('ds', 'seq', 'a', 'c'): [10.0, 20.0, 40.0],
-                                      ('ds', 'seq', 'b', 'c'): [100.0, 200.0],
-                                      ('ds', 'seq', 'c', 'c'): [5.0]}}
-        slam_data.connection_attempts = connection_attempts
-        return slam_data
-
-    def test_non_slideslam_counts_everything(self):
-        self.assertEqual(self._slam_data(None).align_time_used(), 0 + 3 + 70 + 300 + 5)
-
-    def test_truncated_at_connecting_attempt(self):
-        # a-c connected at attempt 2 (first 2 of 3 attempts); b-c connected at 5, beyond its 2 attempts (all kept);
-        # a-b never connected (all kept); self-pairs never truncated
-        slam_data = self._slam_data({('a', 'c'): 2, ('b', 'c'): 5})
-        self.assertEqual(slam_data.align_time_used(), 0 + 3 + 30 + 300 + 5)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -778,67 +670,51 @@ class TestGetTimingTotals(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestTimingAcrossGroups(unittest.TestCase):
-    """A pair shared by two groups has one measurement (deduplicated across groups by get_timing_totals) while its
-    SlideSLAM time used differs per group, since each group's chaining connects the pair at a different attempt."""
-
-    def _group(self, connection_attempts: dict) -> SLAMData:
-        slam_data = object.__new__(SLAMData)
-        slam_data.timing = {'align': {('ds', 's', 'a', 'b'): [1.0, 2.0, 4.0]}, 'mapping': {}, 'offline_rpgo': {}}
-        slam_data.connection_attempts = connection_attempts
-        return slam_data
-
-    def test_shared_measurement_per_group_time_used(self):
-        group_1 = self._group({('a', 'b'): 1})  # robots a and b connected through others at attempt 1
-        group_2 = self._group({('a', 'b'): 3})  # only connected by the pair's own loop closure at attempt 3
-        self.assertEqual(SLAMData.get_timing_totals([group_1, group_2])['align'], 7.0)  # actual compute, counted once
-        self.assertEqual((group_1.align_time_used(), group_2.align_time_used()), (1.0, 7.0))
-
-
-@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestFromMeronomyGraph(unittest.TestCase):
     """SLAMData.from_MeronomyGraph forwards the run's param overrides (None when omitted) to load_system_params, and
-    loads the group's connection attempts only for SlideSLAM methods (None otherwise)."""
+    falls back to no first-stage trajectories when they can't be loaded, and unpacks load_data_size's (MB, objects)."""
 
-    def _load(self, alignment_method: str, *param_overrides_arg):
-        system_params = _FakeSystemParams(dataset_name='ds', dataset_version='seq', method='M', sparsified=False,
-                                          alignment_method=alignment_method)
+    def _load(self, *param_overrides_arg, first_stage_error: Exception = None):
+        system_params = _FakeSystemParams(dataset_name='ds', dataset_version='seq', method='M', sparsified=False)
         with patch.object(SLAMData, 'load_system_params', return_value=system_params) as load_system_params, \
              patch.object(SLAMData, 'load_est_data', return_value=[]), \
-             patch.object(SLAMData, 'load_kimera_rpgo_first_stage_est_data', return_value=[]), \
+             patch.object(SLAMData, 'load_kimera_rpgo_first_stage_est_data', return_value=[MagicMock()],
+                          side_effect=first_stage_error), \
              patch.object(SLAMData, 'load_LC_data', return_value=(MagicMock(), MagicMock())), \
              patch.object(SLAMData, 'load_timing_data', return_value={}), \
-             patch.object(SLAMData, 'load_data_size', return_value={}), \
-             patch.object(SLAMData, 'load_mg_match_stats', return_value=None), \
-             patch.object(SLAMData, '_slideslam_connection_attempts', return_value={('a', 'b'): 1}) as connection:
+             patch.object(SLAMData, 'load_data_size', return_value=(2.5, 7)), \
+             patch.object(SLAMData, 'load_mg_match_stats', return_value=None):
             slam_data = SLAMData.from_MeronomyGraph(Path('/unused'), 'ds', 'seq', 'M', ['b', 'a'], {}, *param_overrides_arg)
-        return slam_data, connection, load_system_params
+        return slam_data, load_system_params
 
     def test_forwards_param_overrides(self):
-        _, _, load_system_params = self._load('ROMAN_BASE', {"submap_align_params.submap_max_size": 35})
+        _, load_system_params = self._load({"submap_align_params.submap_max_size": 35})
         load_system_params.assert_called_once_with(Path('/unused'), 'ds', 'seq', 'M',
                                                    {"submap_align_params.submap_max_size": 35})
 
     def test_no_param_overrides_forwards_none(self):
-        _, _, load_system_params = self._load('ROMAN_BASE')
+        _, load_system_params = self._load()
         load_system_params.assert_called_once_with(Path('/unused'), 'ds', 'seq', 'M', None)
 
-    def test_slideslam_loads_connection_attempts(self):
-        slam_data, connection, _ = self._load('SLIDEMATCH')
-        self.assertEqual(slam_data.connection_attempts, {('a', 'b'): 1})
-        self.assertEqual(connection.call_args.args[2], ['a', 'b'])  # sorted robot names
+    def test_first_stage_trajectories_kept(self):
+        slam_data, _ = self._load()
+        self.assertEqual(len(slam_data.pre_opt_est_trajectories), 1)
 
-    def test_other_methods_have_none(self):
-        slam_data, connection, _ = self._load('ROMAN_BASE')
-        self.assertIsNone(slam_data.connection_attempts)
-        connection.assert_not_called()
+    def test_first_stage_failure_falls_back_to_empty(self):
+        # A missing or unreadable first-stage result is a warning, not an error: the group still loads
+        slam_data, _ = self._load(first_stage_error=FileNotFoundError("no first stage"))
+        self.assertIsInstance(slam_data, SLAMData)
+        self.assertEqual(slam_data.pre_opt_est_trajectories, [])
+
+    def test_data_size_unpacked(self):
+        slam_data, _ = self._load()
+        self.assertEqual((slam_data.data_size_mb, slam_data.data_num_objects_sent), (2.5, 7))
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoadDataSize(unittest.TestCase):
-    """SLAMData.load_data_size: each inter-robot pair's cumulative bytes / objects sent per attempt. Files without
-    attempt lines are one attempt equal to their totals (objects None if the file predates that line); attempt lines
-    must pair up and end at the totals; unknown labels and a missing data size line raise."""
+    """SLAMData.load_data_size: bytes (as decimal MB) and objects sent summed over every inter-robot pair, self-pairs
+    excluded; objects None if any file lacks that line; unknown labels and a missing data size line raise."""
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -853,38 +729,35 @@ class TestLoadDataSize(unittest.TestCase):
         align_dir.mkdir(parents=True, exist_ok=True)
         (align_dir / 'align.data_size.txt').write_text(text)
 
-    def _load(self, robot_names: list) -> dict:
+    def _write_three_robots(self, ac_text: str) -> None:
+        # Distinct powers of two expose a missing or doubled pair; the large self-pair must never be counted
+        self._write('a', 'a', "Total submap data size (bytes): 1000000000\nTotal number of objects sent: 1000\n")
+        self._write('a', 'b', "Total submap data size (bytes): 1000000\nTotal number of objects sent: 1\n")
+        self._write('a', 'c', ac_text)
+        self._write('b', 'c', "Total submap data size (bytes): 4000000\nTotal number of objects sent: 4\n")
+
+    def _load(self, robot_names: list) -> tuple:
         return SLAMData.load_data_size(self.mg_root, self.system_params, robot_names, {})
 
-    def test_totals_only_is_one_attempt(self):
-        self._write('a', 'b', "Total submap data size (bytes): 100\nTotal number of objects sent: 3\n")
-        self.assertEqual(self._load(['a', 'b']), {('ds', 'seq', 'a', 'b'): ([100.0], [3])})
+    def test_sums_inter_pairs_in_mb(self):
+        self._write_three_robots("Total submap data size (bytes): 2000000\nTotal number of objects sent: 2\n")
+        self.assertEqual(self._load(['a', 'b', 'c']), (7.0, 7))
 
-    def test_older_file_without_objects_line(self):
-        self._write('a', 'b', "Total submap data size (bytes): 100\n")
-        self.assertEqual(self._load(['a', 'b']), {('ds', 'seq', 'a', 'b'): ([100.0], None)})
+    def test_lines_in_either_order(self):
+        self._write('a', 'b', "Total number of objects sent: 3\nTotal submap data size (bytes): 500000\n")
+        self.assertEqual(self._load(['a', 'b']), (0.5, 3))
 
-    def test_attempt_lines(self):
-        self._write('a', 'b', "Total submap data size (bytes): 1388\nTotal number of objects sent: 45\n"
-                              "Attempt 1 data size (bytes): 840\nAttempt 1 number of objects sent: 30\n"
-                              "Attempt 2 data size (bytes): 1388\nAttempt 2 number of objects sent: 45\n")
-        self.assertEqual(self._load(['a', 'b']), {('ds', 'seq', 'a', 'b'): ([840.0, 1388.0], [30, 45])})
+    def test_any_file_without_objects_line_gives_none(self):
+        self._write_three_robots("Total submap data size (bytes): 2000000\n")
+        self.assertEqual(self._load(['a', 'b', 'c']), (7.0, None))
 
-    def test_every_inter_pair_and_no_self_pairs(self):
-        for name_a, name_b in (('a', 'b'), ('a', 'c'), ('b', 'c')):
-            self._write(name_a, name_b, "Total submap data size (bytes): 1\nTotal number of objects sent: 1\n")
-        self.assertEqual(set(self._load(['a', 'b', 'c'])), {('ds', 'seq', 'a', 'b'), ('ds', 'seq', 'a', 'c'), ('ds', 'seq', 'b', 'c')})
+    def test_single_robot_sends_nothing(self):
+        self.assertEqual(self._load(['a']), (0.0, 0))
 
     def test_invalid_files_raise(self):
         cases = {
-            'unpaired attempt lines': "Total submap data size (bytes): 20\nTotal number of objects sent: 2\n"
-                                      "Attempt 1 data size (bytes): 10\nAttempt 2 data size (bytes): 20\n"
-                                      "Attempt 1 number of objects sent: 1\n",
-            'totals differ from last attempt': "Total submap data size (bytes): 99\nTotal number of objects sent: 2\n"
-                                               "Attempt 1 data size (bytes): 20\nAttempt 1 number of objects sent: 2\n",
-            'objects total differs': "Total submap data size (bytes): 20\nTotal number of objects sent: 3\n"
-                                     "Attempt 1 data size (bytes): 20\nAttempt 1 number of objects sent: 2\n",
             'unknown label': "Total submap data size (bytes): 20\nSomething else: 1\n",
+            'attempt line': "Total submap data size (bytes): 20\nAttempt 1 data size (bytes): 20\n",
             'missing data size line': "Total number of objects sent: 2\n",
         }
         for name, text in cases.items():
@@ -897,36 +770,6 @@ class TestLoadDataSize(unittest.TestCase):
         self._write('a', 'b', "Total submap data size (bytes): 1\n")  # b-c's file is missing
         with self.assertRaises(FileNotFoundError):
             self._load(['a', 'b', 'c'])
-
-
-@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
-class TestDataSizeUsed(unittest.TestCase):
-    """SLAMData.data_size_used: each pair's cumulative values at its last attempt that counts in this group, summed,
-    in MB; objects sent None if any pair lacks them."""
-
-    def _slam_data(self, data_size: dict, connection_attempts) -> SLAMData:
-        slam_data = object.__new__(SLAMData)
-        slam_data.data_size = data_size
-        slam_data.connection_attempts = connection_attempts
-        return slam_data
-
-    def setUp(self):
-        self.data_size = {('ds', 's', 'a', 'b'): ([100.0, 300.0, 600.0], [1, 3, 6]),
-                          ('ds', 's', 'a', 'c'): ([50.0], [2]),
-                          ('ds', 's', 'b', 'c'): ([10.0, 20.0], [1, 2])}
-
-    def test_non_slideslam_uses_last_attempt(self):
-        self.assertEqual(self._slam_data(self.data_size, None).data_size_used(), ((600.0 + 50.0 + 20.0) / 1e6, 6 + 2 + 2))
-
-    def test_truncated_at_connecting_attempt(self):
-        # a-b connected at attempt 2 (value after attempt 2); b-c connected at 5, beyond its 2 attempts (last value)
-        slam_data = self._slam_data(self.data_size, {('a', 'b'): 2, ('b', 'c'): 5})
-        self.assertEqual(slam_data.data_size_used(), ((300.0 + 50.0 + 20.0) / 1e6, 3 + 2 + 2))
-
-    def test_unrecorded_objects_make_total_none(self):
-        data_size = dict(self.data_size)
-        data_size[('ds', 's', 'a', 'c')] = ([50.0], None)
-        self.assertEqual(self._slam_data(data_size, None).data_size_used(), ((600.0 + 50.0 + 20.0) / 1e6, None))
 
 
 if __name__ == '__main__':
