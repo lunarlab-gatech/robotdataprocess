@@ -84,10 +84,10 @@ class SLAMEvaluator:
                                 style: TableData.TableStyleName = TableData.TableStyleName.GEORGIA_TECH) -> TableData:
         """Resolve two raw numeric DataFrames into one merged-segment TableData.
 
-        Each column's two values (e.g. successful/total counts) are ranked
-        independently and combined into a single "A<separator>B" cell, with the
-        separator colored by ``style``. The table's title is stored in the
-        returned TableData's ``df.attrs["title"]``.
+        Each column's two values (e.g. successful/total counts) are combined into a single
+        "A<separator>B" cell, with the separator colored by ``style``. Only A is ranked (if
+        ``highlight``); B is display-only (e.g. a total that isn't a measure of quality). The
+        table's title is stored in the returned TableData's ``df.attrs["title"]``.
         """
         table_a = TableData.from_DataFrame(raw_df_a)
         table_a.format_and_color_cells(color_fn=color_fn, fmt=fmt)
@@ -95,8 +95,6 @@ class SLAMEvaluator:
             table_a.highlight_best_and_worst_results_by_column(higher_is_better=higher_is_better)
         table_b = TableData.from_DataFrame(raw_df_b)
         table_b.format_and_color_cells(color_fn=color_fn, fmt=fmt)
-        if highlight:
-            table_b.highlight_best_and_worst_results_by_column(higher_is_better=higher_is_better)
         merged = TableData.merge_TableData(table_a, table_b, separator=separator, style=style)
         merged.df.attrs["title"] = title
         return merged
@@ -1080,10 +1078,8 @@ class SLAMEvaluator:
             ).reindex(run_names)
 
         def make_combined_col(idx: int, col_name: str) -> TableData:
-            # Only the successful count is ranked; the total is display-only.
-            successful_table = SLAMEvaluator.make_highlighted_table(pd.DataFrame({col_name: successful_series(idx)}), "Method", fmt=int_fmt)
-            total_table = SLAMEvaluator.make_highlighted_table(pd.DataFrame({col_name: total_series(idx)}), "Method", fmt=int_fmt, emphasis_rankings=False)
-            return TableData.merge_TableData(successful_table, total_table)
+            return SLAMEvaluator._style_combined_columns(pd.DataFrame({col_name: successful_series(idx)}),
+                                                         pd.DataFrame({col_name: total_series(idx)}), "Method", fmt=int_fmt)
 
         # Combined tables: one per LC side, columns match PDF table titles
         table_l = SLAMEvaluator.make_highlighted_table(pd.DataFrame({COL_SR_ALL: sr_series(0)}), "Method", fmt=percent_fmt) \

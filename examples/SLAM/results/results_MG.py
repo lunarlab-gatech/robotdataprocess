@@ -156,7 +156,7 @@ def main():
     See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
     """
     mode = GroupingMode.GLOBAL
-    only_heterogeneous = True
+    only_heterogeneous = False
     all_dir_name = "heterogeneous" if only_heterogeneous else "all"
 
     if mode == GroupingMode.GLOBAL or mode == GroupingMode.PAIRWISE_EVERY:
@@ -179,14 +179,14 @@ def main():
 
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
-    max_size_35 = {"submap_align_params.submap_max_size": 35}
-    methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#8B4513"),
-               SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#FF1493"),
-               SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#FF0000"),
-               #SLAMMethod("MG_SM", "MeronomyGraph (HMO, Max Size 40)", "MG_SM", "#0000FF"),
-               #SLAMMethod("MG_TS_SM", "MeronomyGraph (Max Size 40)", "MG_TS_SM", "#008000"),
-               SLAMMethod("MG_TS_SM_MS35", "MeronomyGraph", "MG_TS_SM", "#800080", max_size_35),
-               SLAMMethod("MG_SM_MS35", "MeronomyGraph (HMO)", "MG_SM", "#FF8C00", max_size_35)]
+    max_size_40 = {"submap_align_params.submap_max_size": 40}
+    methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#009E73"),
+               SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#CC79A7"),
+               SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#D55E00"),
+               #SLAMMethod("MG_SM_40", "MeronomyGraph (HMO, Max Size 40)", "MG_SM", "#0000FF", max_size_40),
+               #SLAMMethod("MG_TS_SM_40", "MeronomyGraph (Max Size 40)", "MG_TS_SM", "#008000", max_size_40),
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#00588B"),
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#56B4E9")]
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')

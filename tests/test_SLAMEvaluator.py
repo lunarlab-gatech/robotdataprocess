@@ -425,6 +425,19 @@ class TestStyleCombinedColumns(unittest.TestCase):
         self.assertEqual(self._separator(style=TableData.TableStyleName.LATEX, separator=' '),
                          TableData.FormattedTextSegment(' ', color=None))
 
+    def _styles(self, **kwargs) -> list:
+        """Returns ``[(A styles, B styles)]`` per row for A = [5, 3] and B = [10, 20]."""
+        df_a = pd.DataFrame({'g1': [5.0, 3.0]}, index=['R', 'M'])
+        df_b = pd.DataFrame({'g1': [10.0, 20.0]}, index=['R', 'M'])
+        table = SLAMEvaluator._style_combined_columns(df_a, df_b, "T", fmt=TableData.fmt_fixed(0), **kwargs)
+        return [(table.df.iat[row, 0][0].styles, table.df.iat[row, 0][2].styles) for row in range(2)]
+
+    def test_only_first_value_is_ranked(self):
+        self.assertEqual(self._styles(), [([TableData.TextStyle.BOLD], []), ([TableData.TextStyle.UNDERLINE], [])])
+
+    def test_highlight_false_ranks_neither_value(self):
+        self.assertEqual(self._styles(highlight=False), [([], []), ([], [])])
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestSaveRobustnessTable(unittest.TestCase):
@@ -520,9 +533,9 @@ class TestSaveLCTables(unittest.TestCase):
     def test_tex_successful_total_table_has_uncolored_separator(self):
         _, counts_tex = self.content.split("\n\n" + r"\begin{table*}")
         self.assertIn(r"\label{tab:lc_successful_total_only_inter_lc}", counts_tex)
-        self.assertIn(r"    R & \underline{2}/\textbf{5} \\", counts_tex)
-        self.assertIn(r"    M & \textbf{4}/\textbf{5} \\", counts_tex)
-        self.assertIn(r"    Z & \textcolor[HTML]{CC2222}{0}/\underline{3} \\", counts_tex)
+        self.assertIn(r"    R & \underline{2}/5 \\", counts_tex)
+        self.assertIn(r"    M & \textbf{4}/5 \\", counts_tex)
+        self.assertIn(r"    Z & \textcolor[HTML]{CC2222}{0}/3 \\", counts_tex)
 
     def test_tex_excludes_inlier_tables(self):
         self.assertEqual(self.content.count(r"\begin{table*}"), 2)
