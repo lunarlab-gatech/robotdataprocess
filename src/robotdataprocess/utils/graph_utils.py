@@ -1,3 +1,6 @@
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import maximum_bipartite_matching
 from typing import Any, Dict, Hashable, Iterator, Set, Tuple
 
 
@@ -67,3 +70,28 @@ def kruskal_connection_weights(edge_weights: Dict[Tuple[Hashable, Hashable], Any
             for node_y in group_b:
                 connection_weights[tuple(sorted((node_x, node_y)))] = edge_weights[edge]
     return connection_weights
+
+
+def maximum_matching_size(pairs: np.ndarray) -> int:
+    """
+    Size of a maximum bipartite matching of (left, right) index pairs: the largest subset of the pairs in
+    which no left index and no right index repeats.
+
+    Args:
+        pairs (np.ndarray): N x 2 array of non-negative integer (left index, right index) pairs; may repeat.
+    Returns:
+        int: The matching size, which is N when no index repeats on either side.
+    """
+
+    # Without a repeated index on either side, every pair can be kept
+    num_pairs: int = len(pairs)
+    if num_pairs == 0:
+        return 0
+    if len(np.unique(pairs[:, 0])) == num_pairs and len(np.unique(pairs[:, 1])) == num_pairs:
+        return num_pairs
+
+    # Otherwise match on the biadjacency matrix and count the left indices that got a partner
+    biadjacency: csr_matrix = csr_matrix((np.ones(num_pairs), (pairs[:, 0], pairs[:, 1])),
+                                         shape=(int(pairs[:, 0].max()) + 1, int(pairs[:, 1].max()) + 1))
+    partners: np.ndarray = maximum_bipartite_matching(biadjacency, perm_type='column')
+    return int(np.sum(partners >= 0))
