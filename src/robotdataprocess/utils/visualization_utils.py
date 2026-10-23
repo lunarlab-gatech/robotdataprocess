@@ -28,6 +28,20 @@ def build_color_palette(colorList: List[str]) -> List[List[Tuple[float, float, f
         paletteList.append([colorsys.hls_to_rgb(h, li, s) for li in lightnesses])
     return paletteList
 
+def darken_color(color, amount: float = 0.6) -> Tuple[float, float, float]:
+    """
+    Darkens a color by scaling down its HLS lightness.
+
+    Args:
+        color: Any matplotlib-recognized color (hex string, name, or RGB(A) tuple).
+        amount: Factor applied to the color's lightness; lower values darken more.
+
+    Returns:
+        The darkened color as an (r, g, b) tuple of floats (0-1).
+    """
+    h, l, s = colorsys.rgb_to_hls(*mcolors.to_rgb(color))
+    return colorsys.hls_to_rgb(h, l * amount, s)
+
 def draw_background_image(ax: plt.Axes, background_image_path: str, background_image_x_edge: Union[float, None],
                            background_image_extent_offsets: Union[Tuple[float, float], None]) -> List[float]:
     """

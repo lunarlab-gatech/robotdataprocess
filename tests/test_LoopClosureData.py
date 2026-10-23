@@ -176,6 +176,76 @@ class TestLoopClosureDataToJson(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestLoopClosureDataApplyNamesOverride(unittest.TestCase):
+    """Test apply_names_override, the shared remap every from_* loader's names_override uses."""
+
+    @staticmethod
+    def _make_lc(names):
+        n = len(names)
+        return LoopClosureData(
+            timestamps_a=[Decimal("0.1")] * n,
+            timestamps_b=[Decimal("0.2")] * n,
+            names=names,
+            translations=np.tile(np.array([[1.0, 2.0, 3.0]]), (n, 1)),
+            orientations=np.tile(np.array([[0.0, 0.0, 0.0, 1.0]]), (n, 1)),
+        )
+
+    def test_replaces_both_names(self):
+        """Every mapped name in the pair is replaced."""
+        lc_data = self._make_lc([("a", "b")])
+        lc_data.apply_names_override({"a": "Husky1", "b": "Drone2"})
+
+        self.assertEqual(lc_data.names, [("Husky1", "Drone2")])
+
+    def test_partial_mapping_keeps_unmapped_names(self):
+        """Names absent from the override are left as-is."""
+        lc_data = self._make_lc([("a", "b")])
+        lc_data.apply_names_override({"a": "Husky1"})
+
+        self.assertEqual(lc_data.names, [("Husky1", "b")])
+
+    def test_empty_dict_keeps_all_names(self):
+        """An empty override changes nothing."""
+        lc_data = self._make_lc([("a", "b"), ("b", "c")])
+        lc_data.apply_names_override({})
+
+        self.assertEqual(lc_data.names, [("a", "b"), ("b", "c")])
+
+    def test_remaps_every_entry_including_intra_and_flipped(self):
+        """Each entry is remapped independently, including self-pairs and flipped pairs."""
+        lc_data = self._make_lc([("a", "b"), ("b", "a"), ("a", "a")])
+        lc_data.apply_names_override({"a": "Husky1", "b": "Drone2"})
+
+        self.assertEqual(lc_data.names,
+                         [("Husky1", "Drone2"), ("Drone2", "Husky1"), ("Husky1", "Husky1")])
+
+    def test_empty_loop_closures(self):
+        """A LoopClosureData with no entries stays empty rather than raising."""
+        lc_data = self._make_lc([])
+        lc_data.apply_names_override({"a": "Husky1"})
+
+        self.assertEqual(lc_data.names, [])
+
+    def test_unrelated_keys_are_ignored(self):
+        """Override keys that match no name leave the pairs untouched."""
+        lc_data = self._make_lc([("a", "b")])
+        lc_data.apply_names_override({"z": "Husky1"})
+
+        self.assertEqual(lc_data.names, [("a", "b")])
+
+    def test_other_fields_untouched(self):
+        """Only names change -- timestamps, translations, and orientations are preserved."""
+        lc_data = self._make_lc([("a", "b")])
+        lc_data.apply_names_override({"a": "Husky1", "b": "Drone2"})
+
+        self.assertEqual(lc_data.num_loop_closures, 1)
+        self.assertEqual(lc_data.timestamps_a[0], Decimal("0.1"))
+        self.assertEqual(lc_data.timestamps_b[0], Decimal("0.2"))
+        np.testing.assert_array_equal(lc_data.translations[0].astype(np.float64), [1.0, 2.0, 3.0])
+        np.testing.assert_array_equal(lc_data.orientations[0].astype(np.float64), [0.0, 0.0, 0.0, 1.0])
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLoopClosureDataFromJsonNamesOverride(unittest.TestCase):
     """Test from_json names_override parameter."""
 

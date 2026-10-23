@@ -1,14 +1,42 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import pdist
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from typing import Sequence, Union
 
 
-def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> int:
+def max_pairwise_distance(points: np.ndarray) -> float:
     """
-    Index of the entry in a sorted timestamp array closest to a query time.
+    Returns the largest distance between any two of ``points`` (N, 3), comparing only convex hull
+    vertices since the farthest pair always lies on the hull. ``QJ`` joggles Qhull's internal copy
+    so near-planar or collinear sets (e.g. ground robots) still yield a hull; distances are still
+    measured between the original, unjoggled points.
+
+    Args:
+        points: (N, 3) array of positions.
+    Returns:
+        float: The largest pairwise distance.
+    Raises:
+        ValueError: If there are fewer than 2 points.
+    """
+    if len(points) < 2:
+        raise ValueError(f"Need at least 2 points to compute a pairwise distance, got {len(points)}.")
+
+    # Too few points to build a hull, but few enough to compare every pair directly
+    if len(points) <= points.shape[1]:
+        return float(pdist(points).max())
+    hull = ConvexHull(points, qhull_options="QJ")
+    return float(pdist(points[hull.vertices]).max())
+
+
+def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]],
+                   t: Union[float, np.ndarray, Sequence[float]]) -> Union[int, np.ndarray]:
+    """
+    Index (or indices) of the entry/entries in a sorted timestamp array closest to
+    query time(s).
 
     Snaps a time onto an existing sample grid -- e.g. anchoring a loop closure's
     timestamp onto the pose-graph vertices it must reference. A query outside the
@@ -17,10 +45,11 @@ def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> in
 
     Args:
         sorted_ts: (N,) timestamps, sorted ascending.
-        t: Query timestamp.
+        t: A single query timestamp, or an (M,) array of query timestamps.
 
     Returns:
-        Index into sorted_ts of the closest timestamp.
+        A python int for a scalar t, or an (M,) int array for an array t -- the
+        index/indices into sorted_ts of the closest timestamp(s).
 
     Raises:
         ValueError: If sorted_ts is empty.
@@ -29,12 +58,15 @@ def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]], t: float) -> in
     if ts.size == 0:
         raise ValueError("sorted_ts must not be empty.")
 
-    k = int(np.searchsorted(ts, t, side='left'))
-    if k == 0:
-        return 0
-    if k >= ts.size:
-        return ts.size - 1
-    return k if abs(ts[k] - t) < abs(ts[k - 1] - t) else k - 1
+    is_scalar = np.ndim(t) == 0
+    queries = np.atleast_1d(np.asarray(t, dtype=np.float64))
+
+    right_idx = np.clip(np.searchsorted(ts, queries, side='left'), 0, ts.size - 1)
+    left_idx = np.clip(right_idx - 1, 0, ts.size - 1)
+    use_right = np.abs(ts[right_idx] - queries) < np.abs(ts[left_idx] - queries)
+    indices = np.where(use_right, right_idx, left_idx)
+
+    return int(indices[0]) if is_scalar else indices
 
 
 def interpolate_poses(ts: np.ndarray, pos: np.ndarray,

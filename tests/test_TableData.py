@@ -6,6 +6,7 @@ from io import StringIO
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
+import math
 import os
 import pandas as pd
 from pathlib import Path
@@ -191,6 +192,92 @@ class TestFormatAndColorCells(unittest.TestCase):
         table = TableData.from_DataFrame(pd.DataFrame({'ColA': {'a': 3.0}}))
         table.format_and_color_cells()
         self.assertEqual(table.df.at['a', 'ColA'][0].raw_value, 3.0)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestFormatAndColorCellsByColumn(unittest.TestCase):
+    """Test format_and_color_cells with color_fn_by_col: named columns use their own color_fn, the rest use color_fn."""
+
+    @staticmethod
+    def _default_color(value: float) -> str:
+        return f"default:{value}"
+
+    @staticmethod
+    def _override_color(value: float) -> str:
+        return f"override:{value}"
+
+    @staticmethod
+    def _make_table() -> TableData:
+        nan = float('nan')
+        return TableData.from_DataFrame(pd.DataFrame({'ColA': {'a': 1.0, 'b': 0.0, 'c': 2.0},
+                                                      'ColB': {'a': 5.0, 'b': nan, 'c': 0.0},
+                                                      'ColC': {'a': 7.0, 'b': 8.0, 'c': nan}}))
+
+    @staticmethod
+    def _colors(table: TableData) -> list:
+        n_rows, n_cols = table.df.shape
+        return [[table.df.iat[r, c][0].color for c in range(n_cols)] for r in range(n_rows)]
+
+    def test_overrides_only_named_middle_column(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={'ColB': self._override_color})
+        self.assertEqual(self._colors(table), [['default:1.0', 'override:5.0', 'default:7.0'],
+                                               ['default:0.0', 'override:nan', 'default:8.0'],
+                                               ['default:2.0', 'override:0.0', 'default:nan']])
+
+    def test_unnamed_columns_use_builtin_default_when_color_fn_none(self):
+        style = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+        red, navy = style.TextFailureColor, style.TextColor
+        table = self._make_table()
+        table.format_and_color_cells(color_fn_by_col={'ColB': self._override_color})
+        self.assertEqual(self._colors(table), [[navy, 'override:5.0', navy],
+                                               [red, 'override:nan', navy],
+                                               [navy, 'override:0.0', red]])
+
+    def test_every_column_overridden(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color,
+                                     color_fn_by_col=dict.fromkeys(['ColA', 'ColB', 'ColC'], self._override_color))
+        self.assertEqual(self._colors(table), [['override:1.0', 'override:5.0', 'override:7.0'],
+                                               ['override:0.0', 'override:nan', 'override:8.0'],
+                                               ['override:2.0', 'override:0.0', 'override:nan']])
+
+    def test_empty_dict_matches_none(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={})
+        self.assertEqual(self._colors(table), [['default:1.0', 'default:5.0', 'default:7.0'],
+                                               ['default:0.0', 'default:nan', 'default:8.0'],
+                                               ['default:2.0', 'default:0.0', 'default:nan']])
+
+    def test_unknown_column_raises(self):
+        table = self._make_table()
+        with self.assertRaises(ValueError) as ctx:
+            table.format_and_color_cells(color_fn_by_col={'ColB': self._override_color, 'ColZ': self._override_color})
+        self.assertIn("'ColZ'", str(ctx.exception))
+        self.assertNotIn("'ColB'", str(ctx.exception))
+
+    def test_unknown_column_raises_on_zero_row_table(self):
+        table = TableData.from_DataFrame(pd.DataFrame({'ColA': pd.Series([], dtype=float)}))
+        with self.assertRaises(ValueError) as ctx:
+            table.format_and_color_cells(color_fn_by_col={'ColZ': self._override_color})
+        self.assertIn("'ColZ'", str(ctx.exception))
+
+    def test_repeated_row_labels_colored_per_cell(self):
+        table = TableData.from_DataFrame(pd.DataFrame({'ColA': [1.0, 2.0, 3.0], 'ColB': [4.0, 5.0, 6.0]},
+                                                      index=['a', 'a', 'b']))
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={'ColA': self._override_color})
+        self.assertEqual(self._colors(table), [['override:1.0', 'default:4.0'],
+                                               ['override:2.0', 'default:5.0'],
+                                               ['override:3.0', 'default:6.0']])
+
+    def test_overridden_column_keeps_fmt_and_raw_value(self):
+        table = self._make_table()
+        table.format_and_color_cells(fmt=TableData.fmt_fixed(1, suffix='m'), color_fn_by_col={'ColB': self._override_color})
+        segments = [table.df.iat[r, 1][0] for r in range(3)]
+        self.assertEqual([s.text for s in segments], ["5.0m", "---", "0.0m"])
+        self.assertEqual(segments[0].raw_value, 5.0)
+        self.assertTrue(math.isnan(segments[1].raw_value))
+        self.assertEqual(segments[2].raw_value, 0.0)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -423,6 +510,92 @@ class TestFmtFixed(unittest.TestCase):
     def test_default_missing_str_is_dashes(self):
         fmt = TableData.fmt_fixed()
         self.assertEqual(fmt(float('nan')), "---")
+
+    def test_prefix_applied_before_number(self):
+        fmt = TableData.fmt_fixed(precision=1, prefix='(', suffix='%)')
+        self.assertEqual(fmt(12.5), "(12.5%)")
+
+    def test_prefix_not_applied_to_missing_str(self):
+        fmt = TableData.fmt_fixed(precision=1, prefix='(', suffix='%)')
+        self.assertEqual(fmt(float('nan')), "---")
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestToLatex(unittest.TestCase):
+    """Test TableData.to_latex, including its subheader row and append mode."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.path = str(Path(self.tmp_dir.name) / 'table.tex')
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def _table(self, title: str = "Method") -> TableData:
+        df = pd.DataFrame({'A': [1.0, 2.0], 'B': [3.0, 4.0]}, index=['r1', 'r2'])
+        df.attrs["title"] = title
+        return TableData.from_DataFrame(df)
+
+    def _read(self) -> str:
+        with open(self.path) as f:
+            return f.read()
+
+    def test_no_subheader_has_no_cline(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        lines = self._read().split("\n")
+        header_idx = lines.index(r"    \textbf{Method} & \textbf{A} & \textbf{B} \\")
+        self.assertEqual(lines[header_idx + 1], r"    \hline")
+        self.assertEqual(lines[header_idx + 2], r"    r1 & 1.0 & 3.0 \\")
+        self.assertNotIn(r"\cline", self._read())
+
+    def test_subheader_row_under_cline(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["16 pairs", "5% x"])
+        lines = self._read().split("\n")
+        header_idx = lines.index(r"    \textbf{Method} & \textbf{A} & \textbf{B} \\")
+        self.assertEqual(lines[header_idx + 1:header_idx + 5], [
+            r"    \cline{2-3}",
+            r"     & \textit{16 pairs} & \textit{5\% x} \\",
+            r"    \hline",
+            r"    r1 & 1.0 & 3.0 \\",
+        ])
+
+    def test_subheader_too_short_raises(self):
+        with self.assertRaises(ValueError):
+            self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["16 pairs"])
+        self.assertFalse(Path(self.path).exists())
+
+    def test_subheader_too_long_raises(self):
+        with self.assertRaises(ValueError):
+            self._table().to_latex(self.path, caption="Cap", label="tab:x", subheader=["a", "b", "c"])
+
+    def test_default_overwrites_existing_file(self):
+        with open(self.path, 'w') as f:
+            f.write("JUNK")
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        content = self._read()
+        self.assertNotIn("JUNK", content)
+        self.assertTrue(content.startswith(r"\begin{table*}[ht]"))
+
+    def test_append_keeps_previous_table(self):
+        self._table().to_latex(self.path, caption="First", label="tab:first")
+        first = self._read()
+        self._table().to_latex(self.path, caption="Second", label="tab:second", append=True)
+        content = self._read()
+        self.assertTrue(content.startswith(first + "\n\n" + r"\begin{table*}[ht]"))
+        self.assertEqual(content.count(r"\begin{table*}"), 2)
+        self.assertLess(content.index(r"\caption{First}"), content.index(r"\caption{Second}"))
+
+    def test_non_star_env_and_custom_column_format(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x", column_format="||l|c|c||", use_star_env=False)
+        content = self._read()
+        self.assertTrue(content.startswith(r"\begin{table}[ht]"))
+        self.assertTrue(content.endswith(r"\end{table}"))
+        self.assertIn(r"\begin{tabular}{||l|c|c||}", content)
+        self.assertNotIn("table*", content)
+
+    def test_default_column_format(self):
+        self._table().to_latex(self.path, caption="Cap", label="tab:x")
+        self.assertIn(r"\begin{tabular}{|l|c|c|}", self._read())
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -722,6 +895,14 @@ class TestToPdf(unittest.TestCase):
         table.highlight_best_and_worst_results_by_column()
         return table
 
+    def _make_table_with_columns(self, num_data_cols: int, title="Method"):
+        df = pd.DataFrame({f'Col{i}': {'r1': float(i)} for i in range(num_data_cols)})
+        df.attrs["title"] = title
+        table = TableData.from_DataFrame(df)
+        table.format_and_color_cells()
+        table.highlight_best_and_worst_results_by_column()
+        return table
+
     def test_saves_single_table_pdf(self):
         table = self._make_table()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -765,14 +946,40 @@ class TestToPdf(unittest.TestCase):
                 _, kwargs = spy.call_args
                 self.assertEqual(kwargs['figsize'][0], 20.0)
 
-    def test_default_width_is_12_inches(self):
-        table = self._make_table()
+    def test_default_width_scales_with_column_count(self):
+        """
+        Default width is _DEFAULT_WIDTH_PER_COLUMN * (num data columns + 1 for the row-label
+        column). A single-data-column table (2 rendered columns) and a 7-data-column table (8
+        rendered columns, matching the "6 data + Average" case _DEFAULT_WIDTH_PER_COLUMN was
+        calibrated against) exercise both ends -- a wrong +1 offset or wrong ratio would fail one
+        without necessarily failing the other.
+        """
+        one_col_table = self._make_table()
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = Path(tmpdir) / "out.pdf"
             with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
-                TableData.to_pdf([table], str(save_path))
+                TableData.to_pdf([one_col_table], str(save_path))
                 _, kwargs = spy.call_args
-                self.assertEqual(kwargs['figsize'][0], 12.0)
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 2)
+
+        seven_col_table = self._make_table_with_columns(7)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([seven_col_table], str(save_path))
+                _, kwargs = spy.call_args
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 8)
+
+    def test_default_width_uses_widest_table_among_multiple(self):
+        """Passing several tables at once bases the default width on whichever has the most columns."""
+        narrow_table = self._make_table()
+        wide_table = self._make_table_with_columns(7, title="Other")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / "out.pdf"
+            with unittest.mock.patch.object(plt, 'subplots', wraps=plt.subplots) as spy:
+                TableData.to_pdf([narrow_table, wide_table], str(save_path))
+                _, kwargs = spy.call_args
+                self.assertAlmostEqual(kwargs['figsize'][0], TableData._DEFAULT_WIDTH_PER_COLUMN * 8)
 
     def test_font_sizes_forwarded_to_render_onto_ax(self):
         table = self._make_table()

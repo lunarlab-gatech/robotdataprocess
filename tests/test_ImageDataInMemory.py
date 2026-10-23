@@ -67,6 +67,48 @@ class TestImageDataInMemory(unittest.TestCase):
             or len(rosData.timestamps) == 0 or rosData.frame_id == "":
             self.fail("Test data is not representative of real-time operation!")
 
+    def test_from_npy_images_are_read_only(self):
+        """
+        ImageDataInMemory.from_npy loads self.images as a memory-mapped .npy
+        file. That file (and the underlying memmap) can be shared by every
+        process that opens this dataset, including sibling worker processes
+        forked by publish_data_ROS_multiprocess -- and nothing in this class
+        ever mutates self.images in place (mutating methods, e.g.
+        downscale_by_factor, always reassign self.images to a brand-new
+        array). So the memmap must be opened read-only: a stray in-place
+        write (self.images[i] = ...) should raise rather than silently
+        corrupting the on-disk file for every process sharing it.
+        """
+        save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy_images_are_read_only').absolute()
+        if save_folder.exists():
+            shutil.rmtree(save_folder)
+        save_folder.mkdir(parents=True)
+
+        # Build a minimal on-disk dataset matching from_npy's expected layout
+        # (the same layout from_ros2_bag writes), without needing a real bag.
+        H, W = 4, 4
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [10, 20, 30]
+        np.save(save_folder / 'imgs.npy', images)
+        np.save(save_folder / 'times.npy', np.array([0.0, 1.0, 2.0]))
+        with open(save_folder / 'attributes.txt', 'w') as f:
+            f.write(f"image_shape: {(H, W, 3)}\n")
+            f.write("frame_id: cam\n")
+            f.write(f"height: {H}\n")
+            f.write(f"width: {W}\n")
+            f.write("encoding: ImageEncoding.RGB8\n")
+
+        data = ImageDataInMemory.from_npy(save_folder)
+
+        original_pixel = data.images[0, 0, 0].copy()
+        with self.assertRaises(ValueError):
+            data.images[0, 0, 0] = [255, 255, 255]
+
+        # The file on disk must be untouched, even if the attempted write
+        # above partially landed before raising.
+        reloaded = np.load(save_folder / 'imgs.npy')
+        np.testing.assert_array_equal(reloaded[0, 0, 0], original_pixel)
+
     def test_from_npy_files(self):
         """ Test that we load the data properly from images in individual .npy files. """
 
