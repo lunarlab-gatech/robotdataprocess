@@ -162,6 +162,7 @@ class TableData:
         return [positions_by_value[v] for v in sorted(positions_by_value, reverse=higher_is_better)]
 
     def format_and_color_cells(self, color_fn: Optional[Callable[[float], Optional[str]]] = None,
+        color_fn_by_col: Optional[Dict[str, Callable[[float], Optional[str]]]] = None,
         fmt: Optional[Callable[[float], str]] = str) -> None:
         """
         Format and color every cell independently, using each cell's stored raw value.
@@ -175,21 +176,34 @@ class TableData:
             color_fn: callable(value: float) -> str; maps a value to a text
                 color (e.g. red above a threshold, green below zero). Defaults
                 to ``color_fn_NAVY_RED_missing_or_equal()`` (red for NaN or 0.0).
+            color_fn_by_col: Maps column names to their own color_fn, overriding
+                ``color_fn`` for those columns (e.g. per-column thresholds).
+                Defaults to no overrides.
             fmt: callable(value: float) -> str; formats a value for display.
                 Defaults to ``str``.
+        Raises:
+            ValueError: If ``color_fn_by_col`` names a column not in the table.
         """
         # Fill in default arguments that can't be default parameters
         if color_fn is None:
             color_fn = TableData.color_fn_NAVY_RED_missing_or_equal()
+        if color_fn_by_col is None:
+            color_fn_by_col = {}
+
+        # Catch misspelled or stale column names instead of silently using color_fn
+        unknown_cols: List[str] = [col for col in color_fn_by_col if col not in self.df.columns]
+        if unknown_cols:
+            raise ValueError(f"color_fn_by_col names columns not in the table: {unknown_cols}")
 
         # Format and color each cell independently (positional: the index may hold
         # repeated labels, e.g. a multirow grouping column)
         n_rows, n_cols = self.df.shape
-        for row_pos in range(n_rows):
-            for col_pos in range(n_cols):
+        for col_pos in range(n_cols):
+            col_color_fn = color_fn_by_col.get(self.df.columns[col_pos], color_fn)
+            for row_pos in range(n_rows):
                 value = self.df.iat[row_pos, col_pos][0].raw_value
                 self.df.iat[row_pos, col_pos] = [TableData.FormattedTextSegment(
-                    fmt(value), color=color_fn(value), raw_value=value
+                    fmt(value), color=col_color_fn(value), raw_value=value
                 )]
 
     def highlight_best_and_worst_results_by_column(self, higher_is_better: bool = True,

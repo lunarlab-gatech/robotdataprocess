@@ -1,21 +1,11 @@
 import numpy as np
 from pathlib import Path
-from scipy.spatial import ConvexHull
-from scipy.spatial.distance import pdist
+from robotdataprocess.utils.math_utils import max_pairwise_distance
 import sys
 from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "results"))
 import results_MG
-
-def max_pairwise_distance(points: np.ndarray) -> float:
-    """
-    Returns the largest 3D distance between any two of ``points`` (N, 3), comparing only convex
-    hull vertices since the farthest pair always lies on the hull. ``QJ`` joggles the input so
-    near-planar point sets (e.g. ground robots) still yield a hull.
-    """
-    hull = ConvexHull(points, qhull_options="QJ")
-    return float(pdist(points[hull.vertices]).max())
 
 def main():
     """

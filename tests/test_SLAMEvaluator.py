@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from operator import attrgetter
 import os
 import pandas as pd
 from pathlib import Path
@@ -14,7 +15,7 @@ from robotdataprocess.eval.SLAMMethod import SLAMMethod
 from scipy.spatial.transform import Rotation as R
 import shutil
 import tempfile
-from typing import List
+from typing import List, Optional
 import unittest
 import unittest.mock
 
@@ -495,7 +496,7 @@ class TestSaveRobustnessTable(unittest.TestCase):
         self.save_path = Path(self.tmp_dir.name) / 'robustness_table.pdf'
         with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf:
             SLAMEvaluator._save_robustness_table(['R', 'M', 'H'], self.groups, {'g1', 'g2', 'g3'}, {'R': 'ROMAN [6]'},
-                                                 self.results, self.save_path, 20.0)
+                                                 self.results, self.save_path, dict.fromkeys(['g1', 'g2', 'g3', 'g4'], 20.0))
         self.pdf_tables = to_pdf.call_args[0][0]
         with open(self.save_path.with_suffix('.tex')) as f:
             self.tex_lines = f.read().split("\n")
@@ -521,6 +522,211 @@ class TestSaveRobustnessTable(unittest.TestCase):
         self.assertEqual(len(self.pdf_tables), 1)
         self.assertEqual(list(self.pdf_tables[0].df.columns), ["DsA\n2 pairs", "DsB\n2 groups"])
         self.assertEqual([seg.text for seg in self.pdf_tables[0].df.iat[2, 0]], ["2", " ", "(100.0%)"])
+
+    def test_each_group_fails_against_its_own_threshold(self):
+        # R: g1 25 <= 30 passes, g2 1 > 0.5 fails, g3 20 > 10 fails, g4 99 <= 100 passes
+        # M: only suppressed g2 fails; H: g1 exactly 30 passes, g2 and g3 fail (a shared 20 would give H 2 / 0 instead)
+        thresholds = {'g1': 30.0, 'g2': 0.5, 'g3': 10.0, 'g4': 100.0}
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf:
+            SLAMEvaluator._save_robustness_table(['R', 'M', 'H'], self.groups, {'g1', 'g2', 'g3'}, {},
+                                                 self.results, self.save_path, thresholds)
+        table = to_pdf.call_args[0][0][0]
+        failures = [[table.df.iat[row, col][0].text for col in range(2)] for row in range(3)]
+        self.assertEqual(failures, [["1", "1"], ["0", "1"], ["1", "1"]])
+
+    def test_missing_group_threshold_raises(self):
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf'), \
+             self.assertRaises(KeyError) as ctx:
+            SLAMEvaluator._save_robustness_table(['R', 'M', 'H'], self.groups, {'g1', 'g2', 'g3'}, {},
+                                                 self.results, self.save_path, dict.fromkeys(['g1', 'g2', 'g3'], 20.0))
+        self.assertIn('g4', str(ctx.exception))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestMakeHighlightedTable(unittest.TestCase):
+    """SLAMEvaluator.make_highlighted_table forwards color_fn_by_col and still ranks every column."""
+
+    def test_color_fn_by_col_forwarded(self):
+        style = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+        raw_df = pd.DataFrame({'ColA': {'r1': 1.0, 'r2': 2.0}, 'ColB': {'r1': 3.0, 'r2': 4.0}})
+        table = SLAMEvaluator.make_highlighted_table(raw_df, "T", fmt=TableData.fmt_fixed(1), higher_is_better=False,
+                    color_fn_by_col={'ColB': TableData.color_fn_NAVY_RED_missing_or_above(3.5)})
+        colors = [[table.df.iat[r, c][0].color for c in range(2)] for r in range(2)]
+        self.assertEqual(colors, [[style.TextColor, style.TextColor], [style.TextColor, style.TextFailureColor]])
+        self.assertIn(TableData.TextStyle.BOLD, table.df.iat[0, 0][0].styles)
+        self.assertIn(TableData.TextStyle.BOLD, table.df.iat[0, 1][0].styles)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveAteTablesPerGroupThresholds(unittest.TestCase):
+    """SLAMEvaluator._save_ate_tables reds each ATE column by its own group's threshold (with "Average" red only when
+    NaN), reds absolute rotation by rot_threshold_deg, and reds the relative-error tables only when NaN; the LaTeX ATE
+    table follows the same ATE thresholds."""
+
+    GT = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+    LATEX = TableData.get_table_style(TableData.TableStyleName.LATEX)
+    ATE_TITLES = ["Merged RMS ATE (m) — Pre-Optimize", "Merged RMS ATE (m)"]
+    RELATIVE_TITLES = ["Merged RMS RTE (m) - Δ5m", "Merged RMS Relative Rotation Error (deg) - Δ5m"]
+
+    @staticmethod
+    def _result(trans: float, rot: float, num_inter_lc: int) -> SLAMResult:
+        metrics = unittest.mock.MagicMock()
+        metrics.APE.translation_part.rmse = trans
+        metrics.RPE.translation_part.rmse = trans
+        metrics.APE.rotation_angle_deg.rmse = rot
+        metrics.RPE.rotation_angle_deg.rmse = rot
+        return SLAMResult(metrics, metrics, [], [], [],
+                          lc_stats_by_mode={LoopClosureFilterMode.ONLY_INTER_LC: {'num_loop_closures': num_inter_lc}})
+
+    @staticmethod
+    def _colors(table: TableData) -> dict:
+        return {(row, col): table.df.at[row, col][0].color for row in table.df.index for col in table.df.columns}
+
+    def _run(self, thresholds: dict):
+        # g1 threshold 1, g2 threshold 20, rotation threshold 10; S has no inter-robot LC, so every S cell is suppressed
+        results = {'R': {'g1': self._result(5.0, 5.0, 3), 'g2': self._result(20.0, 15.0, 3)},
+                   'M': {'g1': self._result(0.5, 5.0, 3), 'g2': self._result(50.0, 15.0, 3)},
+                   'S': {'g1': self._result(1.0, 1.0, 0), 'g2': self._result(1.0, 1.0, 0)}}
+        pdf_colors = {}
+        def snapshot(tables, path, **kwargs):
+            for table in tables:
+                pdf_colors[table.df.attrs["title"]] = self._colors(table)
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf', side_effect=snapshot) as to_pdf, \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_ate_tables(['R', 'M', 'S'], ['g1', 'g2'], {'g1', 'g2'}, {}, results,
+                                           Path(tmp_dir) / 'metrics_table.pdf', thresholds, 10.0)
+        return pdf_colors, self._colors(to_pdf.call_args[0][0][1])
+
+    @staticmethod
+    def _expected(r_colors: tuple, m_colors: tuple, red: str, navy: str) -> dict:
+        # Every table's Average is navy for R and M, and S (all suppressed) is NaN, so red, everywhere
+        return {('R', 'g1'): r_colors[0], ('R', 'g2'): r_colors[1], ('R', 'Average'): navy,
+                ('M', 'g1'): m_colors[0], ('M', 'g2'): m_colors[1], ('M', 'Average'): navy,
+                ('S', 'g1'): red, ('S', 'g2'): red, ('S', 'Average'): red}
+
+    def _expected_ate(self, red: str, navy: str) -> dict:
+        # R: g1 5 > 1 red, g2 exactly 20 navy; M: g1 0.5 navy, g2 50 > 20 red; Averages 12.5 / 25.25 never red
+        return self._expected((red, navy), (navy, red), red, navy)
+
+    def test_ate_tables_use_per_group_thresholds(self):
+        pdf_colors, _ = self._run({'g1': 1.0, 'g2': 20.0})
+        for title in self.ATE_TITLES:
+            with self.subTest(table=title):
+                self.assertEqual(pdf_colors[title], self._expected_ate(self.GT.TextFailureColor, self.GT.TextColor))
+
+    def test_absolute_rotation_uses_rot_threshold(self):
+        # Threshold 10: g1 5 navy, g2 15 red, Average exactly 10 navy -- the opposite of g1/g2's ATE thresholds
+        red, navy = self.GT.TextFailureColor, self.GT.TextColor
+        pdf_colors, _ = self._run({'g1': 1.0, 'g2': 20.0})
+        self.assertEqual(pdf_colors["Merged RMS Absolute Rotation Error (deg)"],
+                         self._expected((navy, red), (navy, red), red, navy))
+
+    def test_relative_tables_red_only_when_nan(self):
+        # R g1 = 5 would be red under g1's ATE threshold, and g2 = 15 under rot_threshold_deg; neither applies here
+        red, navy = self.GT.TextFailureColor, self.GT.TextColor
+        pdf_colors, _ = self._run({'g1': 1.0, 'g2': 20.0})
+        for title in self.RELATIVE_TITLES:
+            with self.subTest(table=title):
+                self.assertEqual(pdf_colors[title], self._expected((navy, navy), (navy, navy), red, navy))
+
+    def test_latex_ate_table_uses_per_group_thresholds(self):
+        _, latex_colors = self._run({'g1': 1.0, 'g2': 20.0})
+        self.assertEqual(latex_colors, self._expected_ate(self.LATEX.TextFailureColor, self.LATEX.TextColor))
+
+    def test_extra_threshold_ignored(self):
+        pdf_colors, _ = self._run({'g1': 1.0, 'g2': 20.0, 'g9': 0.1})
+        self.assertEqual(pdf_colors["Merged RMS ATE (m)"], self._expected_ate(self.GT.TextFailureColor, self.GT.TextColor))
+
+    def test_missing_threshold_raises(self):
+        with self.assertRaises(KeyError) as ctx:
+            self._run({'g1': 1.0})
+        self.assertIn('g2', str(ctx.exception))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveAteSplitTablePerGroupThresholds(unittest.TestCase):
+    """SLAMEvaluator._save_ate_split_table reds each robot's ATE column by its own group's threshold, and its RPE
+    columns only when NaN."""
+
+    GT = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+
+    @staticmethod
+    def _metrics(trans: float) -> unittest.mock.MagicMock:
+        metrics = unittest.mock.MagicMock()
+        metrics.APE.translation_part.rmse = trans
+        metrics.RPE.translation_part.rmse = trans
+        return metrics
+
+    def _run(self, thresholds: dict) -> list:
+        groups = [RobotGroup(('a', 'b'), 'ds', 's', 'g1', None), RobotGroup(('c', 'd'), 'ds', 's', 'g2', None)]
+        # d has no metrics, so its cell is NaN
+        results = {'R': {'g1': SLAMResult(None, None, [self._metrics(5.0), self._metrics(0.5)], [], []),
+                         'g2': SLAMResult(None, None, [self._metrics(10.0), None], [], [])}}
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf, \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            SLAMEvaluator._save_ate_split_table(['R'], groups, {}, results, Path(tmp_dir) / 'split.pdf', thresholds)
+        return to_pdf.call_args[0][0]
+
+    def test_ate_columns_use_their_group_threshold_and_rpe_red_only_when_nan(self):
+        # ATE -- g1 threshold 1: a 5 red, b 0.5 navy; g2 threshold 10: c exactly 10 navy, d NaN red
+        # RPE -- a 5 would be red under g1's ATE threshold, but only d (NaN) is red
+        red, navy = self.GT.TextFailureColor, self.GT.TextColor
+        ate_table, rpe_table = self._run({'g1': 1.0, 'g2': 10.0})
+        expected = {"Individual RMS ATE (m)": (ate_table, {'g1\na': red, 'g1\nb': navy, 'g2\nc': navy, 'g2\nd': red}),
+                    "Individual RMS RPE (m) - Δ5m": (rpe_table, {'g1\na': navy, 'g1\nb': navy, 'g2\nc': navy, 'g2\nd': red})}
+        for title, (table, expected_colors) in expected.items():
+            with self.subTest(table=title):
+                self.assertEqual(table.df.attrs["title"], title)
+                self.assertEqual({col: table.df.at['R', col][0].color for col in table.df.columns}, expected_colors)
+
+    def test_missing_group_threshold_raises(self):
+        with self.assertRaises(KeyError) as ctx:
+            self._run({'g1': 1.0})
+        self.assertIn('g2', str(ctx.exception))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveFailureThresholdTable(unittest.TestCase):
+    """SLAMEvaluator._save_failure_threshold_table: one unranked, uncolored-by-threshold "Threshold" row of each
+    group's threshold, in cols order, saved as a single-table PDF."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.save_path = Path(self.tmp_dir.name) / 'not_yet_created' / 'failure_thresholds.pdf'
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def _run(self, cols: List[str], thresholds: dict):
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.TableData.to_pdf') as to_pdf:
+            SLAMEvaluator._save_failure_threshold_table(cols, thresholds, self.save_path)
+        return to_pdf
+
+    def test_columns_follow_cols_order_with_rounded_values(self):
+        # The dict lists g1 first, cols lists g2 first
+        df = self._run(['g2', 'g1'], {'g1': 1.234, 'g2': 56.789}).call_args[0][0][0].df
+        self.assertEqual(list(df.columns), ['g2', 'g1'])
+        self.assertEqual(list(df.index), ["Threshold"])
+        self.assertEqual([df.iat[0, col][0].text for col in range(2)], ["56.79", "1.23"])
+        self.assertEqual(df.attrs["title"], "RMS ATE Failure Threshold (m)")
+
+    def test_cells_navy_and_unranked(self):
+        navy = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH).TextColor
+        df = self._run(['g1', 'g2', 'g3'], {'g1': 1.0, 'g2': 1e6, 'g3': 0.5}).call_args[0][0][0].df
+        self.assertEqual([df.iat[0, col][0].color for col in range(3)], [navy] * 3)
+        self.assertEqual([df.iat[0, col][0].styles for col in range(3)], [[]] * 3)
+
+    def test_saves_single_table_to_path_creating_parent(self):
+        to_pdf = self._run(['g1'], {'g1': 2.0})
+        to_pdf.assert_called_once()
+        tables, path = to_pdf.call_args[0]
+        self.assertEqual((len(tables), path), (1, str(self.save_path)))
+        self.assertTrue(self.save_path.parent.is_dir())
+
+    def test_missing_threshold_raises(self):
+        with self.assertRaises(KeyError) as ctx:
+            self._run(['g2', 'g1'], {'g2': 2.0})
+        self.assertIn('g1', str(ctx.exception))
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -574,6 +780,220 @@ class TestSaveLCTables(unittest.TestCase):
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestComputeFailureThreshold(unittest.TestCase):
+    """SLAMEvaluator.compute_failure_threshold: extent_fraction of the largest distance between any two GT positions,
+    pooled across all robots."""
+
+    @staticmethod
+    def _make_gt(positions: List[List[float]]) -> OdometryData:
+        n = len(positions)
+        return OdometryData('map', 'robot', np.arange(n, dtype=float), np.array(positions, dtype=float),
+                            np.tile([0.0, 0.0, 0.0, 1.0], (n, 1)), CoordinateFrame.NONE)
+
+    def test_pools_robots(self):
+        # Each robot alone spans < 3 m (and they have different counts); the farthest pair (0, 0, 0)-(30, 40, 0) crosses robots
+        gt_a = self._make_gt([[0, 0, 0], [1, 1, 0], [2, 1, 0], [1, 2, 0]])
+        gt_b = self._make_gt([[30, 40, 0], [29, 39, 0], [29, 40, 0]])
+        self.assertAlmostEqual(SLAMEvaluator.compute_failure_threshold([gt_a, gt_b], 0.25), 12.5)
+
+    def test_single_robot(self):
+        gt = self._make_gt([[0, 0, 0], [6, 8, 0], [12, 16, 0], [3, 1, 0]])
+        self.assertAlmostEqual(SLAMEvaluator.compute_failure_threshold([gt], 0.10), 2.0)
+
+    def test_non_positive_fraction_raises(self):
+        gt = self._make_gt([[0, 0, 0], [6, 8, 0]])
+        for fraction in (0.0, -0.1):
+            with self.subTest(fraction=fraction), self.assertRaises(ValueError):
+                SLAMEvaluator.compute_failure_threshold([gt], fraction)
+
+    def test_empty_gt_list_raises(self):
+        with self.assertRaises(ValueError):
+            SLAMEvaluator.compute_failure_threshold([], 0.10)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestIsFailure(unittest.TestCase):
+    """SLAMEvaluator.is_failure: a NaN (missing/suppressed) ATE, or one strictly above the threshold, is a failure."""
+
+    def test_cases(self):
+        cases = [(float('nan'), 10.0, True), (9.9, 10.0, False), (10.0, 10.0, False), (10.1, 10.0, True), (0.0, 0.0, False)]
+        for ate, threshold_m, expected in cases:
+            with self.subTest(ate=ate, threshold_m=threshold_m):
+                self.assertIs(SLAMEvaluator.is_failure(ate, threshold_m), expected)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestMissingInterRobotLoopClosures(unittest.TestCase):
+    """SLAMEvaluator.missing_inter_robot_loop_closures: only a multi-robot group with zero inter-robot LC qualifies."""
+
+    def test_cases(self):
+        cases = [(0, True, True), (1, True, False), (0, False, False), (3, False, False)]
+        for num_inter_lc, is_multi_robot, expected in cases:
+            with self.subTest(num_inter_lc=num_inter_lc, is_multi_robot=is_multi_robot):
+                self.assertIs(SLAMEvaluator.missing_inter_robot_loop_closures(num_inter_lc, is_multi_robot), expected)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestMetricOrNanIfSuppressedMissingData(unittest.TestCase):
+    """SLAMEvaluator._metric_or_nan_if_suppressed raises for a missing result, and for missing ONLY_INTER_LC stats only
+    on a multi-robot group (a single-robot group never needs them)."""
+
+    @staticmethod
+    def _result_without_stats(ate: float) -> SLAMResult:
+        merged_metrics = unittest.mock.MagicMock()
+        merged_metrics.APE.translation_part.rmse = ate
+        return SLAMResult(None, merged_metrics, [], [], [], lc_stats_by_mode={})
+
+    def _metric(self, results: dict, multi_robot_cols: set) -> float:
+        return SLAMEvaluator._metric_or_nan_if_suppressed(results, 'R', 'g1', multi_robot_cols,
+                                                          attrgetter("merged_metrics.APE.translation_part.rmse"))
+
+    def test_missing_result_raises(self):
+        for multi_robot_cols in ({'g1'}, set()):
+            with self.subTest(multi_robot_cols=multi_robot_cols), self.assertRaises(ValueError) as ctx:
+                self._metric({'R': {'g2': self._result_without_stats(1.0)}}, multi_robot_cols)
+            self.assertIn("run='R', col='g1'", str(ctx.exception))
+
+    def test_missing_stats_raises_only_for_multi_robot_group(self):
+        results = {'R': {'g1': self._result_without_stats(7.0)}}
+        with self.assertRaises(ValueError) as ctx:
+            self._metric(results, {'g1'})
+        self.assertIn("ONLY_INTER_LC", str(ctx.exception))
+        self.assertEqual(self._metric(results, set()), 7.0)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestSaveLCContextFigureAteTable(unittest.TestCase):
+    """SLAMEvaluator._save_lc_context_figure's ATE table: NaN for a multi-robot group with zero inter-robot LC (never for a
+    single-robot group), red above the group's threshold, and an error for missing results, stats, or LC counts."""
+
+    GT = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+
+    @staticmethod
+    def _result(ate: float, lc_stats_by_mode: dict) -> SLAMResult:
+        merged_metrics = unittest.mock.MagicMock()
+        merged_metrics.APE.translation_part.rmse = ate
+        return SLAMResult(None, merged_metrics, [], [], [], lc_stats_by_mode=lc_stats_by_mode)
+
+    def _ate_cells(self, group: tuple, col: str, u_results: Optional[dict] = None) -> dict:
+        # R 5 below threshold 10, M 15 above it, S has zero inter-robot LC; a malformed run U is added only when given
+        run_names = ['R', 'M', 'S']
+        lc_stats = {num: {LoopClosureFilterMode.ONLY_INTER_LC: {'num_loop_closures': num}} for num in (0, 3)}
+        results = {'R': {col: self._result(5.0, lc_stats[3])}, 'M': {col: self._result(15.0, lc_stats[3])},
+                   'S': {col: self._result(1.0, lc_stats[0])}}
+        if u_results is not None:
+            run_names.append('U')
+            results['U'] = u_results
+        stats = [{'success_rate': 50.0, 'num_successful_loop_closures': 1, 'num_loop_closures': 2}] * (2 * len(run_names))
+        tables = []
+        real_make_highlighted_table = SLAMEvaluator.make_highlighted_table
+        def capture(*args, **kwargs):
+            tables.append(real_make_highlighted_table(*args, **kwargs))
+            return tables[-1]
+        with unittest.mock.patch.object(SLAMEvaluator, 'make_highlighted_table', side_effect=capture), \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.LoopClosureData.visualize_error_scatter'), \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            num_entries = 2 * len(run_names)
+            SLAMEvaluator._save_lc_context_figure(group, col, [unittest.mock.MagicMock()] * num_entries, ['x'] * num_entries,
+                                                  [i for i in range(len(run_names)) for _ in range(2)],
+                                                  stats, results, run_names, Path(tmp_dir), 10.0)
+        df = next(t.df for t in tables if list(t.df.columns) == ["RMS ATE (m)"])
+        return {run: (df.at[run, "RMS ATE (m)"][0].text, df.at[run, "RMS ATE (m)"][0].color) for run in run_names}
+
+    def test_multi_robot_group(self):
+        red, navy = self.GT.TextFailureColor, self.GT.TextColor
+        self.assertEqual(self._ate_cells(('a', 'b'), 'g1'), {'R': ("5.00", navy), 'M': ("15.00", red), 'S': ("---", red)})
+
+    def test_single_robot_group_never_suppressed(self):
+        red, navy = self.GT.TextFailureColor, self.GT.TextColor
+        self.assertEqual(self._ate_cells(('a',), 'g0'), {'R': ("5.00", navy), 'M': ("15.00", red), 'S': ("1.00", navy)})
+
+    def test_missing_result_or_stats_raise(self):
+        for group, col in ((('a', 'b'), 'g1'), (('a',), 'g0')):
+            for name, u_results in (("missing result", {}), ("missing stats", {col: self._result(2.0, {})})):
+                with self.subTest(group=group, case=name), self.assertRaises(ValueError) as ctx:
+                    self._ate_cells(group, col, u_results)
+                self.assertIn("run='U'", str(ctx.exception))
+
+    def test_stats_without_count_raise(self):
+        for group, col in ((('a', 'b'), 'g1'), (('a',), 'g0')):
+            u_results = {col: self._result(2.0, {LoopClosureFilterMode.ONLY_INTER_LC: {'success_rate': 50.0}})}
+            with self.subTest(group=group), self.assertRaises(KeyError) as ctx:
+                self._ate_cells(group, col, u_results)
+            self.assertIn('num_loop_closures', str(ctx.exception))
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestRunEvaluationFailureThresholds(unittest.TestCase):
+    """SLAMEvaluator.run_evaluation computes each group's threshold from the GT it already loads (no extra loads),
+    and passes it to every table and to that group's LC-context figures."""
+
+    def setUp(self):
+        viz_config = RobotGroupViz(name_map=None, robot_name_to_color={}, image_path=None,
+                                   image_x_edge=None, image_extent_offsets=None)
+        self.groups = [RobotGroup(('a', 'b'), 'ds', 's1', 'g1', viz_config), RobotGroup(('c', 'd'), 'ds', 's2', 'g2', viz_config)]
+        self.methods = [SLAMMethod("M1", "Method 1", "M1", "#000000")]
+        self.gt_by_seq = {'s1': [unittest.mock.MagicMock(), unittest.mock.MagicMock()],
+                          's2': [unittest.mock.MagicMock(), unittest.mock.MagicMock()]}
+        self.thresholds = {'g1': 5.0, 'g2': 50.0}
+
+    def _load_gt(self, dataset_seq: str, robot_names: List[str]) -> list:
+        return self.gt_by_seq[dataset_seq]
+
+    def _threshold_for_gt(self, gt_data_lst: list, extent_fraction: float) -> float:
+        return 5.0 if gt_data_lst is self.gt_by_seq['s1'] else 50.0
+
+    def test_thresholds_computed_once_per_group_and_threaded_through(self):
+        load_gt_data_fn = unittest.mock.MagicMock(side_effect=self._load_gt)
+        slam_data = unittest.mock.MagicMock()
+        slam_data.get_loop_closures.return_value = (unittest.mock.MagicMock(), unittest.mock.MagicMock())
+        mock = unittest.mock.DEFAULT
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.Pool') as pool, \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.SLAMData') as slam_data_cls, \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.LoopClosureData') as lc_cls, \
+             unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.plt'), \
+             unittest.mock.patch.multiple(SLAMEvaluator, compute_failure_threshold=mock, save_merged_ate_figures=mock,
+                    _save_all_methods_traj_figure=mock, _save_timing_table=mock, _save_data_size_table=mock,
+                    _save_mg_match_table=mock, _save_lc_tables=mock, _save_ate_tables=mock, _save_robustness_table=mock,
+                    _save_failure_threshold_table=mock, _save_ate_split_table=mock, _save_lc_context_figure=mock,
+                    _save_lc_side_by_side_figure=mock, _save_lc_sep_figure=mock, _save_traj_lc_comb_figure=mock) as patched, \
+             tempfile.TemporaryDirectory() as tmp_dir:
+            pool.return_value.__enter__.return_value.starmap.side_effect = [[slam_data, slam_data],
+                                                                            [unittest.mock.MagicMock(), unittest.mock.MagicMock()]]
+            slam_data_cls.get_timing_totals.return_value = {'align': 1.0}
+            lc_cls.visualize_error_scatter.return_value = (None, [{}, {}])
+            patched['compute_failure_threshold'].side_effect = self._threshold_for_gt
+
+            SLAMEvaluator.run_evaluation(Path('/unused'), Path('out'), self.methods, self.groups, {}, Path(tmp_dir),
+                                         load_gt_data_fn, failure_extent_fraction=0.25)
+            base_dir = Path(tmp_dir) / 'out'
+
+        # R1: one threshold per group, from that group's GT and the given fraction
+        self.assertEqual(patched['compute_failure_threshold'].call_args_list,
+                         [unittest.mock.call(self.gt_by_seq['s1'], 0.25), unittest.mock.call(self.gt_by_seq['s2'], 0.25)])
+        # R2/R3: every threshold-using table gets the per-group dict
+        self.assertEqual(patched['_save_ate_tables'].call_args[0][6], self.thresholds)
+        self.assertEqual(patched['_save_robustness_table'].call_args[0][6], self.thresholds)
+        self.assertEqual(patched['_save_ate_split_table'].call_args[0][5], self.thresholds)
+        self.assertEqual(patched['_save_failure_threshold_table'].call_args[0],
+                         (['g1', 'g2'], self.thresholds, base_dir / 'failure_thresholds.pdf'))
+        # R4: each LC-context figure (3 LC modes x 2 groups) gets its own group's threshold
+        context_calls = sorted((c[0][1], c[0][-1]) for c in patched['_save_lc_context_figure'].call_args_list)
+        self.assertEqual(context_calls, [('g1', 5.0)] * 3 + [('g2', 50.0)] * 3)
+        # R5: GT loaded only where it already was -- once for the all-methods figure plus once per LC mode
+        loads_per_seq = [c[0][0] for c in load_gt_data_fn.call_args_list]
+        self.assertEqual((loads_per_seq.count('s1'), loads_per_seq.count('s2'), len(loads_per_seq)), (4, 4, 8))
+
+    def test_old_and_positional_threshold_arguments_rejected(self):
+        args = (Path('/unused'), Path('out'), self.methods, self.groups, {}, Path('/unused'), unittest.mock.MagicMock())
+        with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.Pool') as pool:
+            for name, kwargs, extra_args in (("ate_threshold_m", {'ate_threshold_m': 20.0}, ()), ("positional", {}, (0.10,))):
+                with self.subTest(name), self.assertRaises(TypeError):
+                    SLAMEvaluator.run_evaluation(*args, *extra_args, **kwargs)
+        pool.assert_not_called()
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestRunEvaluationDuplicateMethodNames(unittest.TestCase):
     """SLAMEvaluator.run_evaluation rejects methods sharing a name (they'd overwrite each other's results), naming
     only the duplicated one, before loading any data."""
@@ -589,7 +1009,7 @@ class TestRunEvaluationDuplicateMethodNames(unittest.TestCase):
         with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.Pool') as pool:
             with self.assertRaises(ValueError) as ctx:
                 SLAMEvaluator.run_evaluation(Path('/unused'), Path('out'), methods, robot_groups, {}, Path('/unused'),
-                                             unittest.mock.MagicMock(), ate_threshold_m=20.0)
+                                             unittest.mock.MagicMock(), failure_extent_fraction=0.10)
         self.assertIn("['MG_SM']", str(ctx.exception))
         pool.assert_not_called()
 

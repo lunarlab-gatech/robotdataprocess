@@ -1,9 +1,35 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import pdist
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from typing import Sequence, Union
+
+
+def max_pairwise_distance(points: np.ndarray) -> float:
+    """
+    Returns the largest distance between any two of ``points`` (N, 3), comparing only convex hull
+    vertices since the farthest pair always lies on the hull. ``QJ`` joggles Qhull's internal copy
+    so near-planar or collinear sets (e.g. ground robots) still yield a hull; distances are still
+    measured between the original, unjoggled points.
+
+    Args:
+        points: (N, 3) array of positions.
+    Returns:
+        float: The largest pairwise distance.
+    Raises:
+        ValueError: If there are fewer than 2 points.
+    """
+    if len(points) < 2:
+        raise ValueError(f"Need at least 2 points to compute a pairwise distance, got {len(points)}.")
+
+    # Too few points to build a hull, but few enough to compare every pair directly
+    if len(points) <= points.shape[1]:
+        return float(pdist(points).max())
+    hull = ConvexHull(points, qhull_options="QJ")
+    return float(pdist(points[hull.vertices]).max())
 
 
 def nearest_index(sorted_ts: Union[np.ndarray, Sequence[float]],

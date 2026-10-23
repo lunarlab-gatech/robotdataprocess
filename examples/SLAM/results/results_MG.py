@@ -194,7 +194,7 @@ def main():
 
     SLAMEvaluator.run_evaluation(roman_root, output_dir, methods, robot_groups,
                              critical_invocation_params, figures_base_dir,
-                             _LoadGtDataMG(dataset_name_by_seq), ate_threshold_m=20.0,
+                             _LoadGtDataMG(dataset_name_by_seq), failure_extent_fraction=0.10,
                              figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ def main():
 
     robot_groups = SLAMEvaluator.make_robot_groups("graco", dataset_seq, robot_groups, viz_config)
     SLAMEvaluator.run_evaluation(roman_root, Path("graco") / dataset_seq, methods, robot_groups,
-                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=20.0)
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, failure_extent_fraction=0.10)
 
 if __name__ == "__main__":
     main()

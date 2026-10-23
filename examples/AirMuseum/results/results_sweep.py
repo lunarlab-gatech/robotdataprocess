@@ -113,8 +113,9 @@ def main():
     config (as in results_ROMAN.py), then gets every parameter combination from every named
     sweep applied on top of it.
 
-    A (method, sweep config) combination is a success if its Merged RMS ATE is below
-    ate_threshold_m AND it has at least one inlier inter-robot loop closure; otherwise a failure.
+    A (method, sweep config) combination fails by the same rule as ``robustness_table.pdf`` (see
+    :meth:`SLAMEvaluator.is_failure`): its Merged RMS ATE is above the pair's failure threshold
+    (``failure_extent_fraction`` of its GT extent), or is suppressed for lacking inter-robot LC.
     Missing result directories (a sweep that was never actually run for a given method) raise
     FileNotFoundError rather than being silently skipped.
     """
@@ -125,11 +126,13 @@ def main():
     robot_pair = ["drone", "robotB"]
     methods = ["MG"]
     sweep_names = ["sweep_harder_params"]
-    ate_threshold_m = 10.0
+    failure_extent_fraction = 0.10
     trans_err_in_target = 1.0
     rot_err_in_target = 5.0
 
     gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_seq, robot_pair)))
+    ate_threshold_m: float = SLAMEvaluator.compute_failure_threshold(list(gt_dict.values()), failure_extent_fraction)
+    print(f"Failure threshold for {robot_pair}: {ate_threshold_m:.2f} m")
 
     sweeps_dir = roman_root / "research" / "AirMuseum" / "sweeps"
 
@@ -176,7 +179,9 @@ def main():
         num_successful_inter_lc = int(np.sum(lc_all.results.successful))
         num_total_inter_lc = lc_all.num_loop_closures
 
-        success = ate < ate_threshold_m and num_inlier_inter_lc >= 1
+        if SLAMEvaluator.missing_inter_robot_loop_closures(num_total_inter_lc, len(robot_pair) > 1):
+            ate = float('nan')
+        success = not SLAMEvaluator.is_failure(ate, ate_threshold_m)
         counts[method]["success" if success else "failure"] += 1
         print(f"[{method}] {slam_data.robot_names}: ATE={ate:.2f}m, inlier LC={num_successful_inlier_inter_lc}/{num_inlier_inter_lc} "
               f"all LC={num_successful_inter_lc}/{num_total_inter_lc} "

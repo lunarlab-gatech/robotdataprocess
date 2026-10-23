@@ -79,7 +79,7 @@ def main():
 
     robot_groups = SLAMEvaluator.make_robot_groups("airmuseum", dataset_seq, robot_groups, viz_config)
     SLAMEvaluator.run_evaluation(roman_root, Path("TEMP") / dataset_seq, methods, robot_groups,
-                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, 10.0, 
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, failure_extent_fraction=0.10,
                              figure_output_level=FigureOutputLevel.ESSENTIAL)
 
 if __name__ == "__main__":

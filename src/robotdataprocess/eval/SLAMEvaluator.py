@@ -17,6 +17,8 @@ from robotdataprocess.data_types.SLAMData import SLAMData
 from robotdataprocess.eval.RobotGroup import RobotGroup, RobotGroupViz
 from robotdataprocess.eval.SLAMEvaluatorResult import SLAMResult
 from robotdataprocess.eval.SLAMMethod import SLAMMethod
+from robotdataprocess.utils.conversion_utils import dec_arr_to_float_arr
+from robotdataprocess.utils.math_utils import max_pairwise_distance
 import seaborn as sns
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -59,18 +61,20 @@ class SLAMEvaluator:
         ).T
 
     @staticmethod
-    def make_highlighted_table(raw_df: pd.DataFrame, title: str, color_fn=None, fmt=None,
+    def make_highlighted_table(raw_df: pd.DataFrame, title: str, color_fn=None,
+                    color_fn_by_col: Optional[Dict[str, Callable[[float], Optional[str]]]] = None, fmt=None,
                     emphasis_rankings: bool = True, higher_is_better: bool = True) -> TableData:
         """Resolve a raw numeric DataFrame into a styled TableData, one column at a time.
 
         Missing/suppressed values must be represented as NaN in raw_df; fmt and
         color_fn are responsible for rendering NaN however the caller wants
         (e.g. "---"), since TableData._rank_data_in_Series already excludes NaN
-        from ranking automatically. The table's title is stored in the returned
-        TableData's ``df.attrs["title"]``.
+        from ranking automatically. ``color_fn_by_col`` overrides ``color_fn`` for the
+        columns it names (see :meth:`TableData.format_and_color_cells`). The table's title
+        is stored in the returned TableData's ``df.attrs["title"]``.
         """
         table = TableData.from_DataFrame(raw_df)
-        table.format_and_color_cells(color_fn=color_fn, fmt=fmt)
+        table.format_and_color_cells(color_fn=color_fn, color_fn_by_col=color_fn_by_col, fmt=fmt)
         if emphasis_rankings:
             table.highlight_best_and_worst_results_by_column(higher_is_better=higher_is_better)
         table.df.attrs["title"] = title
@@ -238,12 +242,32 @@ class SLAMEvaluator:
     # ========================== Table Generation =============================
     # =========================================================================
     @staticmethod
+    def missing_inter_robot_loop_closures(num_inter_lc: int, is_multi_robot: bool) -> bool:
+        """
+        Returns whether a group's merged ATE should be suppressed for lacking inter-robot LC: it has
+        more than one robot and zero inter-robot LC (counting every LC at
+        ``LoopClosureFilterMode.ONLY_INTER_LC``, not only Kimera-RPGO inliers, since a non-inlier
+        LC can still be used to align). Single-robot groups have no inter-robot LC by definition.
+
+        Args:
+            num_inter_lc: Number of inter-robot LC found for the group.
+            is_multi_robot: Whether the group has more than one robot.
+        Returns:
+            bool: True if the group's ATE should be suppressed.
+        """
+        return is_multi_robot and num_inter_lc == 0
+
+    @staticmethod
+    def is_failure(ate: float, threshold_m: float) -> bool:
+        """Returns whether an RMS ATE counts as an alignment failure: NaN (missing or suppressed) or above ``threshold_m``."""
+        return math.isnan(ate) or ate > threshold_m
+
+    @staticmethod
     def _metric_or_nan_if_suppressed(results: Dict[str, Dict[str, SLAMResult]], run: str, col: str,
                                      multi_robot_cols: set, metric_fn: Callable[[SLAMResult], Optional[float]]) -> float:
         """
         Returns ``metric_fn`` of one run/group's result, or NaN if that cell is suppressed: the
-        metric is None, or the group has more than one robot and zero inter-robot LC (counting
-        every LC at ``LoopClosureFilterMode.ONLY_INTER_LC``, not only Kimera-RPGO inliers).
+        metric is None, or the group lacks inter-robot LC (see :meth:`missing_inter_robot_loop_closures`).
 
         Args:
             results: ``DatasetSequenceResults`` keyed by run then column.
@@ -263,22 +287,52 @@ class SLAMEvaluator:
                 f"Missing results for run={run!r}, col={col!r} -- every (run, col) pair in "
                 "run_names/cols is expected to already be populated in results by this point.")
         val = metric_fn(result)
-        no_inter_lc = False
-        if col in multi_robot_cols:
+        is_multi_robot: bool = col in multi_robot_cols
+        num_inter_lc: int = 0
+        if is_multi_robot:
             lc_stats = result.lc_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC)
             if lc_stats is None:
                 raise ValueError(
                     f"Missing {LoopClosureFilterMode.ONLY_INTER_LC.name} LC stats for run={run!r}, col={col!r} -- "
                     "expected to always be populated by the LC-filter loop before this table is built.")
-            no_inter_lc = lc_stats['num_loop_closures'] == 0
-        suppressed = val is None or no_inter_lc
+            num_inter_lc = lc_stats['num_loop_closures']
+        suppressed = val is None or SLAMEvaluator.missing_inter_robot_loop_closures(num_inter_lc, is_multi_robot)
         return float('nan') if suppressed else val
+
+    @staticmethod
+    def compute_failure_threshold(gt_data_lst: List[PathData], extent_fraction: float) -> float:
+        """
+        Returns an RMS ATE failure threshold (m): ``extent_fraction`` of the extent of
+        ``gt_data_lst``, the largest 3D distance between any two positions pooled across all of
+        its trajectories (e.g. the ground truth of every robot in a group).
+
+        Args:
+            gt_data_lst: Ground-truth trajectories whose pooled positions define the extent.
+            extent_fraction: Fraction of the extent used as the threshold (e.g. 0.10).
+        Returns:
+            float: The RMS ATE failure threshold in meters.
+        Raises:
+            ValueError: If ``extent_fraction`` is not positive or ``gt_data_lst`` is empty.
+        """
+        if extent_fraction <= 0:
+            raise ValueError(f"extent_fraction must be positive, got {extent_fraction}.")
+        if len(gt_data_lst) == 0:
+            raise ValueError("gt_data_lst must hold at least one trajectory.")
+
+        points: np.ndarray = np.concatenate([dec_arr_to_float_arr(gt.positions) for gt in gt_data_lst], axis=0)
+        return extent_fraction * max_pairwise_distance(points)
+
+    @staticmethod
+    def _color_fn_by_col_above(cols: List[str], threshold_by_col: Dict[str, float],
+            style: TableData.TableStyleName = TableData.TableStyleName.GEORGIA_TECH) -> Dict[str, Callable[[float], Optional[str]]]:
+        """Map each of ``cols`` to a color_fn that reds NaN or values above that column's ``threshold_by_col`` entry."""
+        return {col: TableData.color_fn_NAVY_RED_missing_or_above(threshold_by_col[col], style=style) for col in cols}
 
     @staticmethod
     def _save_ate_tables(run_names: List[str], cols: List[str], multi_robot_cols: set,
                         run_display_names: Dict[str, str],
                         results: Dict[str, Dict[str, SLAMResult]],
-                        save_path: Path, ate_threshold_m: float, rot_threshold_deg: float) -> None:
+                        save_path: Path, ate_threshold_by_col: Dict[str, float], rot_threshold_deg: float) -> None:
         """
         Build and save the ATE/RTE summary PDF tables.
 
@@ -286,8 +340,10 @@ class SLAMEvaluator:
         post-optimize merged RMS ATE, post-optimize merged RMS absolute rotation
         angle error, post-optimize merged RMS RTE, and post-optimize merged RMS
         relative rotation angle error — styled so that cells with no loop
-        closures, or a value above ate_threshold_m (translation tables) / above
-        rot_threshold_deg (rotation tables), are highlighted in red. All five
+        closures, or a value above that column's ate_threshold_by_col entry (ATE tables) /
+        above rot_threshold_deg (absolute rotation table), are highlighted in red. The
+        relative-error tables (RTE, relative rotation) have no threshold, so they are red only
+        when suppressed/NaN. All five
         tables are suppressed for multi-robot groups with zero total inter-robot
         LC (via ``results[...].lc_stats_by_mode`` at
         ``LoopClosureFilterMode.ONLY_INTER_LC``) -- not on Kimera-RPGO inlier count,
@@ -297,7 +353,8 @@ class SLAMEvaluator:
 
         Each table gets a trailing "Average" column (the row-wise mean across
         the pair columns, ignoring suppressed/NaN pairs), set off from the pair
-        columns by a heavy divider.
+        columns by a heavy divider. ATE-table "Average" cells are red only when NaN, since no
+        single group's threshold applies to them.
 
         Args:
             run_names: Ordered list of run identifiers (e.g. ``["ROMAN", "MG_TS"]``).
@@ -307,10 +364,11 @@ class SLAMEvaluator:
             run_display_names: Maps each run identifier to its display name in the table.
             results: ``DatasetSequenceResults`` keyed by run then column.
             save_path: Destination PDF path.
-            ate_threshold_m: Red-highlight cutoff (m) for the translation-error tables
-                (ATE pre/post-optimize, RTE).
-            rot_threshold_deg: Red-highlight cutoff (deg) for the rotation-error tables
-                (absolute and relative).
+            ate_threshold_by_col: Red-highlight cutoff (m) for each of ``cols`` in the
+                ATE tables (pre/post-optimize).
+            rot_threshold_deg: Red-highlight cutoff (deg) for the absolute rotation error table.
+        Raises:
+            KeyError: If ``ate_threshold_by_col`` is missing one of ``cols``.
         """
         def make_raw_df(metric_fn) -> pd.DataFrame:
             def value_fn(run: str, col: str) -> float:
@@ -319,7 +377,8 @@ class SLAMEvaluator:
             raw_df["Average"] = raw_df.mean(axis=1, skipna=True)
             return raw_df
 
-        color_fn_m = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m)
+        color_fn_missing = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
+        color_fn_by_col_m = SLAMEvaluator._color_fn_by_col_above(cols, ate_threshold_by_col)
         color_fn_deg = TableData.color_fn_NAVY_RED_missing_or_above(rot_threshold_deg)
         fmt = TableData.fmt_fixed(3)
         # The trailing "Average" column is a summary column, not another pair —
@@ -329,11 +388,11 @@ class SLAMEvaluator:
         first_stage_ate_table = SLAMEvaluator.make_highlighted_table(
                     make_raw_df(lambda r: r.first_stage_metrics.APE.translation_part.rmse if r.first_stage_metrics else None),
                     "Merged RMS ATE (m) — Pre-Optimize",
-                    color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
+                    color_fn=color_fn_missing, color_fn_by_col=color_fn_by_col_m, fmt=fmt, higher_is_better=False)
         ate_table = SLAMEvaluator.make_highlighted_table(
                     make_raw_df(lambda r: r.merged_metrics.APE.translation_part.rmse),
                     "Merged RMS ATE (m)",
-                    color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
+                    color_fn=color_fn_missing, color_fn_by_col=color_fn_by_col_m, fmt=fmt, higher_is_better=False)
         rot_err_table = SLAMEvaluator.make_highlighted_table(
                     make_raw_df(lambda r: r.merged_metrics.APE.rotation_angle_deg.rmse),
                     "Merged RMS Absolute Rotation Error (deg)",
@@ -341,18 +400,19 @@ class SLAMEvaluator:
         rte_table = SLAMEvaluator.make_highlighted_table(
                     make_raw_df(lambda r: r.merged_metrics.RPE.translation_part.rmse),
                     "Merged RMS RTE (m) - Δ5m",
-                    color_fn=color_fn_m, fmt=fmt, higher_is_better=False)
+                    color_fn=color_fn_missing, fmt=fmt, higher_is_better=False)
         rel_rot_err_table = SLAMEvaluator.make_highlighted_table(
                     make_raw_df(lambda r: r.merged_metrics.RPE.rotation_angle_deg.rmse),
                     "Merged RMS Relative Rotation Error (deg) - Δ5m",
-                    color_fn=color_fn_deg, fmt=fmt, higher_is_better=False)
+                    color_fn=color_fn_missing, fmt=fmt, higher_is_better=False)
 
         dfs = [first_stage_ate_table, ate_table, rot_err_table, rte_table, rel_rot_err_table]
         save_path.parent.mkdir(parents=True, exist_ok=True)
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, heavy_divider_before=heavy_divider_before)
 
-        color_fn_latex = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m, style=TableData.TableStyleName.LATEX)
-        ate_table.format_and_color_cells(color_fn=color_fn_latex, fmt=fmt)
+        color_fn_missing_latex = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'), style=TableData.TableStyleName.LATEX)
+        color_fn_by_col_latex = SLAMEvaluator._color_fn_by_col_above(cols, ate_threshold_by_col, style=TableData.TableStyleName.LATEX)
+        ate_table.format_and_color_cells(color_fn=color_fn_missing_latex, color_fn_by_col=color_fn_by_col_latex, fmt=fmt)
         ate_table.highlight_best_and_worst_results_by_column(higher_is_better=False)
         ate_table.set_title("Method")
         ate_table.to_latex(str(save_path.parent / f"{save_path.stem}_ate.tex"),
@@ -363,14 +423,14 @@ class SLAMEvaluator:
     def _save_robustness_table(run_names: List[str], robot_groups: List[RobotGroup], multi_robot_cols: set,
                                run_display_names: Dict[str, str],
                                results: Dict[str, Dict[str, SLAMResult]],
-                               save_path: Path, ate_threshold_m: float) -> None:
+                               save_path: Path, ate_threshold_by_col: Dict[str, float]) -> None:
         """
         Build and save the failure robustness summary table as a PDF and as a standalone ``.tex``
         (same path with a ``.tex`` suffix), with one row per run and one column per dataset
         (``RobotGroup.dataset_name``, subheaded by its group count, e.g. "16 pairs"), each cell
         holding "failures (failure rate %)". A group fails exactly when its ``metrics_table``
-        post-optimize merged RMS ATE cell is red: the ATE is > ``ate_threshold_m`` or the cell is
-        suppressed (see :meth:`_metric_or_nan_if_suppressed`).
+        post-optimize merged RMS ATE cell is red (see :meth:`is_failure`): the ATE is > its
+        ``ate_threshold_by_col`` entry or the cell is suppressed (see :meth:`_metric_or_nan_if_suppressed`).
 
         Args:
             run_names: Ordered list of run identifiers.
@@ -379,7 +439,9 @@ class SLAMEvaluator:
             run_display_names: Maps each run identifier to its display name in the table.
             results: ``DatasetSequenceResults`` keyed by run then column.
             save_path: Destination PDF path.
-            ate_threshold_m: RMS ATE (m) above which a group counts as a failure.
+            ate_threshold_by_col: RMS ATE (m) above which a group counts as a failure, keyed by group label.
+        Raises:
+            KeyError: If ``ate_threshold_by_col`` is missing a group's label.
         """
         # Get dataset names in first-appearance order
         dataset_names: List[str] = []
@@ -403,7 +465,7 @@ class SLAMEvaluator:
             for group in robot_groups:
                 ate: float = SLAMEvaluator._metric_or_nan_if_suppressed(results, run, group.label, multi_robot_cols,
                                                     attrgetter("merged_metrics.APE.translation_part.rmse"))
-                if math.isnan(ate) or ate > ate_threshold_m:
+                if SLAMEvaluator.is_failure(ate, ate_threshold_by_col[group.label]):
                     failures[display_name][group.dataset_name] += 1
                 totals[display_name][group.dataset_name] += 1
 
@@ -435,7 +497,7 @@ class SLAMEvaluator:
     def _save_ate_split_table(run_names: List[str], robot_groups: List[RobotGroup],
                             run_display_names: Dict[str, str],
                             results: Dict[str, Dict[str, SLAMResult]],
-                            save_path: Path, ate_threshold_m: float) -> None:
+                            save_path: Path, ate_threshold_by_col: Dict[str, float]) -> None:
         """
         Build and save the per-robot RMS ATE/RPE split summary PDF tables.
 
@@ -451,7 +513,10 @@ class SLAMEvaluator:
             run_display_names: Maps each run identifier to its display name in the table.
             results: ``DatasetSequenceResults`` keyed by run then column.
             save_path: Destination PDF path.
-            ate_threshold_m: Red-highlight cutoff (m) for both tables (both are translation-only).
+            ate_threshold_by_col: Red-highlight cutoff (m) for the ATE table, keyed by group label;
+                each robot's column uses its group's cutoff. The RPE table is red only when NaN.
+        Raises:
+            KeyError: If ``ate_threshold_by_col`` is missing a group's label.
         """
         sub_cols = [f"{grp.label}\n{name}" for grp in robot_groups for name in grp.robots]
 
@@ -466,17 +531,41 @@ class SLAMEvaluator:
                 return float('nan') if robot_metrics is None else metric_fn(robot_metrics)
             return SLAMEvaluator._make_raw_df(run_names, run_display_names, lambda run: sub_cols, value_fn)
 
-        color_fn = TableData.color_fn_NAVY_RED_missing_or_above(ate_threshold_m)
+        # Sub-columns are per robot ("<group>\n<robot>"), so map each to its group's threshold
+        threshold_by_subcol: Dict[str, float] = {subcol: ate_threshold_by_col[group_lbl]
+                                                 for subcol, (group_lbl, _) in subcol_group_idx.items()}
+        color_fn_by_col = SLAMEvaluator._color_fn_by_col_above(sub_cols, threshold_by_subcol)
+        color_fn_missing = TableData.color_fn_NAVY_RED_missing_or_above(float('inf'))
         fmt = TableData.fmt_fixed(3)
 
         dfs = [
             SLAMEvaluator.make_highlighted_table(make_raw_df(lambda m: m.APE.translation_part.rmse), "Individual RMS ATE (m)",
-                        color_fn=color_fn, fmt=fmt, higher_is_better=False),
+                        color_fn_by_col=color_fn_by_col, fmt=fmt, higher_is_better=False),
             SLAMEvaluator.make_highlighted_table(make_raw_df(lambda m: m.RPE.translation_part.rmse), "Individual RMS RPE (m) - Δ5m",
-                        color_fn=color_fn, fmt=fmt, higher_is_better=False),
+                        color_fn=color_fn_missing, fmt=fmt, higher_is_better=False),
         ]
         save_path.parent.mkdir(parents=True, exist_ok=True)
         TableData.to_pdf(dfs, str(save_path), row_height=2.4, h_pad=0.5, font_size=8, data_font_size=10)
+
+    @staticmethod
+    def _save_failure_threshold_table(cols: List[str], ate_threshold_by_col: Dict[str, float], save_path: Path) -> None:
+        """
+        Build and save a PDF table with one column per robot group holding that group's RMS ATE
+        failure threshold (m), as used by the metrics and robustness tables.
+
+        Args:
+            cols: Ordered list of robot-group column labels.
+            ate_threshold_by_col: RMS ATE failure threshold (m) keyed by group label.
+            save_path: Destination PDF path.
+        Raises:
+            KeyError: If ``ate_threshold_by_col`` is missing one of ``cols``.
+        """
+        raw_df: pd.DataFrame = pd.DataFrame([ate_threshold_by_col], index=["Threshold"])[cols]
+        table: TableData = SLAMEvaluator.make_highlighted_table(raw_df, "RMS ATE Failure Threshold (m)",
+                                color_fn=TableData.color_fn_NAVY_RED_missing_or_above(float('inf')),
+                                fmt=TableData.fmt_fixed(2), emphasis_rankings=False)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        TableData.to_pdf([table], str(save_path), row_height=2.4, h_pad=0.5)
 
     @staticmethod
     def save_merged_ate_figures(slam_data: SLAMData, result: SLAMResult, method: str, label: str,
@@ -1020,7 +1109,8 @@ class SLAMEvaluator:
                 are never suppressed on LC grounds, since they have no inter-robot LC by definition.
             run_names: Ordered list of run identifiers.
             save_dir: Directory in which to save ``lc_context_<col>.pdf``.
-            ate_threshold_m: Red-highlight cutoff (m) for the ATE table, matching :meth:`ROMANEvaluator._save_ate_tables`.
+            ate_threshold_m: This group's red-highlight cutoff (m) for the ATE table, matching
+                its column in :meth:`SLAMEvaluator._save_ate_tables`.
         """
         expected_group_indices = [i for i in range(len(run_names)) for _ in range(2)]
         assert group_indices == expected_group_indices, (
@@ -1085,11 +1175,13 @@ class SLAMEvaluator:
             .append_TableData(make_combined_col(1, COL_CNT_INL), axis=1)
 
         def _ate_suppressed(rn: str) -> bool:
-            if len(group) == 1:
-                return False
             result = results[rn].get(col)
             lc_stats = result.lc_stats_by_mode.get(LoopClosureFilterMode.ONLY_INTER_LC) if result is not None else None
-            return (lc_stats or {}).get('num_loop_closures', -1) == 0
+            if lc_stats is None:
+                raise ValueError(
+                    f"Missing {LoopClosureFilterMode.ONLY_INTER_LC.name} LC stats for run={rn!r}, col={col!r} -- "
+                    "expected to always be populated by the LC-filter loop before this figure is built.")
+            return SLAMEvaluator.missing_inter_robot_loop_closures(lc_stats['num_loop_closures'], len(group) > 1)
 
         def _ate(rn: str) -> Optional[float]:
             result = results[rn].get(col)
@@ -1354,7 +1446,7 @@ class SLAMEvaluator:
                         critical_invocation_params: Dict[str, Any],
                         figures_base_dir: Path,
                         load_gt_data_fn: Callable[[str, List[str]], List[OdometryData]],
-                        ate_threshold_m: float, rot_threshold_deg: float = 10.0,
+                        *, failure_extent_fraction: float, rot_threshold_deg: float = 10.0,
                         figure_output_level: FigureOutputLevel = FigureOutputLevel.EVERY) -> None:
         """
         Generate all evaluation figures and tables for one grouping -- each ``RobotGroup`` names
@@ -1384,15 +1476,18 @@ class SLAMEvaluator:
             critical_invocation_params: Other data-affecting args from the original run invocation.
             figures_base_dir: Directory under which ``<output_dir>/`` outputs are saved.
             load_gt_data_fn: Callable ``(dataset_seq, robot_names) -> List[OdometryData]``, dataset-specific.
-            ate_threshold_m: Red-highlight cutoff (m) for every translation-error table, and the RMS
-                ATE above which a group counts as a failure in ``robustness_table.pdf``.
-            rot_threshold_deg: Red-highlight cutoff (deg) for every rotation-error table. Defaults to 10.
+            failure_extent_fraction: Each group's RMS ATE failure threshold is this fraction of its
+                ground-truth extent (see :meth:`compute_failure_threshold`). That threshold is the
+                red-highlight cutoff for the group's ATE cells, and the RMS ATE above which the group
+                counts as a failure in ``robustness_table.pdf``. Keyword-only.
+            rot_threshold_deg: Red-highlight cutoff (deg) for the absolute rotation error table. Defaults to 10.
             figure_output_level: Whether to write every figure/table or only the essential ones.
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/``:
         - ``metrics_table.pdf``  — pre/post-optimize RMS ATE, absolute/relative rotation error, and RTE summary tables
         - ``robustness_table.pdf`` — per-dataset failure count and rate, from the post-optimize RMS ATE;
             ``robustness_table.tex`` — standalone LaTeX version
+        - ``failure_thresholds.pdf`` — each group's RMS ATE failure threshold (m)
         - ``ate_split_table.pdf`` — per-robot RMS ATE/RPE summary tables, one column per
             robot in each group
         - ``timing_table.pdf``   — alignment/offline RPGO/total runtime summary tables;
@@ -1477,11 +1572,16 @@ class SLAMEvaluator:
                     SLAMEvaluator.save_merged_ate_figures(slam_data, results[run_name][col], run_name, col,
                                                           load_gt_data_fn, base_dir, group_by_label[col].viz_config)
 
-        # Overlay every method's trajectories per group, at every figure output level
+        # Overlay every method's trajectories per group (at every figure output level), and compute each
+        # group's failure threshold from the same GT load
+        # TODO: Load each group's GT once and pass it to calculate_merged_ate, save_merged_ate_figures, and the LC loop, which each reload it
         run_to_color: Dict[str, str] = {method.name: method.color for method in methods}
+        ate_threshold_by_col: Dict[str, float] = {}
         for group in robot_groups:
+            gt_data_lst: List[OdometryData] = load_gt_data_fn(group.dataset_seq, list(group.robots))
+            ate_threshold_by_col[group.label] = SLAMEvaluator.compute_failure_threshold(gt_data_lst, failure_extent_fraction)
             SLAMEvaluator._save_all_methods_traj_figure(run_names, {run: results[run][group.label] for run in run_names},
-                                    load_gt_data_fn(group.dataset_seq, list(group.robots)), group.label, group.viz_config,
+                                    gt_data_lst, group.label, group.viz_config,
                                     run_to_color, run_display_names, base_dir / 'traj' / 'est_and_gt' / 'all_methods')
 
         # Define group column names
@@ -1549,7 +1649,8 @@ class SLAMEvaluator:
 
                 if is_every:
                     SLAMEvaluator._save_lc_context_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
-                                                stats, results, run_names, subdirs['lc_with_context'], ate_threshold_m)
+                                                stats, results, run_names, subdirs['lc_with_context'],
+                                                ate_threshold_by_col[group.label])
                     SLAMEvaluator._save_lc_side_by_side_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
                                                     run_names, subdirs['lc_side_by_side'])
                     SLAMEvaluator._save_lc_sep_figure(group.robots, group.label, lc_data_list, labels_list, group_indices,
@@ -1566,10 +1667,11 @@ class SLAMEvaluator:
         # Single-robot groups have no inter-robot LC by definition, so they're excluded from suppression.
         multi_robot_cols = {group.label for group in robot_groups if len(group.robots) > 1}
         SLAMEvaluator._save_ate_tables(run_names, cols, multi_robot_cols, run_display_names, results, base_dir / 'metrics_table.pdf',
-                        ate_threshold_m, rot_threshold_deg)
+                        ate_threshold_by_col, rot_threshold_deg)
         SLAMEvaluator._save_robustness_table(run_names, robot_groups, multi_robot_cols, run_display_names, results,
-                                             base_dir / 'robustness_table.pdf', ate_threshold_m)
+                                             base_dir / 'robustness_table.pdf', ate_threshold_by_col)
+        SLAMEvaluator._save_failure_threshold_table(cols, ate_threshold_by_col, base_dir / 'failure_thresholds.pdf')
 
         # Per-robot RMS ATE/RPE split, also LC-independent and saved once at the grouping root.
         SLAMEvaluator._save_ate_split_table(run_names, robot_groups, run_display_names, results,
-                            base_dir / 'ate_split_table.pdf', ate_threshold_m)
+                            base_dir / 'ate_split_table.pdf', ate_threshold_by_col)

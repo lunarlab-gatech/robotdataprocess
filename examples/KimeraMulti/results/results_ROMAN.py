@@ -101,7 +101,7 @@ def main():
 
     for output_name, robot_groups in [("Easy", easy), ("Medium", medium), ("Difficult", difficult)]:
         SLAMEvaluator.run_evaluation(roman_root, Path(DATASET_NAME) / output_name, methods, robot_groups,
-                                 critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, ate_threshold_m=10.0)
+                                 critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, failure_extent_fraction=0.10)
 
 if __name__ == "__main__":
     main()

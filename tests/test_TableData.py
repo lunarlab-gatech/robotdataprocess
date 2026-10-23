@@ -6,6 +6,7 @@ from io import StringIO
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
+import math
 import os
 import pandas as pd
 from pathlib import Path
@@ -191,6 +192,92 @@ class TestFormatAndColorCells(unittest.TestCase):
         table = TableData.from_DataFrame(pd.DataFrame({'ColA': {'a': 3.0}}))
         table.format_and_color_cells()
         self.assertEqual(table.df.at['a', 'ColA'][0].raw_value, 3.0)
+
+
+@unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
+class TestFormatAndColorCellsByColumn(unittest.TestCase):
+    """Test format_and_color_cells with color_fn_by_col: named columns use their own color_fn, the rest use color_fn."""
+
+    @staticmethod
+    def _default_color(value: float) -> str:
+        return f"default:{value}"
+
+    @staticmethod
+    def _override_color(value: float) -> str:
+        return f"override:{value}"
+
+    @staticmethod
+    def _make_table() -> TableData:
+        nan = float('nan')
+        return TableData.from_DataFrame(pd.DataFrame({'ColA': {'a': 1.0, 'b': 0.0, 'c': 2.0},
+                                                      'ColB': {'a': 5.0, 'b': nan, 'c': 0.0},
+                                                      'ColC': {'a': 7.0, 'b': 8.0, 'c': nan}}))
+
+    @staticmethod
+    def _colors(table: TableData) -> list:
+        n_rows, n_cols = table.df.shape
+        return [[table.df.iat[r, c][0].color for c in range(n_cols)] for r in range(n_rows)]
+
+    def test_overrides_only_named_middle_column(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={'ColB': self._override_color})
+        self.assertEqual(self._colors(table), [['default:1.0', 'override:5.0', 'default:7.0'],
+                                               ['default:0.0', 'override:nan', 'default:8.0'],
+                                               ['default:2.0', 'override:0.0', 'default:nan']])
+
+    def test_unnamed_columns_use_builtin_default_when_color_fn_none(self):
+        style = TableData.get_table_style(TableData.TableStyleName.GEORGIA_TECH)
+        red, navy = style.TextFailureColor, style.TextColor
+        table = self._make_table()
+        table.format_and_color_cells(color_fn_by_col={'ColB': self._override_color})
+        self.assertEqual(self._colors(table), [[navy, 'override:5.0', navy],
+                                               [red, 'override:nan', navy],
+                                               [navy, 'override:0.0', red]])
+
+    def test_every_column_overridden(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color,
+                                     color_fn_by_col=dict.fromkeys(['ColA', 'ColB', 'ColC'], self._override_color))
+        self.assertEqual(self._colors(table), [['override:1.0', 'override:5.0', 'override:7.0'],
+                                               ['override:0.0', 'override:nan', 'override:8.0'],
+                                               ['override:2.0', 'override:0.0', 'override:nan']])
+
+    def test_empty_dict_matches_none(self):
+        table = self._make_table()
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={})
+        self.assertEqual(self._colors(table), [['default:1.0', 'default:5.0', 'default:7.0'],
+                                               ['default:0.0', 'default:nan', 'default:8.0'],
+                                               ['default:2.0', 'default:0.0', 'default:nan']])
+
+    def test_unknown_column_raises(self):
+        table = self._make_table()
+        with self.assertRaises(ValueError) as ctx:
+            table.format_and_color_cells(color_fn_by_col={'ColB': self._override_color, 'ColZ': self._override_color})
+        self.assertIn("'ColZ'", str(ctx.exception))
+        self.assertNotIn("'ColB'", str(ctx.exception))
+
+    def test_unknown_column_raises_on_zero_row_table(self):
+        table = TableData.from_DataFrame(pd.DataFrame({'ColA': pd.Series([], dtype=float)}))
+        with self.assertRaises(ValueError) as ctx:
+            table.format_and_color_cells(color_fn_by_col={'ColZ': self._override_color})
+        self.assertIn("'ColZ'", str(ctx.exception))
+
+    def test_repeated_row_labels_colored_per_cell(self):
+        table = TableData.from_DataFrame(pd.DataFrame({'ColA': [1.0, 2.0, 3.0], 'ColB': [4.0, 5.0, 6.0]},
+                                                      index=['a', 'a', 'b']))
+        table.format_and_color_cells(color_fn=self._default_color, color_fn_by_col={'ColA': self._override_color})
+        self.assertEqual(self._colors(table), [['override:1.0', 'default:4.0'],
+                                               ['override:2.0', 'default:5.0'],
+                                               ['override:3.0', 'default:6.0']])
+
+    def test_overridden_column_keeps_fmt_and_raw_value(self):
+        table = self._make_table()
+        table.format_and_color_cells(fmt=TableData.fmt_fixed(1, suffix='m'), color_fn_by_col={'ColB': self._override_color})
+        segments = [table.df.iat[r, 1][0] for r in range(3)]
+        self.assertEqual([s.text for s in segments], ["5.0m", "---", "0.0m"])
+        self.assertEqual(segments[0].raw_value, 5.0)
+        self.assertTrue(math.isnan(segments[1].raw_value))
+        self.assertEqual(segments[2].raw_value, 0.0)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
