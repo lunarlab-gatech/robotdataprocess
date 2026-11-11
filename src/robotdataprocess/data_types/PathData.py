@@ -5,6 +5,7 @@ import copy
 import csv
 import cv2
 from .Data import CoordinateFrame, TransformType
+import datetime
 from .SequentialData import SequentialData
 from decimal import Decimal
 from evo.core import sync, metrics
@@ -23,13 +24,20 @@ import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import re
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys.store import Typestore
+from scipy.signal import correlate
 from scipy.spatial.transform import Rotation as R
 from typeguard import typechecked
 from typing import Dict, Union, Tuple, List, Optional
 import tqdm
+import xml.etree.ElementTree as ET
+
+# Scale from each unit a Vicon export may label a column with to radians / meters.
+VICON_ANGLE_UNIT_TO_RAD: Dict[str, float] = {'rad': 1.0, 'deg': math.pi / 180.0}
+VICON_LENGTH_UNIT_TO_M: Dict[str, Decimal] = {'mm': Decimal('0.001'), 'm': Decimal('1')}
 
 @typechecked
 class PathData(SequentialData):
@@ -678,6 +686,113 @@ class PathData(SequentialData):
             orientations=np.array(orientations, dtype=object),
             frame=frame,
         )
+
+    @staticmethod
+    def vicon_capture_start_time(xcp_path: Union[Path, str], utc_offset_hours: float) -> Decimal:
+        """
+        Reads a Vicon Tracker capture's wall-clock start from its .xcp file, as UNIX seconds.
+
+        The .xcp holds one ``Capture`` element per camera, each stamped with the capture's
+        ``START_TIME`` in the Vicon PC's local time (e.g. ``"2026-11-06 12:36:18.358 ST"``); its
+        ``Calibration`` elements carry the earlier wand wave's times and are ignored.
+
+        Args:
+            xcp_path (Path | str): Path to the capture's .xcp file.
+            utc_offset_hours (float): The Vicon PC's UTC offset at capture time (e.g. -5 for EST).
+        Returns:
+            Decimal: The capture's start, in seconds since the UNIX epoch.
+        Raises:
+            ValueError: If there is no ``Capture`` element, the cameras disagree on the start, or
+                the start isn't a ``YYYY-MM-DD HH:MM:SS[.fff]`` time.
+        """
+        starts = {el.attrib['START_TIME'] for el in ET.parse(str(xcp_path)).getroot().iter('Capture')}
+        if len(starts) != 1:
+            raise ValueError(f"Expected one capture START_TIME in {xcp_path}, found {sorted(starts)}.")
+        start: str = starts.pop()
+
+        # Parse whole seconds with datetime, but keep the fraction as an exact Decimal
+        match = re.match(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(\.\d+)?', start)
+        if match is None:
+            raise ValueError(f"Unrecognized capture START_TIME {start!r} in {xcp_path}.")
+        tz = datetime.timezone(datetime.timedelta(hours=utc_offset_hours))
+        whole_s: float = datetime.datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S').replace(tzinfo=tz).timestamp()
+        return Decimal(int(whole_s)) + Decimal(match.group(2) or '0')
+
+    @staticmethod
+    def _vicon_object_column(header_row: pd.Series, object_name: Optional[str]) -> int:
+        """
+        Finds the first column of one object's block in a Vicon Objects export.
+
+        Args:
+            header_row (pd.Series): The export's object row, reading e.g. ``"Global Angle Go2:Go2"``
+                above each object's first column.
+            object_name (str | None): The object's subject name (before the ``:``), or None to
+                take the export's only object.
+        Returns:
+            int: Index of the object's first column.
+        Raises:
+            ValueError: If no object matches, or ``object_name`` is None and there are several.
+        """
+        prefix = 'Global Angle '
+        columns: Dict[str, int] = {cell[len(prefix):].split(':')[0]: i for i, cell in header_row.items()
+                                   if isinstance(cell, str) and cell.startswith(prefix)}
+        if object_name is None:
+            if len(columns) != 1:
+                raise ValueError(f"Pass object_name to choose one of the export's objects {sorted(columns)}.")
+            return next(iter(columns.values()))
+        if object_name not in columns:
+            raise ValueError(f"Object {object_name!r} not in the export's objects {sorted(columns)}.")
+        return columns[object_name]
+
+    @classmethod
+    def from_vicon_xlsx(cls, xlsx_path: Union[Path, str], frame_id: str, frame: CoordinateFrame,
+                        start_time: Decimal, object_name: Optional[str] = None) -> PathData:
+        """
+        Creates a class structure from one object of a Vicon Tracker "Objects" .xlsx export.
+
+        The export's rows are: ``Objects``; the frame rate (Hz); a ``Global Angle <subject>:<segment>``
+        cell above each object's block; the labels ``Frame, Sub Frame, RX, RY, RZ, TX, TY, TZ``; the
+        units; then one row per frame. ``RX RY RZ`` is a helical (rotation-vector) angle, not Euler
+        angles. Untracked frames (empty cells) are dropped, frame ``n`` is stamped
+        ``start_time + (n - 1) / rate``, and ``Sub Frame`` is ignored.
+
+        Args:
+            xlsx_path (Path | str): Path to the .xlsx export.
+            frame_id (str): The frame this path is relative to (the Vicon world).
+            frame (CoordinateFrame): The coordinate system convention of this data.
+            start_time (Decimal): Timestamp of frame 1, e.g. from :meth:`vicon_capture_start_time`.
+            object_name (str | None): Subject name of the object to load, or None if the export
+                has only one object.
+        Returns:
+            PathData: Instance of this class.
+        Raises:
+            ValueError: If the file isn't an Objects export, the object isn't found, or a column
+                has an unsupported unit.
+            NotImplementedError: If the object's columns aren't ``RX RY RZ TX TY TZ``.
+        """
+        df = pd.read_excel(str(xlsx_path), header=None, sheet_name=0)
+        if df.iat[0, 0] != 'Objects':
+            raise ValueError(f"{xlsx_path} is not a Vicon Objects export (cell A1 is {df.iat[0, 0]!r}).")
+        rate = Decimal(str(df.iat[1, 0]))
+
+        # Locate the object's six columns and check their labels and units
+        first_col: int = PathData._vicon_object_column(df.iloc[2], object_name)
+        cols: List[int] = list(range(first_col, first_col + 6))
+        labels: List[str] = list(df.iloc[3, cols])
+        if labels != ['RX', 'RY', 'RZ', 'TX', 'TY', 'TZ']:
+            raise NotImplementedError(f"Unsupported Vicon columns {labels} in {xlsx_path}.")
+        angle_units, length_units = set(df.iloc[4, cols[:3]]), set(df.iloc[4, cols[3:]])
+        if len(angle_units) != 1 or not angle_units <= VICON_ANGLE_UNIT_TO_RAD.keys() or \
+           len(length_units) != 1 or not length_units <= VICON_LENGTH_UNIT_TO_M.keys():
+            raise ValueError(f"Unsupported Vicon units {angle_units | length_units} in {xlsx_path}.")
+
+        # Keep only the frames where the object was tracked
+        data: pd.DataFrame = df.iloc[5:, [0] + cols].dropna()
+        angles: np.ndarray = data.iloc[:, 1:4].to_numpy(dtype=np.float64) * VICON_ANGLE_UNIT_TO_RAD[angle_units.pop()]
+        positions: np.ndarray = col_to_dec_arr(data.iloc[:, 4:7].to_numpy(dtype=np.float64)) * VICON_LENGTH_UNIT_TO_M[length_units.pop()]
+        timestamps = np.array([start_time + (Decimal(int(f)) - 1) / rate for f in data.iloc[:, 0]], dtype=object)
+        orientations: np.ndarray = col_to_dec_arr(R.from_rotvec(angles).as_quat())
+        return PathData(frame_id, timestamps, positions, orientations, frame)
 
     # =========================================================================
     # ============================ Visualization ==============================
@@ -1489,7 +1604,55 @@ class PathData(SequentialData):
                 lst.append(pd)
 
         return (out_list, out_list_paired) if merged_PathData_paired is not None else out_list
-    
+
+    def _angular_speed_profile(self, grid_dt: float, smooth_s: float) -> np.ndarray:
+        """Angular speed (rad/s) resampled every ``grid_dt`` s from the first timestamp, box-smoothed over ``smooth_s`` s."""
+        t: np.ndarray = dec_arr_to_float_arr(self.timestamps - self.timestamps[0])
+        rots = R.from_quat(dec_arr_to_float_arr(self.orientations))
+        step: np.ndarray = np.diff(t)
+        moving: np.ndarray = step > 0  # Skip repeated timestamps
+        speed: np.ndarray = (rots[:-1].inv() * rots[1:]).magnitude()[moving] / step[moving]
+        midpoints: np.ndarray = 0.5 * (t[:-1] + t[1:])[moving]
+        resampled: np.ndarray = np.interp(np.arange(0.0, t[-1], grid_dt), midpoints, speed)
+        window: int = max(1, int(round(smooth_s / grid_dt)))
+        return np.convolve(resampled, np.ones(window) / window, mode='same')
+
+    @staticmethod
+    def estimate_time_offset(ref: PathData, other: PathData, grid_dt: float = 0.01, smooth_s: float = 0.2) -> Decimal:
+        """
+        Estimates the clock offset between two trajectories of the same body, as the shift that best
+        lines up their angular-speed profiles; these don't depend on either path's world or body frame,
+        so the two can come from different sensors (e.g. Vicon and odometry). Adding the result to
+        ``other``'s timestamps (see :meth:`shift_timestamps`) puts ``other`` on ``ref``'s clock.
+
+        Args:
+            ref: Trajectory whose clock to align to.
+            other: Trajectory of the same body on another clock.
+            grid_dt: Spacing (s) of the grid both profiles are resampled to; the coarsest resolution
+                before the sub-sample peak refinement.
+            smooth_s: Width (s) of the box filter applied to both profiles to suppress jitter.
+        Returns:
+            Decimal: Offset (s) to add to ``other``'s timestamps.
+        Raises:
+            ValueError: If either trajectory never changes its rotation speed (nothing to correlate).
+        """
+        ref_speed: np.ndarray = ref._angular_speed_profile(grid_dt, smooth_s)
+        other_speed: np.ndarray = other._angular_speed_profile(grid_dt, smooth_s)
+        a, b = ref_speed - ref_speed.mean(), other_speed - other_speed.mean()
+        if not np.any(a) or not np.any(b):
+            raise ValueError("Both trajectories must vary their rotation speed to estimate a time offset.")
+
+        # Cross-correlate, then refine the peak to sub-sample with a parabola through it and its neighbours
+        xcorr: np.ndarray = correlate(a, b, mode='full', method='fft')
+        peak: int = int(np.argmax(xcorr))
+        frac: float = 0.0
+        if 0 < peak < len(xcorr) - 1:
+            y0, y1, y2 = xcorr[peak - 1:peak + 2]
+            curvature: float = y0 - 2 * y1 + y2
+            frac = 0.5 * (y0 - y2) / curvature if curvature != 0 else 0.0
+        lag_s: float = (peak - (len(b) - 1) + frac) * grid_dt
+        return ref.timestamps[0] - other.timestamps[0] + Decimal(f"{lag_s:.6f}")
+
     @staticmethod
     def align(gt_path: PathData, est_path: PathData, max_diff: float) -> Tuple[PathData, PathData]:
         """

@@ -305,6 +305,28 @@ class OdometryData(PathData):
         path_data = super().from_g2o(g2o_path, time_path, robot, frame_id, frame, names_override)
         return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
 
+    @classmethod
+    def from_vicon_xlsx(cls, xlsx_path: Union[Path, str], frame_id: str, child_frame_id: str, frame: CoordinateFrame,
+                        start_time: Decimal, object_name: Union[str, None] = None) -> OdometryData:
+        """
+        Creates an OdometryData class from one object of a Vicon Tracker "Objects" .xlsx export.
+
+        Delegates to :meth:`PathData.from_vicon_xlsx`; see that method for the export format.
+
+        Args:
+            xlsx_path (Path | str): Path to the .xlsx export.
+            frame_id (str): The frame this odometry is relative to (the Vicon world).
+            child_frame_id (str): The frame whose pose is represented (the Vicon object).
+            frame (CoordinateFrame): The coordinate system convention of this data.
+            start_time (Decimal): Timestamp of frame 1, e.g. from :meth:`PathData.vicon_capture_start_time`.
+            object_name (str | None): Subject name of the object to load, or None if the export
+                has only one object.
+        Returns:
+            OdometryData: Instance of this class.
+        """
+        path_data = super().from_vicon_xlsx(xlsx_path, frame_id, frame, start_time, object_name)
+        return cls(frame_id, child_frame_id, path_data.timestamps, path_data.positions, path_data.orientations, frame)
+
     # =========================================================================
     # =========================== Conversion to ROS ===========================
     # =========================================================================

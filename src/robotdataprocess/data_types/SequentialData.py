@@ -70,6 +70,16 @@ class SequentialData(Data):
         self.timestamps = np.array([ts.quantize(quantize_val) for ts in self.timestamps])
         self._invalidate_cache()
 
+    def shift_timestamps(self, offset: Decimal):
+        """
+        Adds ``offset`` to every timestamp, e.g. to move the data onto another clock.
+
+        Args:
+            offset: Seconds to add (negative moves the data earlier).
+        """
+        self.timestamps = self.timestamps + offset
+        self._invalidate_cache()
+
     def crop_data(self, start: Decimal, end: Decimal):
         """
         Will crop the data so only values within [start, end] inclusive are kept.
