@@ -1,4 +1,5 @@
 from decimal import Decimal
+from io import StringIO
 import numpy as np
 import os
 from pathlib import Path
@@ -6,6 +7,7 @@ from robotdataprocess import CoordinateFrame, LiDARData, ROSMsgLibType, Ros2BagW
 import shutil
 import struct
 import unittest
+from unittest.mock import patch
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestLiDARData(unittest.TestCase):
@@ -176,7 +178,45 @@ class TestLiDARData(unittest.TestCase):
         _, channels_1 = lidar_data_cropped.get_point_cloud_at_index(1)
         np.testing.assert_array_equal(channels_0, [40, 40, 40, 31, 25, 20])
         np.testing.assert_array_equal(channels_1, [ 9, 15,  0, 16,  8, 65535])
-        
+
+    def test_calculate_point_channels_warns_out_of_range(self):
+        """ Test that a warning is printed when a point's vertical angle falls outside
+        [v_min_angle, v_max_angle] by more than half a channel's spacing. """
+
+        # Three points land almost exactly on the -10/0/10 degree lasers (covering all
+        # 3 channels), plus one point straight up (90 degrees) which is well outside the range.
+        point_cloud = [np.array([[1.0, 0.0, -0.17633],
+                                  [1.0, 0.0,  0.0],
+                                  [1.0, 0.0,  0.17633],
+                                  [0.0, 0.0, 100.0]])]
+        lidar_data = LiDARData("robot", [0], point_cloud, None, CoordinateFrame.FLU)
+
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            lidar_data.calculate_point_channels(3, -10, 10)
+        output = mock_stdout.getvalue()
+
+        self.assertIn("Warning", output)
+        self.assertIn("outside the expected", output)
+        self.assertNotIn("never assigned", output)
+
+    def test_calculate_point_channels_warns_unused_channels(self):
+        """ Test that a warning is printed when one or more channels never get assigned
+        to any point (num_channels/angle range does not match the data). """
+
+        # All points land on the 0 degree laser, so the -10 and 10 degree channels are unused.
+        point_cloud = [np.array([[1.0, 0.0, 0.0],
+                                  [1.0, 0.0, 0.0]])]
+        lidar_data = LiDARData("robot", [0], point_cloud, None, CoordinateFrame.FLU)
+
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            lidar_data.calculate_point_channels(3, -10, 10)
+        output = mock_stdout.getvalue()
+
+        self.assertIn("Warning", output)
+        self.assertIn("never assigned", output)
+        self.assertIn("[0, 2]", output)
+        self.assertNotIn("outside the expected", output)
+
     def test_make_dense(self):
         """ Ensure invalid points (infinities and NaNs are removed) """
 
@@ -194,7 +234,14 @@ class TestLiDARData(unittest.TestCase):
         np.testing.assert_array_equal(pc_expected, lidar_data.get_point_cloud_at_index(0)[0])
         np.testing.assert_array_equal(channels_expected, lidar_data.get_point_cloud_at_index(0)[1])
 
-    # NOTE: Only testing ROSBAGS right now
+    @unittest.skipIf(os.getenv("SKIP_ROS1_TESTS") == "True", "ROS1 not installed")
+    def test_get_ros_msg_type_rospy(self):
+        """get_ros_msg_type returns the PointCloud2 class for ROSPY."""
+        import sensor_msgs.msg
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_LiDARData', 'test_from_npy_files').absolute()
+        lidar_data = LiDARData.from_npy_files(folder_path, "robot", CoordinateFrame.NED)
+        self.assertIs(lidar_data.get_ros_msg_type(ROSMsgLibType.ROSPY), sensor_msgs.msg.PointCloud2)
+
     def test_get_ros_msg_type(self):
         """ Ensure we get the correct ROS message type. """
 
@@ -328,6 +375,45 @@ class TestLiDARData(unittest.TestCase):
         self.assertEqual(ros_msg.header.stamp.sec, 2)
         self.assertEqual(ros_msg.header.stamp.nanosec, 0)
 
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        point_clouds = [np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 1.0, 1.0]])]
+        timestamps = [Decimal("0.1"), Decimal("0.2")]
+        lidar1 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        lidar2 = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            LiDARData.crop_to_matched(lidar1, lidar2, Decimal("0.01"))
+
+
+    def test_eq(self):
+        """ Test __eq__ compares frame, point_clouds, and channels, not just frame_id/timestamps. """
+        timestamps = [Decimal("0.1"), Decimal("0.2")]
+        point_clouds = [np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 1.0, 1.0]])]
+        channels = [np.array([0], dtype=np.uint16), np.array([1], dtype=np.uint16)]
+
+        lidar = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.FLU)
+
+        # Identical values should be equal
+        lidar_same = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.FLU)
+        self.assertEqual(lidar, lidar_same)
+
+        # Different frame should not be equal
+        lidar_diff_frame = LiDARData("robot", timestamps, point_clouds, channels, CoordinateFrame.NED)
+        self.assertNotEqual(lidar, lidar_diff_frame)
+
+        # Different point_clouds should not be equal
+        point_clouds_diff = [np.array([[0.0, 0.0, 0.0]]), np.array([[9.0, 9.0, 9.0]])]
+        lidar_diff_pc = LiDARData("robot", timestamps, point_clouds_diff, channels, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_diff_pc)
+
+        # None vs non-None channels should not be equal
+        lidar_no_channels = LiDARData("robot", timestamps, point_clouds, None, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_no_channels)
+
+        # Different channels should not be equal
+        channels_diff = [np.array([0], dtype=np.uint16), np.array([2], dtype=np.uint16)]
+        lidar_diff_channels = LiDARData("robot", timestamps, point_clouds, channels_diff, CoordinateFrame.FLU)
+        self.assertNotEqual(lidar, lidar_diff_channels)
 
     def test_calculate_point_channels_already_exists(self):
         """ Test that RuntimeError is raised when channels already calculated. """
@@ -357,7 +443,7 @@ class TestLiDARData(unittest.TestCase):
         if bag_path.is_dir():
             shutil.rmtree(bag_path)
         bag_path.parent.mkdir(parents=True, exist_ok=True)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [lidar_data], ['/lidar'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [lidar_data], ['/lidar'], [None], None)
 
         # Read it back -- frame_id should be loaded from the bag header
         loaded_data = LiDARData.from_ros2_bag(bag_path, '/lidar', CoordinateFrame.NED)

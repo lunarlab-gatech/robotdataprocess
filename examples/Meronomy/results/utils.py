@@ -16,13 +16,13 @@ class LoadDataResult:
 def print_errors(metrics_dictionary: dict):
     """ Helper function to print desired metrics. """
 
-    print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-    print("Standard Deviation RTE: ", metrics_dictionary['RPE']['translation_part']['std'])
+    print("RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+    print("RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
+    print("Standard Deviation RTE: ", metrics_dictionary.RPE.translation_part.std)
 
-    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
-    print("Standard Deviation RTE Rotation Angle (Rad): ", metrics_dictionary['RPE']['rotation_angle_rad']['std'])
+    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
+    print("Standard Deviation RTE Rotation Angle (Rad): ", metrics_dictionary.RPE.rotation_angle_rad.std)
 
 def plot_GT_vs_est_on_image(data: LoadDataResult, est_data_align: OdometryData, gt_data_align: OdometryData,
                                    dataset_name: str, robot0_name: str, robot1_name: str):

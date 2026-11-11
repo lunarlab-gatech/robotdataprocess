@@ -1,6 +1,6 @@
 import os
 import unittest
-from robotdataprocess.ModuleImporter import ModuleImporter
+from robotdataprocess.utils.ModuleImporter import ModuleImporter
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

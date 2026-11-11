@@ -8,12 +8,19 @@ from .data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk
 from .data_types.CameraData import CameraData
 from .data_types.ImuData import ImuData
 from .data_types.LiDARData import LiDARData
-from .data_types.LoopClosureData import LoopClosureData
+from .data_types.LoopClosureData.LoopClosureData import LoopClosureData
 from .data_types.OdometryData import OdometryData
 from .data_types.PathData import PathData
 from .data_types.SequentialData import SequentialData
+from .data_types.TableData import TableData
 from .data_types.TransformationData import TransformationData
+
+# Utils
+from .utils.PathDataAlignResult import PathDataAlignResult, PoseRelationErrors, TrajErrorStatistics
 
 # ROS Classes & Functions
 from .ros.Ros2BagWrapper import Ros2BagWrapper
 from .ros.RosPublisher import publish_data_ROS_multiprocess
+
+# Results
+from .data_types.LoopClosureData.LoopClosureDataResult import LoopClosureFilterMode

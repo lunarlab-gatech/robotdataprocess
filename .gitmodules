@@ -1,6 +1,3 @@
-[submodule "external_msgs_ros2/HERCULES-Cosys-AirSim"]
-	path = external_msgs_ros2/HERCULES-Cosys-AirSim
-	url = https://github.com/ssaigarimella/HERCULES-Cosys-AirSim.git
 [submodule "external_msgs_ros1/geometry2"]
 	path = external_msgs_ros1/geometry2
 	url = https://github.com/ros/geometry2.git

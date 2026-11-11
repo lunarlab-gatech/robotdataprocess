@@ -25,7 +25,7 @@ def main():
                                 [0, -1,  0],
                                 [0,  0, -1]])
                 R_NED_Q = R.from_matrix(R_NED)
-                odom_data._ori_apply_rotation(R_NED_Q.inv())
+                odom_data._ori_apply_rotation_left_side(R_NED_Q.inv())
                 odom_data._ori_change_of_basis(R_NED_Q)
 
                 # The timestamps are in ns for 'vins_result_loop.csv', so set to seconds

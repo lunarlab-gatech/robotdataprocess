@@ -5,6 +5,7 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+from scipy.spatial.transform import Rotation as R
 from robotdataprocess.data_types.Data import CoordinateFrame, ROSMsgLibType
 from robotdataprocess.data_types.SequentialData import SequentialData
 
@@ -18,7 +19,56 @@ class TestCoordinateFrame(unittest.TestCase):
         self.assertEqual(CoordinateFrame.FLU.value, 0)
         self.assertEqual(CoordinateFrame.NED.value, 1)
         self.assertEqual(CoordinateFrame.ENU.value, 2)
-        self.assertEqual(CoordinateFrame.NONE.value, 3)
+        self.assertEqual(CoordinateFrame.FUR.value, 3)
+        self.assertEqual(CoordinateFrame.UFL.value, 4)
+        self.assertEqual(CoordinateFrame.LDB.value, 5)
+        self.assertEqual(CoordinateFrame.RDF.value, 6)
+        self.assertEqual(CoordinateFrame.NONE.value, 7)
+
+    def test_get_rotation_ned_to_flu_matches_path_data(self):
+        """ Test get_rotation(NED, FLU) matches the hardcoded matrix in PathData.to_coordinate_frame. """
+        R_frame = np.array([[1,  0,  0],
+                             [0, -1,  0],
+                             [0,  0, -1]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.NED, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_ldb_to_flu(self):
+        """ Test get_rotation(LDB, FLU) -- LDB's X/Y/Z axes point Left/Down/Back in FLU. """
+        R_frame = np.array([[0,  0, -1],
+                             [1,  0,  0],
+                             [0, -1,  0]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.LDB, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_rdf_to_flu(self):
+        """ Test get_rotation(RDF, FLU) -- RDF's (optical) X/Y/Z axes point Right/Down/Forward in FLU. """
+        R_frame = np.array([[0,  0,  1],
+                             [-1, 0,  0],
+                             [0, -1,  0]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.RDF, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_ned_to_flu_matches_scipy_euler(self):
+        """ Test get_rotation(NED, FLU) matches R.from_euler('x', 180, degrees=True), as used in TransformationData.to_coordinate_frame. """
+        R_frame = R.from_euler('x', 180, degrees=True).as_matrix()
+
+        np.testing.assert_array_almost_equal(CoordinateFrame.get_rotation(CoordinateFrame.NED, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_enu_to_flu_matches_lidar_data(self):
+        """ Test get_rotation(ENU, FLU) matches the hardcoded matrix in LiDARData.to_FLU_frame. """
+        R_frame = np.array([[ 0,  1,  0],
+                             [-1,  0,  0],
+                             [ 0,  0,  1]])
+
+        np.testing.assert_array_equal(CoordinateFrame.get_rotation(CoordinateFrame.ENU, CoordinateFrame.FLU), R_frame)
+
+    def test_get_rotation_none_raises(self):
+        """ Test get_rotation raises ValueError when either frame is NONE. """
+        with self.assertRaises(ValueError):
+            CoordinateFrame.get_rotation(CoordinateFrame.NONE, CoordinateFrame.FLU)
+        with self.assertRaises(ValueError):
+            CoordinateFrame.get_rotation(CoordinateFrame.FLU, CoordinateFrame.NONE)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -54,18 +104,21 @@ class TestSequentialData(unittest.TestCase):
         self.assertEqual(data.frame_id, "test_frame")
         self.assertEqual(len(data.timestamps), 3)
 
-    def test_init_non_sequential_timestamps_raises(self):
-        """ Test that non-sequential timestamps raise ValueError. """
-        # Timestamps out of order
+    def test_init_non_sequential_timestamps_warns(self):
+        """ Test that non-sequential timestamps print a warning (once) but do not raise. """
         timestamps = [Decimal("0.3"), Decimal("0.2"), Decimal("0.1")]
-        with self.assertRaises(ValueError):
-            SequentialData("test_frame", timestamps)
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            data = SequentialData("test_frame", timestamps)
+        self.assertEqual(data.len(), 3)
+        self.assertEqual(mock_stdout.getvalue().count("\n"), 1)
 
-    def test_init_duplicate_timestamps_raises(self):
-        """ Test that duplicate timestamps raise ValueError. """
+    def test_init_duplicate_timestamps_warns(self):
+        """ Test that duplicate timestamps print a warning (once) but do not raise. """
         timestamps = [Decimal("0.1"), Decimal("0.1"), Decimal("0.2")]
-        with self.assertRaises(ValueError):
-            SequentialData("test_frame", timestamps)
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            data = SequentialData("test_frame", timestamps)
+        self.assertEqual(data.len(), 3)
+        self.assertEqual(mock_stdout.getvalue().count("\n"), 1)
 
     def test_init_single_timestamp(self):
         """ Test Data initialization with single timestamp (no validation needed). """
@@ -85,6 +138,30 @@ class TestSequentialData(unittest.TestCase):
         data = SequentialData("test_frame", timestamps)
         self.assertEqual(data.len(), 4)
 
+    def test_get_rate_hz_basic(self):
+        """ Test get_rate_hz on evenly-spaced timestamps returns the expected rate. """
+        timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(11)]  # 0.0 to 1.0, 10 gaps
+        data = SequentialData("test_frame", timestamps)
+        self.assertAlmostEqual(data.get_rate_hz(), 10.0)
+
+    def test_get_rate_hz_uneven_spacing(self):
+        """ Test get_rate_hz only cares about the first/last timestamps, not evenness in between. """
+        timestamps = [Decimal("0.0"), Decimal("0.01"), Decimal("0.5"), Decimal("2.0")]  # 3 gaps over 2.0s
+        data = SequentialData("test_frame", timestamps)
+        self.assertAlmostEqual(data.get_rate_hz(), 1.5)
+
+    def test_get_rate_hz_single_sample_raises(self):
+        """ Test get_rate_hz raises ValueError with only 1 sample (no gaps to measure). """
+        data = SequentialData("test_frame", [Decimal("0.1")])
+        with self.assertRaises(ValueError):
+            data.get_rate_hz()
+
+    def test_get_rate_hz_empty_raises(self):
+        """ Test get_rate_hz raises ValueError with no samples. """
+        data = SequentialData("test_frame", [])
+        with self.assertRaises(ValueError):
+            data.get_rate_hz()
+
     def test_get_ros_msg_type_raises(self):
         """ Test get_ros_msg_type raises NotImplementedError. """
         with self.assertRaises(NotImplementedError):
@@ -103,6 +180,46 @@ class TestSequentialData(unittest.TestCase):
         data = SequentialData("test_frame", timestamps)
         with self.assertRaises(NotImplementedError):
             data.crop_data(Decimal("0.1"), Decimal("0.2"))
+
+    def test_crop_to_matched_basic(self):
+        """ Test crop_to_matched keeps only mutually-close pairs, in place. """
+        data1 = SequentialData("frame1", [Decimal("0.1"), Decimal("0.2"), Decimal("0.3"), Decimal("0.4")])
+        data2 = SequentialData("frame2", [Decimal("0.15"), Decimal("0.25"), Decimal("0.35"), Decimal("10.0")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.06"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("0.1"), Decimal("0.2"), Decimal("0.3")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("0.15"), Decimal("0.25"), Decimal("0.35")])
+
+    def test_crop_to_matched_tolerance_boundary(self):
+        """ Test a diff exactly equal to tolerance is kept, but any larger diff is dropped. """
+        data1 = SequentialData("frame1", [Decimal("1.0"), Decimal("2.0")])
+        data2 = SequentialData("frame2", [Decimal("1.05"), Decimal("2.06")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.05"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("1.0")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("1.05")])
+
+    def test_crop_to_matched_enforces_one_to_one(self):
+        """ Test a single entry only consumes one match, even if multiple candidates are in tolerance. """
+        data1 = SequentialData("frame1", [Decimal("1.0")])
+        data2 = SequentialData("frame2", [Decimal("1.01"), Decimal("1.02")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.05"))
+
+        np.testing.assert_array_equal(data1.timestamps, [Decimal("1.0")])
+        np.testing.assert_array_equal(data2.timestamps, [Decimal("1.01")])
+
+    def test_crop_to_matched_no_overlap(self):
+        """ Test completely disjoint timestamps result in both objects being emptied. """
+        data1 = SequentialData("frame1", [Decimal("0.1"), Decimal("0.2")])
+        data2 = SequentialData("frame2", [Decimal("100.1"), Decimal("100.2")])
+
+        SequentialData.crop_to_matched(data1, data2, Decimal("0.01"))
+
+        self.assertEqual(data1.len(), 0)
+        self.assertEqual(data2.len(), 0)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")

@@ -41,7 +41,79 @@ class TestTransformationData(unittest.TestCase):
         actual_matrix = transformation_data.as_matrix()
 
         np.testing.assert_array_almost_equal(actual_matrix, expected_matrix)
-    
+
+    @staticmethod
+    def _unreal_to_flu_matrix(position_cm: list, rotation_deg: list, player_start_cm: list) -> np.ndarray:
+        """ from_unreal followed by the CHANGE_OF_BASIS NED -> FLU conversion HERCULES ground truth uses. """
+        ned = TransformationData.from_unreal("world", "camera", position_cm, rotation_deg, player_start_cm)
+        return ned.to_coordinate_frame(CoordinateFrame.FLU, TransformType.CHANGE_OF_BASIS).as_matrix()
+
+    def _assert_proper_rotation(self, matrix: np.ndarray) -> None:
+        """ The rotation block is orthonormal with determinant +1 (no reflection). """
+        np.testing.assert_array_almost_equal(matrix[0:3, 0:3] @ matrix[0:3, 0:3].T, np.identity(3))
+        self.assertAlmostEqual(np.linalg.det(matrix[0:3, 0:3]), 1.0)
+
+    def test_from_unreal_frame_ids_and_ned_values(self):
+        """ Returns NED with the given frame ids; the real HERCULES camera lands at its hand-computed NED offset. """
+        tf_data = TransformationData.from_unreal("world_ned", "sim_camera", [-13989.27763, 34342.415401, 1057.830428],
+                                                 [0.0, -10.9999, 103.399867], [120.0, 32542.0, 150.0])
+        self.assertEqual(tf_data.frame_id, "world_ned")
+        self.assertEqual(tf_data.child_frame_id, "sim_camera")
+        self.assertEqual(tf_data.frame, CoordinateFrame.NED)
+        np.testing.assert_array_almost_equal(tf_data.translation, [-141.0928, 18.0042, -9.0783], decimal=4)
+        expected_quat = R.from_euler(seq="xyz", angles=[0.0, -10.9999, 103.399867], degrees=True).as_quat()
+        np.testing.assert_array_almost_equal(R.from_quat(tf_data.orientation).as_matrix(),
+                                             R.from_quat(expected_quat).as_matrix())
+
+    def test_from_unreal_position(self):
+        """ Centimetres become metres, Unreal's +y (right) becomes FLU -y and Unreal's +z (up) stays FLU +z. """
+        matrix = self._unreal_to_flu_matrix([100.0, 200.0, 300.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [1.0, -2.0, 3.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 0:3], np.identity(3))
+
+    def test_from_unreal_player_start_subtracted(self):
+        """ PlayerStart is the origin: subtracted (not added) before scaling, per axis (not swapped). """
+        matrix = self._unreal_to_flu_matrix([150.0, 260.0, 370.0], [0.0, 0.0, 0.0], [50.0, 60.0, 70.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [1.0, -2.0, 3.0])
+
+    def test_from_unreal_integer_inputs(self):
+        """ Integer lists (as YAML gives for whole numbers) are accepted and give the same result as floats. """
+        np.testing.assert_array_almost_equal(self._unreal_to_flu_matrix([100, 200, 300], [0, 30, 90], [0, 0, 0]),
+                                             self._unreal_to_flu_matrix([100.0, 200.0, 300.0], [0.0, 30.0, 90.0],
+                                                                        [0.0, 0.0, 0.0]))
+
+    def test_from_unreal_rotation(self):
+        """ Camera forward (+x) in FLU: positive yaw turns right, positive pitch raises the nose, yaw applied after pitch. """
+        pitch, yaw = np.deg2rad(30.0), np.deg2rad(90.0)
+        cases = {
+            "yaw_only": ([0.0, 0.0, 90.0], [0.0, -1.0, 0.0]),
+            "pitch_only": ([0.0, 30.0, 0.0], [np.cos(pitch), 0.0, np.sin(pitch)]),
+            "yaw_and_pitch": ([0.0, 30.0, 60.0], [np.cos(pitch) * np.cos(np.deg2rad(60.0)),
+                                                  -np.cos(pitch) * np.sin(np.deg2rad(60.0)), np.sin(pitch)]),
+            "yaw_and_pitch_90": ([0.0, 30.0, 90.0], [np.cos(pitch) * np.cos(yaw), -np.cos(pitch) * np.sin(yaw),
+                                                     np.sin(pitch)]),
+        }
+        for name, (rotation_deg, expected_forward) in cases.items():
+            with self.subTest(case=name):
+                matrix = self._unreal_to_flu_matrix([0.0, 0.0, 0.0], rotation_deg, [0.0, 0.0, 0.0])
+                np.testing.assert_array_almost_equal(matrix[0:3, 0], expected_forward)
+                self._assert_proper_rotation(matrix)
+
+    def test_from_unreal_roll(self):
+        """ Positive Unreal roll lowers the actor's right side (checked in the editor), so its FLU left axis rises. """
+        matrix = self._unreal_to_flu_matrix([0.0, 0.0, 0.0], [30.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 0], [1.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 1], [0.0, np.cos(np.deg2rad(30.0)), np.sin(np.deg2rad(30.0))])
+        self._assert_proper_rotation(matrix)
+
+    def test_from_unreal_real_camera(self):
+        """ The HERCULES V2.4.C figure camera, checked by hand: FLU position and forward direction. """
+        matrix = self._unreal_to_flu_matrix([-13989.27763, 34342.415401, 1057.830428], [0.0, -10.9999, 103.399867],
+                                            [120.0, 32542.0, 150.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [-141.0928, -18.0042, 9.0783], decimal=4)
+        np.testing.assert_array_almost_equal(matrix[0:3, 0], [-0.2275, -0.9549, -0.1908], decimal=4)
+        self._assert_proper_rotation(matrix)
+
     def test_from_matrix(self):
         """ Test creating TransformationData from a 4x4 matrix, including a non-identity rotation. """
         # Matrix with a rotation (90 deg around Z) and translation
@@ -417,8 +489,8 @@ class TestTransformationData(unittest.TestCase):
         """ Test loading transformations from GrAco calibration YAML files. """
         base_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData', 'test_from_GrAco_yaml').absolute()
 
-        # --- imu-lidar.yaml: single transform T_Imu_Lidar ---
-        tf = TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_Imu_Lidar')
+        # --- imu-lidar.yaml: single transform T_Imu_Lidar (passed as a Path, not str) ---
+        tf = TransformationData.from_GrAco_yaml(base_path / 'imu-lidar.yaml', 'T_Imu_Lidar')
         self.assertEqual(tf.frame_id, "Imu")
         self.assertEqual(tf.child_frame_id, "Lidar")
         self.assertEqual(tf.frame, CoordinateFrame.ENU)
@@ -491,6 +563,56 @@ class TestTransformationData(unittest.TestCase):
             TransformationData.from_GrAco_yaml(str(base_path / 'imu-lidar.yaml'), 'T_nonexistent')
 
 
+    def test_from_kalibr(self):
+        """ Test loading transformations from a kalibr camera calibration YAML file. """
+        yaml_path = Path(Path('.'), 'tests', 'files', 'test_TransformationData',
+                          'test_from_kalibr', 'drone_cameras_calib.yaml').absolute()
+
+        # --- cam0: T_cam_imu ---
+        tf_cam0 = TransformationData.from_kalibr(yaml_path, 'cam0', 'T_cam_imu', CoordinateFrame.ENU)
+        self.assertEqual(tf_cam0.frame_id, "cam0")
+        self.assertEqual(tf_cam0.child_frame_id, "imu")
+        self.assertEqual(tf_cam0.frame, CoordinateFrame.ENU)
+        expected_cam0 = np.array([[ 0.0027305274838303473, -0.999982323169393, -0.005281814877973967,  0.12415900872540632],
+                                   [-0.1738050949758117,     0.004726870081005641, -0.9847687269911081,   0.036012403509607445],
+                                   [ 0.9847762858538534,     0.0036069444107767468, -0.1737891158039203,  -0.20357622084417762],
+                                   [ 0.0,                    0.0,                    0.0,                  1.0]])
+        np.testing.assert_array_almost_equal(tf_cam0.as_matrix(), expected_cam0)
+
+        # --- cam1: T_cam_imu (passed as a str, not a Path) ---
+        tf_cam1 = TransformationData.from_kalibr(str(yaml_path), 'cam1', 'T_cam_imu', CoordinateFrame.ENU)
+        self.assertEqual(tf_cam1.frame_id, "cam1")
+        self.assertEqual(tf_cam1.child_frame_id, "imu")
+        self.assertEqual(tf_cam1.frame, CoordinateFrame.ENU)
+        expected_cam1 = np.array([[-0.0003540123070847889, -0.999998698126567,     0.0015742999896645182, -0.13849989246993996],
+                                   [-0.17139967845626314,   -0.001490325404841203, -0.9852004512561275,     0.03619217829845767],
+                                   [ 0.9852015148691033,    -0.000618607596712395, -0.1713989277220405,    -0.20311129552391755],
+                                   [ 0.0,                     0.0,                  0.0,                    1.0]])
+        np.testing.assert_array_almost_equal(tf_cam1.as_matrix(), expected_cam1)
+
+        # --- cam1: T_cn_cnm1 (frame_id resolved from cam_name, child from the literal token) ---
+        tf_c1_c0 = TransformationData.from_kalibr(yaml_path, 'cam1', 'T_cn_cnm1', CoordinateFrame.ENU)
+        self.assertEqual(tf_c1_c0.frame_id, "cam1")
+        self.assertEqual(tf_c1_c0.child_frame_id, "cnm1")
+        expected_c1_c0 = np.array([[ 0.9999717395175309,   -0.006215656181287534, -0.00422915884312321,  -0.263292507858012],
+                                    [ 0.006225933929098103,  0.9999776870329092,    0.00242140104583302,  -9.94877785432512e-05],
+                                    [ 0.004214013881663212, -0.0024476630794041583, 0.9999881254457255,    2.744638754520268e-05],
+                                    [ 0.0,                    0.0,                    0.0,                  1.0]])
+        np.testing.assert_array_almost_equal(tf_c1_c0.as_matrix(), expected_c1_c0)
+
+        # --- Custom coordinate frame is respected ---
+        tf_flu = TransformationData.from_kalibr(yaml_path, 'cam0', 'T_cam_imu', CoordinateFrame.FLU)
+        self.assertEqual(tf_flu.frame, CoordinateFrame.FLU)
+
+        # --- Error: camera name not found ---
+        with self.assertRaises(KeyError):
+            TransformationData.from_kalibr(yaml_path, 'cam2', 'T_cam_imu', CoordinateFrame.ENU)
+
+        # --- Error: transform name not found ---
+        with self.assertRaises(KeyError):
+            TransformationData.from_kalibr(yaml_path, 'cam0', 'T_nonexistent', CoordinateFrame.ENU)
+
+
     def test_timestamps_single_zero(self):
         """ TransformationData has exactly one timestamp at Decimal('0'). """
         tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
@@ -528,6 +650,50 @@ class TestTransformationData(unittest.TestCase):
         tf = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
         with self.assertRaises(NotImplementedError):
             tf.get_ros_msg(ROSMsgLibType.NONE, 0)
+
+    def test_crop_to_matched_raises(self):
+        """ crop_to_matched raises NotImplementedError. """
+        tf1 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        tf2 = TransformationData.from_matrix("A", "B", np.identity(4), CoordinateFrame.FLU)
+        with self.assertRaises(NotImplementedError):
+            TransformationData.crop_to_matched(tf1, tf2, Decimal('0.01'))
+
+    def test_eq(self):
+        """ Test __eq__ compares child_frame_id, translation, orientation, and frame, not just frame_id/timestamps. """
+        matrix = np.array([
+            [0.0, -1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 2.0],
+            [0.0, 0.0, 1.0, 3.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        tf = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.FLU)
+
+        # Identical values should be equal
+        tf_same = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.FLU)
+        self.assertEqual(tf, tf_same)
+
+        # Different child_frame_id (same frame_id/timestamps) should not be equal
+        tf_diff_child = TransformationData.from_matrix("world", "other_sensor", matrix, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_child)
+
+        # Different translation should not be equal
+        matrix_diff_translation = matrix.copy()
+        matrix_diff_translation[0:3, 3] = [10.0, 20.0, 30.0]
+        tf_diff_translation = TransformationData.from_matrix("world", "sensor", matrix_diff_translation, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_translation)
+
+        # Different orientation should not be equal
+        matrix_diff_orientation = np.identity(4)
+        matrix_diff_orientation[0:3, 3] = matrix[0:3, 3]
+        tf_diff_orientation = TransformationData.from_matrix("world", "sensor", matrix_diff_orientation, CoordinateFrame.FLU)
+        self.assertNotEqual(tf, tf_diff_orientation)
+
+        # Different frame should not be equal
+        tf_diff_frame = TransformationData.from_matrix("world", "sensor", matrix, CoordinateFrame.NED)
+        self.assertNotEqual(tf, tf_diff_frame)
+
+        # Different type should not be equal
+        self.assertNotEqual(tf, "not a TransformationData")
 
 
 if __name__ == "__main__":

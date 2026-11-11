@@ -20,8 +20,8 @@ def load_data_GAC_Mapping(dataset_name, experiment_name, robot0_name, robot1_nam
     # For some reason, GAC-Mapping orientation is 180° rotated around the axes pointed equally in the YZ direction
     # Rotating to match the GT orientation. If we use rotation results, should found out why this is...
     H_rotation = R.from_rotvec(np.pi * np.array([0, 1/np.sqrt(2), 1/np.sqrt(2)]))
-    data.est_data_robot0._ori_apply_rotation(H_rotation)
-    data.est_data_robot1._ori_apply_rotation(H_rotation)
+    data.est_data_robot0._ori_apply_rotation_left_side(H_rotation)
+    data.est_data_robot1._ori_apply_rotation_left_side(H_rotation)
 
     # Load the ground truth data
     data.gt_data_robot0 = OdometryData.from_tum('/media/' + user + '/T73/GrAco_dataset/' + dataset_name + '/data/' + \

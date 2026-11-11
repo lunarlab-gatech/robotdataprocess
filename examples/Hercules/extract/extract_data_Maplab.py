@@ -74,7 +74,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str):
 
     print("\n3. Writing to temporary ROS2 bag...")
     # Write data to temporary ROS2 bag (required intermediate step)
-    Ros2BagWrapper.write_data_to_rosbag(
+    Ros2BagWrapper.write_data_to_ros2_bag(
         temp_ros2_bag,
         [imu_data, left_image_data, right_image_data, lidar_data],    # Data to write
         ['/imu0', '/cam0/image_raw', '/cam1/image_raw', '/lidar'],  # Topic names

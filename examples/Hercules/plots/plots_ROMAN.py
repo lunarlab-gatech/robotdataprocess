@@ -50,11 +50,11 @@ def main():
         # Calculate RMS ATE, among other metrics
         print("\n========== Merged Trajectories for dataset: ", dataset_name, run_name, "==========")
         metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
-        print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-        print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+        print("RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+        print("RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
 
-        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+        print("RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse)
+        print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
         # Seperate the aligned trajectories into their single-robot forms
         gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)

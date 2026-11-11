@@ -20,6 +20,7 @@ cam1:
     -0.0015031965111152103]  # k1, k2, r1, r2
   resolution: [1600, 1100]
   sensor_type: Flir-BFS-U3-16S7C
+  timeshift_cam_imu: 0.0123
 
 # Stereo extrinsics
 T_cam1_cam0:
