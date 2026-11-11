@@ -6,6 +6,9 @@ from pathlib import Path
 from robotdataprocess import CoordinateFrame
 from robotdataprocess.data_types.ImuData import ImuData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag1 import Writer as Writer1
+from rosbags.typesys import Stores, get_typestore
+import tempfile
 import unittest
 import unittest.mock
 
@@ -65,6 +68,78 @@ class TestImuData(unittest.TestCase):
         np.testing.assert_array_equal(ros_data_2.ang_vel[84].astype(np.float128), [ 0.000035,  0.001181, -0.005946])
         np.testing.assert_array_equal(ros_data_2.orientations[84].astype(np.float128), [0.001867, -0.000799, 0.927410, 0.374042])
         np.testing.assert_equal(ros_data_2.frame_id, '/Husky1/base_link')
+
+    def _write_ros1_imu_bag(self, bag_path: Path, topic: str, frame_id: str,
+                            timestamps_sec: list, lin_acc: np.ndarray, ang_vel: np.ndarray,
+                            orientations: np.ndarray) -> None:
+        """Write a ROS1 bag containing sensor_msgs/msg/Imu messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        ImuMsg     = typestore.types['sensor_msgs/msg/Imu']
+        Header     = typestore.types['std_msgs/msg/Header']
+        Time       = typestore.types['builtin_interfaces/msg/Time']
+        Quaternion = typestore.types['geometry_msgs/msg/Quaternion']
+        Vector3    = typestore.types['geometry_msgs/msg/Vector3']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, ImuMsg.__msgtype__, typestore=typestore)
+            for i, (ts, acc, vel, ori) in enumerate(zip(timestamps_sec, lin_acc, ang_vel, orientations)):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = ImuMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    orientation=Quaternion(x=float(ori[0]), y=float(ori[1]), z=float(ori[2]), w=float(ori[3])),
+                    orientation_covariance=np.zeros(9),
+                    angular_velocity=Vector3(x=float(vel[0]), y=float(vel[1]), z=float(vel[2])),
+                    angular_velocity_covariance=np.zeros(9),
+                    linear_acceleration=Vector3(x=float(acc[0]), y=float(acc[1]), z=float(acc[2])),
+                    linear_acceleration_covariance=np.zeros(9),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, ImuMsg.__msgtype__))
+
+    def test_from_ros1_bag(self):
+        """Write a ROS1 bag with known Imu messages and verify from_ros1_bag round-trips."""
+        frame_id       = '/Husky1/base_link'
+        topic          = '/imu'
+        timestamps_sec = [1.0, 2.0, 3.0]
+        lin_acc        = np.array([[1.1, 2.2, 3.3],
+                                   [4.4, 5.5, 6.6],
+                                   [7.7, 8.8, 9.9]])
+        ang_vel        = np.array([[0.1, 0.2, 0.3],
+                                   [0.4, 0.5, 0.6],
+                                   [0.7, 0.8, 0.9]])
+        # orientations as (qx, qy, qz, qw)
+        orientations   = np.array([[0.0, 0.0, 0.0,        1.0       ],
+                                   [0.5, 0.5, 0.5,        0.5       ],
+                                   [0.0, 0.0, 0.70710678, 0.70710678]])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'imu.bag'
+            self._write_ros1_imu_bag(bag_path, topic, frame_id, timestamps_sec, lin_acc, ang_vel, orientations)
+
+            data = ImuData.from_ros1_bag(bag_path, topic, frame_id)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.frame, CoordinateFrame.FLU)
+            self.assertEqual(data.len(), 3)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- lin_acc / ang_vel / orientations ---
+            np.testing.assert_array_almost_equal(
+                data.lin_acc.astype(np.float64), lin_acc, decimal=6)
+            np.testing.assert_array_almost_equal(
+                data.ang_vel.astype(np.float64), ang_vel, decimal=6)
+            np.testing.assert_array_almost_equal(
+                data.orientations.astype(np.float64), orientations, decimal=6)
+
+            # --- missing topic should raise ---
+            with self.assertRaises(ValueError):
+                ImuData.from_ros1_bag(bag_path, '/nonexistent_topic', frame_id)
 
     def test_crop_data(self):
         """ Make sure data is successfully cropped. """

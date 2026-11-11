@@ -814,6 +814,32 @@ class TestPathData(unittest.TestCase):
         finally:
             os.remove(tmp_img)
 
+    def test_visualize_2D_label_suffixes(self):
+        """ Test legend labels include GT/Est. suffixes by default, and omit them when disabled. """
+        path1 = PathData(
+            frame_id="robot1",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 1.0, 0.0], [1.0, 1.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([path1, path2], [True, False], ['#FF0000', '#0000FF'], ['R1', 'R2'], ax=ax)
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["R1 (GT)", "R2 (Est.)"])
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([path1, path2], [True, False], ['#FF0000', '#0000FF'], ['R1', 'R2'], ax=ax,
+                              label_suffixes=False)
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["R1", "R2"])
+        plt.close(fig)
+
     # =========================================================================
     # ================ visualize_2D_video Tests ================================
     # =========================================================================

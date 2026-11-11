@@ -138,6 +138,30 @@ class TestSequentialData(unittest.TestCase):
         data = SequentialData("test_frame", timestamps)
         self.assertEqual(data.len(), 4)
 
+    def test_get_rate_hz_basic(self):
+        """ Test get_rate_hz on evenly-spaced timestamps returns the expected rate. """
+        timestamps = [Decimal(f"{i * 0.1:.1f}") for i in range(11)]  # 0.0 to 1.0, 10 gaps
+        data = SequentialData("test_frame", timestamps)
+        self.assertAlmostEqual(data.get_rate_hz(), 10.0)
+
+    def test_get_rate_hz_uneven_spacing(self):
+        """ Test get_rate_hz only cares about the first/last timestamps, not evenness in between. """
+        timestamps = [Decimal("0.0"), Decimal("0.01"), Decimal("0.5"), Decimal("2.0")]  # 3 gaps over 2.0s
+        data = SequentialData("test_frame", timestamps)
+        self.assertAlmostEqual(data.get_rate_hz(), 1.5)
+
+    def test_get_rate_hz_single_sample_raises(self):
+        """ Test get_rate_hz raises ValueError with only 1 sample (no gaps to measure). """
+        data = SequentialData("test_frame", [Decimal("0.1")])
+        with self.assertRaises(ValueError):
+            data.get_rate_hz()
+
+    def test_get_rate_hz_empty_raises(self):
+        """ Test get_rate_hz raises ValueError with no samples. """
+        data = SequentialData("test_frame", [])
+        with self.assertRaises(ValueError):
+            data.get_rate_hz()
+
     def test_get_ros_msg_type_raises(self):
         """ Test get_ros_msg_type raises NotImplementedError. """
         with self.assertRaises(NotImplementedError):
