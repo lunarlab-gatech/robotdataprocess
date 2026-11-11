@@ -125,6 +125,37 @@ class TestCameraData(unittest.TestCase):
         self.assertEqual(cam.timeshift_cam_imu, 0.0456)
 
     # =========================================================================
+    # ==================== from_Unreal_Engine_CameraActor =====================
+    # =========================================================================
+
+    def test_from_Unreal_Engine_CameraActor_full_width(self):
+        """ 90 deg across the full 2210 px width gives f = 1105 (a 16:9 aspect applied to the height would give ~1112). """
+        cam = CameraData.from_Unreal_Engine_CameraActor(self.FRAME_ID, 2210, 1251, 90.0)
+        np.testing.assert_array_almost_equal(cam.K, [[1105.0, 0.0, 1105.0],
+                                                     [0.0, 1105.0, 625.5],
+                                                     [0.0, 0.0, 1.0]])
+        self.assertEqual((cam.width, cam.height), (2210, 1251))
+        self.assertEqual(cam.frame_id, self.FRAME_ID)
+        np.testing.assert_array_equal(cam.D, np.zeros(5))
+        np.testing.assert_array_equal(cam.R, np.eye(3))
+        self.assertEqual(cam.distortion_model, CameraData.DistortionModel.RADIAL_TANGENTIAL)
+        self.assertEqual(cam.camera_model, CameraData.CameraModel.PINHOLE)
+
+    def test_from_Unreal_Engine_CameraActor_other_fov_and_size(self):
+        """ A second FOV catches a hard-coded tan(45 deg); a non-square size catches swapped width/height. """
+        cam = CameraData.from_Unreal_Engine_CameraActor(self.FRAME_ID, 1000, 500, 60.0)
+        f = 500.0 / np.tan(np.deg2rad(30.0))
+        np.testing.assert_array_almost_equal(cam.K, [[f, 0.0, 500.0], [0.0, f, 250.0], [0.0, 0.0, 1.0]])
+        self.assertEqual((cam.width, cam.height), (1000, 500))
+
+    def test_from_Unreal_Engine_CameraActor_out_of_range_raises(self):
+        """ A pinhole's horizontal FOV is strictly between 0 and 180 deg. """
+        for fov in [0.0, -10.0, 180.0, 200.0]:
+            with self.subTest(fov=fov):
+                with self.assertRaises(ValueError):
+                    CameraData.from_Unreal_Engine_CameraActor(self.FRAME_ID, 1000, 500, fov)
+
+    # =========================================================================
     # ========================= __init__ validation ===========================
     # =========================================================================
 
