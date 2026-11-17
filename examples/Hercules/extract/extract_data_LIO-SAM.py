@@ -5,7 +5,7 @@ from robotdataprocess import ImuData, OdometryData, CoordinateFrame, LiDARData
 from robotdataprocess.ros.Ros2BagWrapper import Ros2BagWrapper
 from typing import Union
 
-def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decimal):
+def to_bag(input_dir: str, dataset_num: str, robot_name: str, start_time: Decimal, end_time: Decimal):
 
     # Make directory paths
     input_path = Path(input_dir).absolute()
@@ -17,7 +17,17 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     lidar_data = LiDARData.from_npy_files(input_path / robot_name / "lidar", "lidar_link", CoordinateFrame.NED)
 
     # Prepare LiDARData
-    lidar_data.calculate_point_channels(16, -20, 20)
+    if dataset_num == "SmallTownSequence":
+        num_channels = 32
+        v_min_angle = -25
+        v_max_angle = 25
+    elif dataset_num == "V2.4.C" or dataset_num == "V2.3.AP" or dataset_num == "V2.3.AC" or dataset_num == "V2.4.F":
+        num_channels = 16
+        v_min_angle = -20
+        v_max_angle = 20
+    else:
+        raise ValueError("LiDAR point channels not specified for this dataset number.")
+    lidar_data.calculate_point_channels(num_channels, v_min_angle, v_max_angle)
     lidar_data.make_dense()
 
     # Shift GT data to start at Identity to be roughly close to odometry output
@@ -29,7 +39,7 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     lidar_data.crop_data(start_time, end_time)
 
     # Save it into a ROS2 bag
-    Ros2BagWrapper.write_data_to_rosbag(output_path / robot_name,
+    Ros2BagWrapper.write_data_to_ros2_bag(output_path / robot_name,
                       [  imu_data,     lidar_data,     pose_data],
                       ['/imu_raw',  '/points_raw',    '/odom_gt'],
                       [      None,           None,        "Path"], 
@@ -37,10 +47,13 @@ def to_bag(input_dir: str, robot_name: str, start_time: Decimal, end_time: Decim
     
 def main(): 
     # Enter desired configuration here
-    dataset_num = "V2.4.F"
+    dataset_num = "SmallTownSequence"
     user = getpass.getuser()
     input_dir = '/media/' + user + '/T73/Hercules_datasets/' + dataset_num + '/data'
-    robot_names = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_names = ["Drone1"]
+
+    # Define robot name to index mapping
+    robot_name_to_index = {"Husky1": 0, "Husky2": 1, "Drone1": 2, "Drone2": 3}
 
     # LIO-SAM starts from zero as it desires static initialization
     if dataset_num == "V2.4.C":
@@ -55,19 +68,19 @@ def main():
     elif dataset_num == "V2.4.F":
         robot_crop_start_times = [Decimal('35.05'), Decimal('34.60'), Decimal('27.45'), Decimal('31.50')]
         robot_crop_end_times = [Decimal('575.55'), Decimal('762.35'), Decimal('898.10'), Decimal('906.85')]
+    elif dataset_num == "SmallTownSequence":
+        robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+        robot_crop_end_times = [None, None, None, None]
     else:
         raise ValueError("Crop times not specified for this dataset number.")
 
-    # Check validity of inputs
-    assert len(robot_names) == len(robot_crop_end_times)
-    num_robots = len(robot_names)
-
     # Run extraction for each robot
-    for i in range(num_robots):
+    for i in range(len(robot_names)):
         to_bag(input_dir=input_dir,
+               dataset_num=dataset_num,
                robot_name=robot_names[i],
-               start_time=robot_crop_start_times[i],
-               end_time=robot_crop_end_times[i])
+               start_time=robot_crop_start_times[robot_name_to_index[robot_names[i]]],
+               end_time=robot_crop_end_times[robot_name_to_index[robot_names[i]]])
         
 if __name__ == "__main__":
     main()

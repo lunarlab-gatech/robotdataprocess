@@ -5,11 +5,11 @@
 USER=$(whoami)
 
 # Define paths
-DATASET_NUM="V2.4.F"
+DATASET_NUM="SmallTownSequence"
 BASE_DIR="/media/${USER}/T73/Hercules_datasets/${DATASET_NUM}/extract/bags_for_LIO-SAM"
 
 # Robot names (must match extract_data_LIO-SAM.py)
-ROBOTS=("Husky1" "Husky2" "Drone1" "Drone2")
+ROBOTS=("Husky1" "Drone1")
 
 # Convert each robot's ROS2 bag to ROS1
 for ROBOT in "${ROBOTS[@]}"; do

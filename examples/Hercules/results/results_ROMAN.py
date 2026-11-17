@@ -1,104 +1,110 @@
+from decimal import Decimal
 import getpass
-from robotdataprocess import OdometryData, CoordinateFrame, PathData
-from scipy.spatial.transform import Rotation as R
+import itertools
+import sys
+from pathlib import Path
+from robotdataprocess import OdometryData, CoordinateFrame
+from typing import Dict, List
 
-def main():  
-    dataset_name = "V2.3.AC"
-    method = "MeronomyGraph"
-    robot_names = ["Drone1", "Drone2"]
-    run_name = "1st_NM_" + ''.join(name[0] + ''.join(filter(str.isdigit, name)) for name in robot_names)
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
+from robotdataprocess.eval.RobotGroup import RobotGroupViz
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
+from robotdataprocess.eval.SLAMMethod import SLAMMethod
 
-    # Get robot0 name and robot1 name
-    robot0_name = robot_names[0]
-    robot1_name = robot_names[1]
-    
-    # Load the estimated data
+def load_gt_data_ROMAN(dataset_seq: str, robot_names: List) -> List[OdometryData]:
+    """
+    Load ground truth trajectories for a set of robots from poseGT.csv.
+
+    Returns:
+        List of OdometryData in the same order as robot_names, in FLU frame.
+    """
     user = getpass.getuser()
-    est_data_robot0 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + run_name+ '/offline_rpgo/' + robot0_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
-    est_data_robot1 = OdometryData.from_csv('/home/' + user + '/Research/ROMAN_DEVEL/results/hercules_' + dataset_name + '_' + method + '/' + run_name+ '/offline_rpgo/' + robot1_name + '.csv', "map", 'robot0', CoordinateFrame.FLU, True, [0, 1, 2, 3, 4, 5, 6, 7], ts_in_ns=True, reorder_data=False)
-    est_data_lst: list[OdometryData] = [est_data_robot0, est_data_robot1]
+    gt_data_list: List[OdometryData] = []
+    for rn in robot_names:
+        pose_data = OdometryData.from_txt('/media/' + user + '/T73/Hercules_datasets/' + dataset_seq + '/data/' + rn + '/pose_world_frame.txt',
+                     rn + '/odom', rn + '/ground_truth/base_link', CoordinateFrame.NED, False)
+        pose_data.to_coordinate_frame(CoordinateFrame.FLU)
 
-    # Load the ground truth data
-    gt_data_robot0 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot0_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
-    gt_data_robot1 = OdometryData.from_csv('/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/extract/files_for_roman_baseline/' + robot1_name + '/poseGT.csv', "world", "robot", CoordinateFrame.FLU, True, None)
-    gt_data_lst: list[OdometryData] = [gt_data_robot0, gt_data_robot1]
+        if dataset_seq == "V2.4.C":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('382.85'), Decimal('390.90'), Decimal('1100.00'), Decimal('1190.35')]
+        elif dataset_seq == "V2.3.AP":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('772.15'), Decimal('741.45'), Decimal('1121.80'), Decimal('1193.80')]
+        elif dataset_seq == "V2.3.AC":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [Decimal('1125.00'), Decimal('1118.80'), Decimal('1025.50'), Decimal('892.60')]
+        elif dataset_seq == "V2.4.F":
+            robot_crop_start_times = [Decimal('35.05'), Decimal('34.60'), Decimal('27.45'), Decimal('31.50')]
+            robot_crop_end_times = [Decimal('575.55'), Decimal('762.35'), Decimal('898.10'), Decimal('906.85')]
+        elif dataset_seq == "SmallTownSequence":
+            robot_crop_start_times = [Decimal('0.0'), Decimal('0.0'), Decimal('0.0'), Decimal('0.0')]
+            robot_crop_end_times = [None, None, None, None]
+        else:
+            raise ValueError("Crop times not specified for this dataset number.")
 
-    # Calculate individual RMS ATE, among other metrics
-    print("=========== Individual Trajectory", robot0_name, "for dataset: ", dataset_name, run_name, "============")
-    metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot0, est_data_robot0, max_diff=0.1, visualize=False)
-    print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
+        robot_name_to_index: dict = {"Husky1": 0, "Husky2": 1, "Drone1": 2, "Drone2": 3}
+        pose_data.crop_data(robot_crop_start_times[robot_name_to_index[rn]],
+                            robot_crop_end_times[robot_name_to_index[rn]])
+        gt_data_list.append(pose_data)
 
-    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
+    return gt_data_list
 
-    print("\n=========== Individual Trajectory", robot1_name, "for dataset: ", dataset_name, run_name, "============")
-    metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data_robot1, est_data_robot1, max_diff=0.1, visualize=False)
-    print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-
-    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
-
-    # Make the timestamps match and then concatenate
-    est_data_lst, gt_data_lst = PathData.make_start_and_end_times_match(est_data_lst, gt_data_lst)
-    est_data: OdometryData = PathData.concatenate_PathData(est_data_lst).to_OdometryData('odom', 'base_link')
-    gt_data: PathData = PathData.concatenate_PathData(gt_data_lst)
-
-    # Calculate RMS ATE, among other metrics
-    print("\n========== Merged Trajectories for dataset: ", dataset_name, run_name, "==========")
-    metrics_dictionary, est_data_align, gt_data_align = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1, visualize=False)
-    print("RMS ATE: ", metrics_dictionary['APE']['translation_part']['rmse'])
-    print("RMS RTE: ", metrics_dictionary['RPE']['translation_part']['rmse'])
-
-    print("RMS APE Rotation Angle (Deg): ", metrics_dictionary['APE']['rotation_angle_deg']['rmse'])
-    print("RMS RTE Rotation Angle (Deg): ", metrics_dictionary['RPE']['rotation_angle_deg']['rmse'])
-
-    # Seperate the aligned trajectories into their single-robot forms
-    gt_data_align_list = PathData.seperate_PathData(gt_data_lst, gt_data_align)
-    gt_data_align_robot0 = gt_data_align_list[0]
-    gt_data_align_robot1 = gt_data_align_list[1]
-
-    est_data_align_list = PathData.seperate_PathData(est_data_lst, est_data_align)
-    est_data_align_robot0 = est_data_align_list[0]
-    est_data_align_robot1 = est_data_align_list[1]
-
-    # Get environment image path
-    image_path = '/media/' + user + '/T73/Hercules_datasets/' + dataset_name + '/data/environment.png'
-    if dataset_name in "V2.3.AP":  x_edge = 350
-    elif dataset_name in "V2.4.C": x_edge = 300
-    elif dataset_name in "V2.3.AC": x_edge = 500
-    elif dataset_name in "V2.4.F": x_edge = 150
+def make_viz_config(dataset_seq: str) -> RobotGroupViz:
+    """Builds the HERCULES environment image / robot display config for one dataset_seq."""
+    user = getpass.getuser()
+    image_path = '/media/' + user + '/T73/Hercules_datasets/' + dataset_seq + '/data/environment.png'
+    if dataset_seq in "V2.3.AP":  x_edge = 350
+    elif dataset_seq in "V2.4.C": x_edge = 300
+    elif dataset_seq in "V2.3.AC": x_edge = 500
+    elif dataset_seq in "V2.4.F": x_edge = 150
+    elif dataset_seq in "SmallTownSequence": x_edge = 150
     else:
-        raise RuntimeError(f"x_edge not defined for {dataset_name}.")
+        raise RuntimeError(f"x_edge not defined for {dataset_seq}.")
 
-    # Define the mapping from robot name to color and robot_name to new name
-    name_map: dict = {
+    name_map: Dict = {
         "Husky1": "UGV1",
         "Husky2": "UGV2",
         "Drone1": "UAV1",
         "Drone2": "UAV2"
     }
-    robot_name_to_color: dict = {
+    robot_name_to_color: Dict = {
         "UGV1": "#1EE15F",
         "UGV2": "#E11E28",
         "UAV1": "#F0F02A",
         "UAV2": "#1B0ED5",
     }
+    return RobotGroupViz(
+        name_map=name_map,
+        robot_name_to_color=robot_name_to_color,
+        image_path=image_path,
+        image_x_edge=x_edge,
+        image_extent_offsets=None,
+    )
 
-    # Plot the results in 2D (Configuration for Figure 10)
-    dataList =  [est_data_align_robot0, gt_data_align_robot0,  est_data_align_robot1,  gt_data_align_robot1]
-    isGTList =  [                False,                 True,                  False,                  True]
-    nameList =  [name_map[robot0_name], name_map[robot0_name], name_map[robot1_name], name_map[robot1_name]]
-    colorList = [robot_name_to_color[name] for name in nameList]
-    PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=2.0, show_grid=True, 
-                       background_image_path=image_path, background_image_x_edge=x_edge,
-                       save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
-    
-    # Configuration for Figure 2
-    # PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=4.0, show_grid=False, 
-    #                     background_image_path=image_path, background_image_x_edge=x_edge, legend=False, no_border=True,
-    #                     save_path='/home/dbutterfield3/Research/robotdataprocess/fig.pdf')
+def main():
+    """
+    Generate all evaluation figures and tables for the HERCULES dataset.
+
+    See :meth:`SLAMEvaluator.run_evaluation` for the outputs produced.
+    """
+    all_robots = ["Husky1", "Husky2", "Drone1", "Drone2"]
+    robot_groups = list(itertools.combinations(all_robots, 2))
+    methods = [SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#1f77b4"), # "ROMAN_O"
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#ff7f0e"),
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#2ca02c")]
+    dataset_seq = "V2.4.C"
+    viz_config = make_viz_config(dataset_seq)
+
+    user = getpass.getuser()
+    figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
+    roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')
+    critical_invocation_params = {"use_lidar": False, "use_gt_odom": False}
+
+    robot_groups = SLAMEvaluator.make_robot_groups("hercules", dataset_seq, robot_groups, viz_config)
+    SLAMEvaluator.run_evaluation(roman_root, Path("hercules") / dataset_seq, methods, robot_groups,
+                             critical_invocation_params, figures_base_dir, load_gt_data_ROMAN, failure_extent_fraction=0.10)
 
 if __name__ == "__main__":
     main()

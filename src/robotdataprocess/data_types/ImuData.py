@@ -1,15 +1,16 @@
-from ..conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
+from ..utils.conversion_utils import col_to_dec_arr, dec_arr_to_float_arr
 from .Data import CoordinateFrame, ROSMsgLibType
 from .SequentialData import SequentialData
 import decimal
 from decimal import Decimal
-from ..ModuleImporter import ModuleImporter
+from ..utils.ModuleImporter import ModuleImporter
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
 from robotdataprocess.data_types.PathData import PathData
 from ..ros.Ros2BagWrapper import Ros2BagWrapper
+from rosbags.rosbag1 import Reader as Reader1
 from rosbags.rosbag2 import Reader as Reader2
 from rosbags.typesys import Stores, get_typestore
 from rosbags.typesys.store import Typestore
@@ -63,6 +64,27 @@ class ImuData(SequentialData):
     def _invalidate_cache(self):
         """ Hook for subclasses to clear cached data after mutations. No-op in ImuData. """
         pass
+
+    def __eq__(self, other) -> bool:
+        parent_result = super().__eq__(other)
+        if parent_result is not True:
+            return parent_result
+        if self.frame != other.frame:
+            print(f"  [__eq__] frame: {self.frame} != {other.frame}")
+            return False
+        if not np.array_equal(self.lin_acc, other.lin_acc):
+            print(f"  [__eq__] lin_acc not equal")
+            return False
+        if not np.array_equal(self.ang_vel, other.ang_vel):
+            print(f"  [__eq__] ang_vel not equal")
+            return False
+        if (self.orientations is None) != (other.orientations is None):
+            print(f"  [__eq__] orientations: {self.orientations} != {other.orientations}")
+            return False
+        if self.orientations is not None and not np.array_equal(self.orientations, other.orientations):
+            print(f"  [__eq__] orientations not equal")
+            return False
+        return True
 
     # =========================================================================
     # ============================ Class Methods ==============================
@@ -124,7 +146,66 @@ class ImuData(SequentialData):
 
         # Create an ImageData class
         return cls(frame_id, CoordinateFrame.FLU, timestamps, lin_acc, ang_vel, orientation)
-    
+
+    @classmethod
+    @typechecked
+    def from_ros1_bag(cls, bag_path: Union[Path, str], imu_topic: str, frame_id: str):
+        """
+        Creates a class structure from a ROS1 bag file with an Imu topic.
+
+        Args:
+            bag_path (Path | str): Path to the ROS1 .bag file.
+            imu_topic (str): Topic of the sensor_msgs/Imu messages.
+            frame_id (str): The frame where this IMU data was collected.
+        Returns:
+            ImuData: Instance of this class.
+        Raises:
+            ValueError: If ``imu_topic`` is not present in the bag.
+        """
+
+        print("WARNING: This code does not check the orientation covariance to determine if the orientation is valid; may use invalid orientations!")
+
+        # Get typestore and topic message count
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+
+        # TODO: Load the frame id directly from the ROS1 bag.
+
+        with Reader1(Path(bag_path)) as reader:
+            conns = [c for c in reader.connections if c.topic == imu_topic]
+            if not conns:
+                raise ValueError(f"Topic {imu_topic!r} not found in bag {bag_path}.")
+            conn = conns[0]
+            num_msgs = len(reader.indexes[conn.id])
+
+            # Setup arrays to hold data
+            timestamps_np = np.zeros(num_msgs, dtype=Decimal)
+            lin_acc_np = np.zeros((num_msgs, 3), dtype=np.double)
+            ang_vel_np = np.zeros((num_msgs, 3), dtype=np.double)
+            orientation_np = np.zeros((num_msgs, 4), dtype=np.double)
+
+            # Extract the imu data/timestamps and save
+            pbar = tqdm.tqdm(total=num_msgs, desc="Extracting IMU...", unit=" msgs")
+            for i, (_, _, rawdata) in enumerate(reader.messages(connections=conns)):
+                msg = typestore.deserialize_ros1(rawdata, conn.msgtype)
+
+                # Extract imu data
+                lin_acc_np[i] = np.array([msg.linear_acceleration.x, msg.linear_acceleration.y,
+                                          msg.linear_acceleration.z], dtype=np.double)
+                ang_vel_np[i] = np.array([msg.angular_velocity.x, msg.angular_velocity.y,
+                                          msg.angular_velocity.z], dtype=np.double)
+                orientation_np[i] = np.array([msg.orientation.x, msg.orientation.y,
+                                              msg.orientation.z, msg.orientation.w], dtype=np.double)
+
+                # Extract timestamps
+                timestamps_np[i] = (Decimal(msg.header.stamp.sec) +
+                                    Decimal(msg.header.stamp.nanosec) * Decimal('1e-9'))
+
+                # Update the count
+                pbar.update(1)
+
+        # Create an ImuData class
+        return cls(frame_id, CoordinateFrame.FLU, timestamps_np, lin_acc_np, ang_vel_np, orientation_np)
+
     @classmethod
     @typechecked
     def from_txt(cls, file_path: Union[Path, str], frame_id: str, frame: CoordinateFrame, nine_axis: bool = False):
@@ -448,4 +529,25 @@ class ImuData(SequentialData):
 
         else:
             raise NotImplementedError(f"Unsupported ROSMsgLibType {lib_type} for ImuData.get_ros_msg()!")
+
+    # =========================================================================
+    # ========================= Multi ImuData Methods ==========================
+    # =========================================================================
+
+    @staticmethod
+    def crop_to_matched(data1: 'ImuData', data2: 'ImuData', tolerance: Decimal) -> None:
+        """
+        Crop two ImuData objects in place so only mutually-matched entries
+        remain.
+
+        Args:
+            data1: The first ImuData object, cropped in place.
+            data2: The second ImuData object, cropped in place.
+            tolerance: Maximum allowed absolute time difference between
+                matched timestamps.
+
+        Raises:
+            NotImplementedError: Always; must be overridden with real logic.
+        """
+        raise NotImplementedError("This method needs to be overwritten by the child Data class!")
     

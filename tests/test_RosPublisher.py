@@ -9,7 +9,7 @@ from robotdataprocess.data_types.SequentialData import SequentialData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
 from robotdataprocess.data_types.OdometryData import PATH_SLICE_STEP
-from robotdataprocess.ModuleImporter import ModuleImporter
+from robotdataprocess.utils.ModuleImporter import ModuleImporter
 from robotdataprocess.ros.RosPublisher import publish_data_ROS_multiprocess
 import signal
 import struct
@@ -84,6 +84,8 @@ class TestRosPublisher(unittest.TestCase):
             rclpy.shutdown()
 
         
+    # TODO: _SingleDataPublisher.PublishMode.PUB_ALL is currently untested; add a
+    # regression test (e.g. bursty IMU data) once there's time to verify it.
     def test__run_ROS2_publisher_process(self):
         """ Test that we can publish to ROS2 without losing data."""
 
@@ -115,7 +117,7 @@ class TestRosPublisher(unittest.TestCase):
             np.testing.assert_array_equal(data_sent.images[matched_index], msg_recieved["image"])
             np.testing.assert_equal(data_sent.height, msg_recieved["height"])
             np.testing.assert_equal(data_sent.width, msg_recieved["width"])
-            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_recieved["encoding"]))
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros2_str(msg_recieved["encoding"]))
             np.testing.assert_equal(data_sent.frame_id, msg_recieved["frame_id"])
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_recieved["stamp"])
 
@@ -416,7 +418,7 @@ class TestRosPublisherROS1(unittest.TestCase):
             np.testing.assert_array_equal(data_sent.images[matched_index], msg_received["image"])
             np.testing.assert_equal(data_sent.height, msg_received["height"])
             np.testing.assert_equal(data_sent.width, msg_received["width"])
-            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros_str(msg_received["encoding"]))
+            np.testing.assert_equal(data_sent.encoding, ImageData.ImageEncoding.from_ros2_str(msg_received["encoding"]))
             np.testing.assert_equal(data_sent.frame_id, msg_received["frame_id"])
             np.testing.assert_almost_equal(float(data_sent.timestamps[matched_index]), msg_received["stamp"])
 

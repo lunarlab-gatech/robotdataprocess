@@ -36,7 +36,7 @@ def extract_to_bag(input_dir: str, output_bag: str, robot_name: str, crop_data: 
         depth_data.crop_data(Decimal('0.0'), end_time)
 
     # Write data to temporary ROS2 bag (required intermediate step)
-    Ros2BagWrapper.write_data_to_rosbag(
+    Ros2BagWrapper.write_data_to_ros2_bag(
         temp_ros2_bag,
         [odom_data, pose_data, seg_data, depth_data], 
         ['/odom', '/odom_gt/path', '/cam0/seg', '/cam0/depth'], 

@@ -1,13 +1,42 @@
+import decimal
+from decimal import Decimal
+import multiprocessing
 import numpy as np
 import os
 from pathlib import Path
 from robotdataprocess.data_types.CameraData import CameraData
 from robotdataprocess.data_types.ImageData.ImageData import ImageData
 from robotdataprocess.data_types.ImageData.ImageDataInMemory import ImageDataInMemory
-from robotdataprocess.data_types.ImageData.ImageDataOnDisk import ImageDataOnDisk, LazyImageArray
+from robotdataprocess.data_types.ImageData.ImageDataOnDisk import BagLazyImageArray, ImageDataOnDisk, LazyImageArray
+from rosbags.rosbag1 import Writer as Writer1
+from rosbags.typesys import Stores, get_typestore
+import tempfile
 import unittest
 import cv2
 from PIL import Image
+
+
+def _bag_multiprocess_worker(data: ImageDataOnDisk, worker_id: int, num_workers: int,
+                              result_queue: multiprocessing.Queue, barrier: multiprocessing.Barrier) -> None:
+    """
+    Module-level worker for test_from_ros1_bag_multiprocess_worker_access. Replicates
+    RosPublisher's _message_worker access pattern: this process is one of several
+    forked siblings that all inherited the same (already-constructed, possibly
+    already-opened) ImageDataOnDisk from their common parent, and each round-robins
+    over a disjoint slice of indices, reading every image assigned to it.
+    """
+    try:
+        barrier.wait(timeout=30)
+    except Exception:
+        return
+
+    for idx in range(worker_id, data.len(), num_workers):
+        try:
+            image = np.array(data.images[idx])
+            result_queue.put((idx, image))
+        except Exception as e:
+            result_queue.put((idx, e))
+
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
 class TestImageDataOnDisk(unittest.TestCase):
@@ -111,18 +140,40 @@ class TestImageDataOnDisk(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             image_data.to_encoding(ImageData.ImageEncoding.Mono8)
         
-        # Test unsupported conversion from Mono8 to BGR8
+        # Test conversion from Mono8 to BGR8
         mono_folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', 'mono_images').absolute()
         mono_folder.mkdir(parents=True, exist_ok=True)
         # Create a dummy mono image
         mono_image_path = mono_folder / "1.000000000.png"
         img = Image.new('L', (100, 100)) # 'L' mode for monochrome
         img.save(str(mono_image_path))
-        
+
         mono_image_data = ImageDataOnDisk.from_image_files(mono_folder, 'optical')
         self.assertEqual(mono_image_data.encoding, ImageData.ImageEncoding.Mono8)
-        with self.assertRaises(NotImplementedError):
-            mono_image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        original_mono_image = mono_image_data.images[0]
+
+        mono_image_data.to_encoding(ImageData.ImageEncoding.BGR8)
+        self.assertEqual(mono_image_data.encoding, ImageData.ImageEncoding.BGR8)
+        self.assertEqual(len(mono_image_data.images.transformations), 1)
+
+        bgr_from_mono = mono_image_data.images[0]
+        self.assertEqual(bgr_from_mono.shape, (100, 100, 3))
+        mono_converted_back = cv2.cvtColor(bgr_from_mono, cv2.COLOR_BGR2GRAY)
+        np.testing.assert_array_equal(original_mono_image, mono_converted_back)
+
+        # Test conversion from Mono8 to RGB8
+        mono_image_data_rgb = ImageDataOnDisk.from_image_files(mono_folder, 'optical')
+        self.assertEqual(mono_image_data_rgb.encoding, ImageData.ImageEncoding.Mono8)
+        original_mono_image_rgb = mono_image_data_rgb.images[0]
+
+        mono_image_data_rgb.to_encoding(ImageData.ImageEncoding.RGB8)
+        self.assertEqual(mono_image_data_rgb.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(mono_image_data_rgb.images.transformations), 1)
+
+        rgb_from_mono = mono_image_data_rgb.images[0]
+        self.assertEqual(rgb_from_mono.shape, (100, 100, 3))
+        mono_converted_back_rgb = cv2.cvtColor(rgb_from_mono, cv2.COLOR_RGB2GRAY)
+        np.testing.assert_array_equal(original_mono_image_rgb, mono_converted_back_rgb)
 
     def test_from_npy_files(self):
         """ Test loading 32FC1 npy files from disk matches ImageDataInMemory. """
@@ -141,6 +192,258 @@ class TestImageDataOnDisk(unittest.TestCase):
         for i in range(data.len()):
             np.testing.assert_array_equal(data.images[i], mem_data.images[i])
 
+    def _make_depth_npy_folder(self, subfolder: str) -> Path:
+        depth = np.array([[0.0, 50.0], [100.0, 200.0]], dtype=np.float32)
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', subfolder).absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        np.save(folder / "1.000000000.npy", depth)
+        return folder
+
+    def test_depth_to_rgb_with_color_map(self):
+        """ Test depth_to_rgb with a color map produces a colormapped RGB8 image. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_color')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=cv2.COLORMAP_TURBO)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2, 3))
+
+        # Expected result: normalize [0, max_depth] -> [0, 255], colormap, then
+        # zero out pixels at or above max_depth
+        normalized = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+        # Pixels at/above max_depth are rendered black
+        np.testing.assert_array_equal(vis[1, 0], [0, 0, 0])
+        np.testing.assert_array_equal(vis[1, 1], [0, 0, 0])
+
+    def test_depth_to_rgb_with_color_map_reversed(self):
+        """ Test depth_to_rgb with reverse=True inverts normalized depth before colormapping. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_color_reversed')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=cv2.COLORMAP_TURBO, reverse=True)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2, 3))
+
+        # Expected result: normalize [0, max_depth] -> [0, 255], invert, colormap,
+        # then zero out pixels at or above max_depth
+        normalized = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected = cv2.applyColorMap(255 - normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+        # Pixels at/above max_depth are still rendered black
+        np.testing.assert_array_equal(vis[1, 0], [0, 0, 0])
+        np.testing.assert_array_equal(vis[1, 1], [0, 0, 0])
+
+    def test_depth_to_rgb_without_color_map(self):
+        """ Test depth_to_rgb with color_map=None produces a single-channel Mono8 image. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_mono')
+        max_depth = 100.0
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+        original_depth = data.images[0]
+
+        data.depth_to_rgb(max_depth, color_map=None)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+        self.assertEqual(len(data.images.transformations), 1)
+
+        vis = data.images[0]
+        self.assertEqual(vis.shape, (2, 2))
+
+        expected = ((original_depth / max_depth).clip(0, 1) * 255).astype(np.uint8)
+        expected[original_depth >= max_depth] = 0
+        np.testing.assert_array_equal(vis, expected)
+
+    def _make_multi_frame_depth_npy_folder(self, subfolder: str, depths: list) -> Path:
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', subfolder).absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        for i, depth in enumerate(depths):
+            np.save(folder / f"{i + 1}.000000000.npy", depth)
+        return folder
+
+    def test_depth_to_rgb_frame_dependent_max_with_color_map(self):
+        """ Test depth_to_rgb(max_depth=None) normalizes each frame by its own max, with a color map. """
+        depths = [
+            np.array([[0.0, 50.0], [100.0, 100.0]], dtype=np.float32),
+            np.array([[0.0, 25.0], [50.0, 50.0]], dtype=np.float32),
+        ]
+        folder = self._make_multi_frame_depth_npy_folder('depth_to_rgb_frame_max_color', depths)
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        data.depth_to_rgb(max_depth=None, color_map=cv2.COLORMAP_TURBO)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+
+        for i, original_depth in enumerate(depths):
+            vis = data.images[i]
+            self.assertEqual(vis.shape, (2, 2, 3))
+
+            # Expected: normalize [0, this frame's own max] -> [0, 255], colormap;
+            # nothing is marked invalid since max_depth is frame-dependent
+            normalized = ((original_depth / original_depth.max()).clip(0, 1) * 255).astype(np.uint8)
+            expected = cv2.applyColorMap(normalized, cv2.COLORMAP_TURBO)[..., ::-1]
+            np.testing.assert_array_equal(vis, expected)
+
+        # Both frames' max-depth pixel is normalized to the same top-of-range color,
+        # even though the underlying depth values differ (100.0 vs. 50.0)
+        np.testing.assert_array_equal(data.images[0][1, 0], data.images[1][1, 0])
+
+    def test_depth_to_rgb_frame_dependent_max_without_color_map(self):
+        """ Test depth_to_rgb(max_depth=None) normalizes each frame by its own max, as grayscale. """
+        depths = [
+            np.array([[0.0, 50.0], [100.0, 100.0]], dtype=np.float32),
+            np.array([[0.0, 25.0], [50.0, 50.0]], dtype=np.float32),
+        ]
+        folder = self._make_multi_frame_depth_npy_folder('depth_to_rgb_frame_max_mono', depths)
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        data.depth_to_rgb(max_depth=None, color_map=None)
+        self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+
+        for i, original_depth in enumerate(depths):
+            vis = data.images[i]
+            self.assertEqual(vis.shape, (2, 2))
+            expected = ((original_depth / original_depth.max()).clip(0, 1) * 255).astype(np.uint8)
+            np.testing.assert_array_equal(vis, expected)
+
+        np.testing.assert_array_equal(data.images[0], data.images[1])
+
+    def test_depth_to_rgb_nonpositive_max_depth_raises(self):
+        """ Test depth_to_rgb raises if max_depth is given and isn't positive. """
+        folder = self._make_depth_npy_folder('depth_to_rgb_nonpositive')
+        data = ImageDataOnDisk.from_npy_files(folder, 'depth_cam')
+
+        with self.assertRaises(ValueError):
+            data.depth_to_rgb(0.0)
+        with self.assertRaises(ValueError):
+            data.depth_to_rgb(-5.0)
+
+    def test_depth_to_rgb_requires_32fc1(self):
+        """ Test depth_to_rgb raises if the encoding isn't _32FC1. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        image_data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        self.assertEqual(image_data.encoding, ImageData.ImageEncoding.RGB8)
+
+        with self.assertRaises(NotImplementedError):
+            image_data.depth_to_rgb(100.0)
+
+    # =========================================================================
+    # ================================ resize =================================
+    # =========================================================================
+
+    def test_resize_upscale(self):
+        """ Test resize to larger dimensions upscales pixel content via nearest-neighbor. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        orig_width, orig_height = img_data.width, img_data.height
+        original_image = img_data.images[0]
+        new_width, new_height = orig_width * 2, orig_height * 2
+
+        self.assertEqual(len(img_data.images.transformations), 0)
+        img_data.resize(new_height, new_width)
+        self.assertEqual(len(img_data.images.transformations), 1)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+
+        resized_image = img_data.images[0]
+        expected = cv2.resize(original_image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+        self.assertEqual(resized_image.shape[:2], (new_height, new_width))
+        np.testing.assert_array_equal(resized_image, expected)
+
+    def test_resize_downscale(self):
+        """ Test resize to smaller dimensions downscales dimensions. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+        orig_width, orig_height = img_data.width, img_data.height
+        new_width, new_height = orig_width // 2, orig_height // 2
+
+        img_data.resize(new_height, new_width)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+        self.assertEqual(img_data.images[0].shape[:2], (new_height, new_width))
+
+    def test_resize_320x480_to_512x640(self):
+        """ Test resizing a 320(w)x480(h) image to 512(w)x640(h) via nearest-neighbor. """
+        width, height = 320, 480
+        rng = np.random.RandomState(0)
+        image = rng.randint(0, 256, size=(height, width, 3), dtype=np.uint8)
+
+        folder = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageDataOnDisk', 'resize_320x480').absolute()
+        folder.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(image).save(str(folder / "1.000000000.png"))
+
+        img_data = ImageDataOnDisk.from_image_files(folder, 'cam')
+        self.assertEqual(img_data.width, width)
+        self.assertEqual(img_data.height, height)
+
+        new_width, new_height = 640, 512
+        img_data.resize(new_height, new_width)
+
+        self.assertEqual(img_data.width, new_width)
+        self.assertEqual(img_data.height, new_height)
+
+        resized_image = img_data.images[0]
+        expected = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+        self.assertEqual(resized_image.shape[:2], (new_height, new_width))
+        np.testing.assert_array_equal(resized_image, expected)
+
+    def test_resize_nonpositive_dimensions_raises(self):
+        """ Test resize raises if new_height or new_width isn't positive. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+        img_data = ImageDataOnDisk.from_image_files(folder_path, 'cam')
+
+        with self.assertRaises(ValueError):
+            img_data.resize(0, img_data.width)
+        with self.assertRaises(ValueError):
+            img_data.resize(img_data.height, 0)
+        with self.assertRaises(ValueError):
+            img_data.resize(-1, -1)
+
+    # =========================================================================
+    # ===================== set_above_threshold_to_zero =======================
+    # =========================================================================
+
+    def _write_invalid_depth_npy(self, folder: Path) -> None:
+        """ Writes a depth frame carrying the invalid values learned stereo produces. """
+        depth = np.array([[1.5, 40.0], [np.inf, 4.5e8]], dtype=np.float32)
+        np.save(folder / "1.000000000.npy", depth)
+
+    def test_set_above_threshold_to_zero(self):
+        """ Test values above the threshold, including +inf, are zeroed and the rest kept. """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_invalid_depth_npy(Path(tmpdir))
+            data = ImageDataOnDisk.from_npy_files(Path(tmpdir), 'depth_cam')
+
+            data.set_above_threshold_to_zero(50.0)
+
+            expected = np.array([[1.5, 40.0], [0.0, 0.0]], dtype=np.float32)
+            np.testing.assert_array_equal(data.images[0], expected)
+            self.assertEqual(data.images[0].dtype, np.float32)
+
+    def test_set_above_threshold_to_zero_non_finite_threshold_raises(self):
+        """ Test a non-finite threshold raises rather than silently zeroing nothing. """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_invalid_depth_npy(Path(tmpdir))
+            data = ImageDataOnDisk.from_npy_files(Path(tmpdir), 'depth_cam')
+
+            with self.assertRaises(ValueError):
+                data.set_above_threshold_to_zero(np.inf)
+            with self.assertRaises(ValueError):
+                data.set_above_threshold_to_zero(np.nan)
 
     # =========================================================================
     # ====================== crop_images_to_LiDAR_FOV ========================
@@ -216,6 +519,461 @@ class TestImageDataOnDisk(unittest.TestCase):
 
         with self.assertRaises((ValueError, TypeError)):
             img_data.crop_images_to_LiDAR_FOV((-10.0, 10.0))
+
+
+    def _write_ros1_image_bag(self, bag_path: Path, topic: str, frame_id: str,
+                               images: np.ndarray, timestamps_sec: list) -> None:
+        """Write a ROS1 bag containing sensor_msgs/msg/Image messages."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        ImageMsg = typestore.types['sensor_msgs/msg/Image']
+        Header    = typestore.types['std_msgs/msg/Header']
+        Time      = typestore.types['builtin_interfaces/msg/Time']
+
+        n, H, W = images.shape[:3]
+        channels = 1 if images.ndim == 3 else images.shape[3]
+        encoding = 'rgb8' if channels == 3 else 'mono8'
+        step = W * channels
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, ImageMsg.__msgtype__, typestore=typestore)
+            for i, ts in enumerate(timestamps_sec):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                msg = ImageMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    height=H, width=W, encoding=encoding,
+                    is_bigendian=0, step=step,
+                    data=images[i].flatten(),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, ImageMsg.__msgtype__))
+
+    def test_from_ros1_bag(self):
+        """Write a ROS1 bag with known images and verify from_ros1_bag round-trips correctly."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small RGB8 images with distinct solid colours
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # red
+        images[1, :, :] = [  0, 255,   0]  # green
+        images[2, :, :] = [  0,   0, 255]  # blue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.height, H)
+            self.assertEqual(data.width, W)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.RGB8)
+            self.assertEqual(data.len(), 3)
+            self.assertIsInstance(data.images, BagLazyImageArray)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- pixel data loaded on demand ---
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            # --- crop_data keeps the right subset ---
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2.crop_data(Decimal('1.5'), Decimal('3.0'))
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data2.images[0], images[1])  # green
+            np.testing.assert_array_equal(data2.images[1], images[2])  # blue
+
+            # --- to_encoding RGB -> BGR ---
+            data3 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data3.to_encoding(ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data3.encoding, ImageData.ImageEncoding.BGR8)
+            expected_bgr_red = np.zeros((H, W, 3), dtype=np.uint8)
+            expected_bgr_red[:, :] = [0, 0, 255]  # red in BGR
+            np.testing.assert_array_equal(data3.images[0], expected_bgr_red)
+
+            # --- crop_images_to_LiDAR_FOV ---
+            # With H=4, cy=2.0, fy=10.0, FOV=(-5°,5°):
+            #   row_top    = floor(2.0 - 10.0*tan(5°))  = 1
+            #   row_bottom = ceil (2.0 - 10.0*tan(-5°)) = 3  →  new_height = 2
+            data4 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            cam = CameraData.from_user_mono('test_cam', W, H, fx=10.0, fy=10.0, cx=3.0, cy=2.0)
+            fy_val, cy_val = float(cam.K[1, 1]), float(cam.K[1, 2])
+            lidar_v_fov = (-5.0, 5.0)
+            row_top    = max(0, int(np.floor(cy_val - fy_val * np.tan(np.radians(lidar_v_fov[1])))))
+            row_bottom = min(H,  int(np.ceil( cy_val - fy_val * np.tan(np.radians(lidar_v_fov[0])))))
+            data4.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+            self.assertEqual(data4.height, row_bottom - row_top)
+            self.assertEqual(cam.height, row_bottom - row_top)
+            for i in range(3):
+                np.testing.assert_array_equal(data4.images[i], images[i][row_top:row_bottom, :])
+
+    def test_from_ros1_bag_mono8_to_encoding_bgr8(self):
+        """Write a ROS1 bag with mono8 images and verify from_ros1_bag + to_encoding(BGR8) round-trips."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small Mono8 images with distinct solid grey levels
+        images = np.zeros((3, H, W), dtype=np.uint8)
+        images[0, :, :] = 10
+        images[1, :, :] = 128
+        images[2, :, :] = 250
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.Mono8)
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            data.to_encoding(ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.BGR8)
+            for i in range(3):
+                bgr_image = data.images[i]
+                self.assertEqual(bgr_image.shape, (H, W, 3))
+                mono_converted_back = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2GRAY)
+                np.testing.assert_array_equal(images[i], mono_converted_back)
+
+    def test_crop_to_matched(self):
+        """ crop_to_matched keeps .images in sync with .timestamps for both BagLazyImageArray-backed objects. """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # red
+        images[1, :, :] = [  0, 255,   0]  # green
+        images[2, :, :] = [  0,   0, 255]  # blue
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data1 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # data2 is missing the middle (green) entry, and its last timestamp is
+            # slightly offset from data1's, but still within tolerance.
+            data2.timestamps = np.array([data2.timestamps[0], data2.timestamps[2] + Decimal('0.02')])
+            data2.images = data2.images[np.array([True, False, True])]
+
+            ImageDataOnDisk.crop_to_matched(data1, data2, Decimal('0.05'))
+
+            self.assertEqual(data1.len(), 2)
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data1.images[0], images[0])  # red
+            np.testing.assert_array_equal(data1.images[1], images[2])  # blue
+            np.testing.assert_array_equal(data2.images[0], images[0])  # red
+            np.testing.assert_array_equal(data2.images[1], images[2])  # blue
+
+    def _write_ros1_compressed_image_bag(self, bag_path: Path, topic: str, frame_id: str,
+                                          images: np.ndarray, timestamps_sec: list,
+                                          format_str: str = 'bgr8; png compressed bgr8') -> None:
+        """Write a ROS1 bag containing sensor_msgs/msg/CompressedImage messages (PNG)."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        CompressedImageMsg = typestore.types['sensor_msgs/msg/CompressedImage']
+        Header = typestore.types['std_msgs/msg/Header']
+        Time   = typestore.types['builtin_interfaces/msg/Time']
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, CompressedImageMsg.__msgtype__, typestore=typestore)
+            for i, ts in enumerate(timestamps_sec):
+                ts_dec = Decimal(str(ts))
+                sec  = int(ts_dec)
+                nsec = int((ts_dec - Decimal(sec)) * Decimal('1e9'))
+                ts_ns = sec * 10**9 + nsec
+                ok, buf = cv2.imencode('.png', images[i])
+                assert ok, "cv2.imencode failed"
+                msg = CompressedImageMsg(
+                    Header(seq=i, stamp=Time(sec=sec, nanosec=nsec), frame_id=frame_id),
+                    format=format_str,
+                    data=buf.flatten(),
+                )
+                writer.write(conn, ts_ns, typestore.serialize_ros1(msg, CompressedImageMsg.__msgtype__))
+
+    def test_from_ros1_bag_compressed(self):
+        """Write a ROS1 bag with compressed images and verify from_ros1_bag round-trips correctly."""
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0/compressed'
+        timestamps_sec = [1.0, 2.0, 3.0]
+
+        # Three small BGR8 images with distinct solid colours (cv2 convention)
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]  # blue channel
+        images[1, :, :] = [  0, 255,   0]  # green channel
+        images[2, :, :] = [  0,   0, 255]  # red channel
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_compressed.bag'
+            self._write_ros1_compressed_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # --- metadata ---
+            self.assertEqual(data.frame_id, frame_id)
+            self.assertEqual(data.height, H)
+            self.assertEqual(data.width, W)
+            self.assertEqual(data.encoding, ImageData.ImageEncoding.BGR8)
+            self.assertEqual(data.len(), 3)
+            self.assertIsInstance(data.images, BagLazyImageArray)
+
+            # --- timestamps ---
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), timestamps_sec, decimal=6)
+
+            # --- pixel data round-trips losslessly through PNG ---
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+            # --- crop_data keeps the right subset ---
+            data2 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            data2.crop_data(Decimal('1.5'), Decimal('3.0'))
+            self.assertEqual(data2.len(), 2)
+            np.testing.assert_array_equal(data2.images[0], images[1])
+            np.testing.assert_array_equal(data2.images[1], images[2])
+
+            # --- crop_images_to_LiDAR_FOV ---
+            data3 = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+            cam = CameraData.from_user_mono('test_cam', W, H, fx=10.0, fy=10.0, cx=3.0, cy=2.0)
+            fy_val, cy_val = float(cam.K[1, 1]), float(cam.K[1, 2])
+            lidar_v_fov = (-5.0, 5.0)
+            row_top    = max(0, int(np.floor(cy_val - fy_val * np.tan(np.radians(lidar_v_fov[1])))))
+            row_bottom = min(H,  int(np.ceil( cy_val - fy_val * np.tan(np.radians(lidar_v_fov[0])))))
+            data3.crop_images_to_LiDAR_FOV(lidar_v_fov, cam)
+            self.assertEqual(data3.height, row_bottom - row_top)
+            self.assertEqual(cam.height, row_bottom - row_top)
+            for i in range(3):
+                np.testing.assert_array_equal(data3.images[i], images[i][row_top:row_bottom, :])
+
+
+    def _write_ros1_image_bag_skewed_timestamps(self, bag_path: Path, topic: str, frame_id: str,
+                                                  images: np.ndarray, header_timestamps_sec: list,
+                                                  recording_timestamps_sec: list) -> None:
+        """Write a ROS1 bag where bag recording times differ from msg.header.stamp values."""
+        typestore = get_typestore(Stores.ROS1_NOETIC)
+        ImageMsg = typestore.types['sensor_msgs/msg/Image']
+        Header    = typestore.types['std_msgs/msg/Header']
+        Time      = typestore.types['builtin_interfaces/msg/Time']
+
+        n, H, W = images.shape[:3]
+        channels = 1 if images.ndim == 3 else images.shape[3]
+        encoding = 'rgb8' if channels == 3 else 'mono8'
+        step = W * channels
+
+        with Writer1(bag_path) as writer:
+            conn = writer.add_connection(topic, ImageMsg.__msgtype__, typestore=typestore)
+            for i, (h_ts, r_ts) in enumerate(zip(header_timestamps_sec, recording_timestamps_sec)):
+                h_dec = Decimal(str(h_ts))
+                h_sec  = int(h_dec)
+                h_nsec = int((h_dec - Decimal(h_sec)) * Decimal('1e9'))
+
+                r_dec = Decimal(str(r_ts))
+                r_sec  = int(r_dec)
+                r_nsec = int((r_dec - Decimal(r_sec)) * Decimal('1e9'))
+                rec_ns = r_sec * 10**9 + r_nsec
+
+                msg = ImageMsg(
+                    Header(seq=i, stamp=Time(sec=h_sec, nanosec=h_nsec), frame_id=frame_id),
+                    height=H, width=W, encoding=encoding,
+                    is_bigendian=0, step=step,
+                    data=images[i].flatten(),
+                )
+                writer.write(conn, rec_ns, typestore.serialize_ros1(msg, ImageMsg.__msgtype__))
+
+    def test_from_ros1_bag_uses_header_stamp(self):
+        """from_ros1_bag must load timestamps from msg.header.stamp, not bag recording time.
+
+        Writes a bag where recording times are ~1000 s ahead of the header stamps.
+        The bug (entry.time used instead of msg.header.stamp) would cause timestamps
+        to be [1001, 1002, 1003] instead of the correct [1, 2, 3].  The fix must also
+        ensure images are still retrievable after the seek logic is corrected.
+        """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        header_timestamps_sec   = [1.0, 2.0, 3.0]
+        recording_timestamps_sec = [1001.0, 1002.0, 1003.0]
+
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [255,   0,   0]
+        images[1, :, :] = [  0, 255,   0]
+        images[2, :, :] = [  0,   0, 255]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_skewed.bag'
+            self._write_ros1_image_bag_skewed_timestamps(
+                bag_path, topic, frame_id, images, header_timestamps_sec, recording_timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # Timestamps must come from msg.header.stamp, not the bag recording time
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), header_timestamps_sec, decimal=6)
+
+            # Images must still load correctly after the seek logic is corrected
+            for i in range(3):
+                np.testing.assert_array_equal(data.images[i], images[i])
+
+    def test_from_ros1_bag_header_recording_order_mismatch(self):
+        """from_ros1_bag must return images ordered by header stamp even when recording
+        time order differs from header stamp order.
+
+        Bag layout (recording-time order):
+          rec=1001s  header=3.0s  red image
+          rec=1002s  header=1.0s  green image
+          rec=1003s  header=2.0s  blue image
+
+        Expected after from_ros1_bag (sorted by header stamp):
+          timestamps = [1.0, 2.0, 3.0]
+          images[0]  = green  (header 1.0s, rec 1002s)
+          images[1]  = blue   (header 2.0s, rec 1003s)
+          images[2]  = red    (header 3.0s, rec 1001s)
+
+        This catches a bug where seek uses header-stamp values as recording-time
+        indices, which would retrieve the wrong message when the two orderings differ.
+        """
+        H, W = 4, 6
+        frame_id = 'test_cam'
+        topic = '/cam0'
+
+        # Images written in recording-time order
+        images_written = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images_written[0, :, :] = [255,   0,   0]  # red   → header 3.0s
+        images_written[1, :, :] = [  0, 255,   0]  # green → header 1.0s
+        images_written[2, :, :] = [  0,   0, 255]  # blue  → header 2.0s
+
+        # Recording times ascending (required by bag format); header stamps out of order
+        recording_timestamps_sec = [1001.0, 1002.0, 1003.0]
+        header_timestamps_sec    = [   3.0,    1.0,    2.0]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_order_mismatch.bag'
+            self._write_ros1_image_bag_skewed_timestamps(
+                bag_path, topic, frame_id, images_written,
+                header_timestamps_sec, recording_timestamps_sec)
+
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            # Timestamps must be sorted by header stamp
+            np.testing.assert_array_almost_equal(
+                data.timestamps.astype(np.float64), [1.0, 2.0, 3.0], decimal=6)
+
+            # images[i] must match the image whose header stamp is timestamps[i]
+            np.testing.assert_array_equal(data.images[0], images_written[1])  # green (header 1.0s)
+            np.testing.assert_array_equal(data.images[1], images_written[2])  # blue  (header 2.0s)
+            np.testing.assert_array_equal(data.images[2], images_written[0])  # red   (header 3.0s)
+
+    def test_from_ros1_bag_multiprocess_worker_access(self):
+        """
+        Regression test for a shared-file-descriptor race in BagLazyImageArray.
+
+        Replicates publish_data_ROS_multiprocess's fork-per-topic-worker pattern
+        (RosPublisher._SingleDataPublisher spawns several sibling Process workers
+        per image topic that round-robin over disjoint index slices): a single
+        ImageDataOnDisk is loaded once in this (parent) process, then several
+        Process workers are forked from it and each reads its assigned indices
+        concurrently. A multiprocessing.Barrier holds all workers at the starting
+        line so their reads overlap as much as possible.
+
+        Before the fix, all forked siblings inherited the *same* already-open
+        Reader1/file descriptor from the parent (a single shared kernel-level file
+        offset), so one worker's seek could land between another's seek and read,
+        corrupting reads and raising rosbags ReaderErrors. This test doesn't just
+        check that no worker raises: it verifies every single image recovered by
+        every worker exactly matches the known pixel content written for its
+        index, since a caught-but-wrong read (mis-seeked to a neighboring frame)
+        would otherwise pass silently.
+
+        Images are made a realistic camera resolution (not just tiny placeholder
+        pixels) so that, as in the real bag that exposed this bug, individual
+        messages are large enough to land in separate bag chunks -- with all
+        messages packed into a single chunk there's nothing to actually race
+        over, since every worker would seek to the same chunk offset regardless
+        of which message it wants.
+        """
+        ctx = multiprocessing.get_context('fork')
+
+        H, W = 480, 640
+        N = 40
+        num_workers = 4
+        frame_id = 'test_cam'
+        topic = '/cam0'
+        timestamps_sec = [1.0 + i * 0.01 for i in range(N)]
+
+        # Every frame gets a distinct, independently-verifiable solid colour.
+        images = np.zeros((N, H, W, 3), dtype=np.uint8)
+        for i in range(N):
+            images[i, :, :] = [i % 256, (i * 7) % 256, (i * 13) % 256]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bag_path = Path(tmpdir) / 'test_multiprocess.bag'
+            self._write_ros1_image_bag(bag_path, topic, frame_id, images, timestamps_sec)
+
+            # Load once in the parent process. If a Reader1 is already open on
+            # this object at fork time (as it always was before the fix), every
+            # child below inherits that same open file description.
+            data = ImageDataOnDisk.from_ros1_bag(bag_path, topic)
+
+            result_queue = ctx.Queue()
+            barrier = ctx.Barrier(num_workers)
+            procs = [
+                ctx.Process(target=_bag_multiprocess_worker,
+                            args=(data, worker_id, num_workers, result_queue, barrier))
+                for worker_id in range(num_workers)
+            ]
+            for p in procs:
+                p.start()
+
+            try:
+                results = {}
+                for _ in range(N):
+                    idx, payload = result_queue.get(timeout=60)
+                    self.assertNotIn(idx, results, f"Index {idx} was returned more than once.")
+                    if isinstance(payload, Exception):
+                        self.fail(f"Worker raised while reading index {idx}: {payload!r}")
+                    results[idx] = payload
+            finally:
+                for p in procs:
+                    p.join(timeout=10)
+                    if p.is_alive():
+                        p.terminate()
+                        p.join(timeout=5)
+
+            self.assertEqual(len(results), N)
+            for i in range(N):
+                np.testing.assert_array_equal(
+                    results[i], images[i],
+                    err_msg=f"Image at index {i} does not match what was written to the bag.")
+
+    def test_eq(self):
+        """ Test __eq__ works on lazily loaded imagery, comparing frame-by-frame via LazyImageArray indexing. """
+        folder_path = Path(Path('.'), 'tests', 'files', 'test_ImageDataOnDisk', 'test_from_image_files').absolute()
+
+        # Two independently loaded instances of the same data should be equal
+        data = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        data_same = ImageDataOnDisk.from_image_files(folder_path, 'optical')
+        self.assertEqual(data, data_same)
+
+        # Different frame_id should not be equal (inherited from Data)
+        data_diff_frame_id = ImageDataOnDisk.from_image_files(folder_path, 'other_optical')
+        self.assertNotEqual(data, data_diff_frame_id)
+
+        # A different type holding equal pixel data should not be equal (type check in Data.__eq__)
+        data_mem = ImageDataInMemory.from_image_files(folder_path, 'optical')
+        self.assertNotEqual(data, data_mem)
 
 
 if __name__ == "__main__":

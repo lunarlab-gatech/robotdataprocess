@@ -39,7 +39,7 @@ class TestImageDataInMemory(unittest.TestCase):
     def test_from_ros_str(self):
         """ Make sure that an exception is thrown with a non-valid ROS encoding str"""
         with np.testing.assert_raises(NotImplementedError):
-            ImageDataInMemory.ImageEncoding.from_ros_str("fake_name")
+            ImageDataInMemory.ImageEncoding.from_ros2_str("fake_name")
 
     def test_from_npy(self):
         """
@@ -66,6 +66,48 @@ class TestImageDataInMemory(unittest.TestCase):
         if rosData.height == 0 or rosData.width == 0 or len(rosData.images) == 0 \
             or len(rosData.timestamps) == 0 or rosData.frame_id == "":
             self.fail("Test data is not representative of real-time operation!")
+
+    def test_from_npy_images_are_read_only(self):
+        """
+        ImageDataInMemory.from_npy loads self.images as a memory-mapped .npy
+        file. That file (and the underlying memmap) can be shared by every
+        process that opens this dataset, including sibling worker processes
+        forked by publish_data_ROS_multiprocess -- and nothing in this class
+        ever mutates self.images in place (mutating methods, e.g.
+        downscale_by_factor, always reassign self.images to a brand-new
+        array). So the memmap must be opened read-only: a stray in-place
+        write (self.images[i] = ...) should raise rather than silently
+        corrupting the on-disk file for every process sharing it.
+        """
+        save_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_npy_images_are_read_only').absolute()
+        if save_folder.exists():
+            shutil.rmtree(save_folder)
+        save_folder.mkdir(parents=True)
+
+        # Build a minimal on-disk dataset matching from_npy's expected layout
+        # (the same layout from_ros2_bag writes), without needing a real bag.
+        H, W = 4, 4
+        images = np.zeros((3, H, W, 3), dtype=np.uint8)
+        images[0, :, :] = [10, 20, 30]
+        np.save(save_folder / 'imgs.npy', images)
+        np.save(save_folder / 'times.npy', np.array([0.0, 1.0, 2.0]))
+        with open(save_folder / 'attributes.txt', 'w') as f:
+            f.write(f"image_shape: {(H, W, 3)}\n")
+            f.write("frame_id: cam\n")
+            f.write(f"height: {H}\n")
+            f.write(f"width: {W}\n")
+            f.write("encoding: ImageEncoding.RGB8\n")
+
+        data = ImageDataInMemory.from_npy(save_folder)
+
+        original_pixel = data.images[0, 0, 0].copy()
+        with self.assertRaises(ValueError):
+            data.images[0, 0, 0] = [255, 255, 255]
+
+        # The file on disk must be untouched, even if the attempted write
+        # above partially landed before raising.
+        reloaded = np.load(save_folder / 'imgs.npy')
+        np.testing.assert_array_equal(reloaded[0, 0, 0], original_pixel)
 
     def test_from_npy_files(self):
         """ Test that we load the data properly from images in individual .npy files. """
@@ -101,7 +143,7 @@ class TestImageDataInMemory(unittest.TestCase):
             os.remove(bag_path / 'rgb_data_bag.db3')
             os.remove(bag_path / 'metadata.yaml')
             os.rmdir(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(bag_path, [image_data], ['/cam0'], [None], None)
+        Ros2BagWrapper.write_data_to_ros2_bag(bag_path, [image_data], ['/cam0'], [None], None)
 
         # Load that data directly from the rosbag
         npy_folder = Path(Path('.'), 'tests', 'test_outputs', 'test_from_image_files', 'rgb', 'npy').absolute()
@@ -192,7 +234,26 @@ class TestImageDataInMemory(unittest.TestCase):
         np.testing.assert_equal(image_data.height, npy_data.height)
         np.testing.assert_equal(image_data.width, npy_data.width)
         np.testing.assert_equal(image_data.encoding, npy_data.encoding)
-        
+
+        # === Test with Mono8 Images ===
+        # Load the images
+        files_folder = Path(Path('.'), 'tests', 'files', 'test_ImageData', 'test_from_image_files', 'mono8').absolute()
+        image_data = ImageDataInMemory.from_image_files(files_folder, 'callie')
+
+        # Save to .npy file and reload
+        save_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_to_npy', 'npy_mono8').absolute()
+        save_path.mkdir(parents=True, exist_ok=True)
+        image_data.to_npy(save_path)
+        npy_data = ImageDataInMemory.from_npy(save_path)
+
+        # Ensure the data hasn't changed
+        np.testing.assert_array_almost_equal(image_data.images, npy_data.images, 16)
+        np.testing.assert_array_almost_equal(image_data.timestamps, npy_data.timestamps, 16)
+        np.testing.assert_equal(image_data.frame_id, npy_data.frame_id)
+        np.testing.assert_equal(image_data.height, npy_data.height)
+        np.testing.assert_equal(image_data.width, npy_data.width)
+        np.testing.assert_equal(image_data.encoding, npy_data.encoding)
+
     def test_crop_data(self):
         """ Ensure the correct data is cropped. """
 
@@ -223,7 +284,7 @@ class TestImageDataInMemory(unittest.TestCase):
         bag_path = Path(Path('.'), 'tests', 'temporary_files', 'test_ImageData', 'test_get_ros_msg', 'depth.bag').absolute()
         if bag_path.exists():
             shutil.rmtree(bag_path)
-        Ros2BagWrapper.write_data_to_rosbag(
+        Ros2BagWrapper.write_data_to_ros2_bag(
             bag_path,
             [image_data], 
             ['/cam0/depth'], 
@@ -311,6 +372,35 @@ class TestImageDataInMemory(unittest.TestCase):
         data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.RGB8, imgs)
         with self.assertRaises(NotImplementedError):
             data.downscale_by_factor(2)
+
+    def test_eq(self):
+        """ Test __eq__ compares height/width/encoding and per-frame images, not just frame_id/timestamps. """
+        imgs = np.arange(2 * 10 * 10, dtype=np.uint8).reshape(2, 10, 10)
+        data = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs.copy())
+
+        # Identical values should be equal
+        data_same = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs.copy())
+        self.assertEqual(data, data_same)
+
+        # Different height/width should not be equal
+        small_imgs = np.zeros((2, 5, 5), dtype=np.uint8)
+        data_diff_size = ImageDataInMemory('cam', [0.0, 1.0], 5, 5, ImageDataInMemory.ImageEncoding.Mono8, small_imgs)
+        self.assertNotEqual(data, data_diff_size)
+
+        # Different encoding should not be equal
+        rgb_imgs = np.zeros((2, 10, 10, 3), dtype=np.uint8)
+        data_diff_encoding = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.RGB8, rgb_imgs)
+        self.assertNotEqual(data, data_diff_encoding)
+
+        # Different pixel values should not be equal
+        imgs_diff = imgs.copy()
+        imgs_diff[1, 0, 0] += 1
+        data_diff_pixels = ImageDataInMemory('cam', [0.0, 1.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs_diff)
+        self.assertNotEqual(data, data_diff_pixels)
+
+        # Different number of frames should not be equal
+        data_diff_len = ImageDataInMemory('cam', [0.0], 10, 10, ImageDataInMemory.ImageEncoding.Mono8, imgs[:1].copy())
+        self.assertNotEqual(data, data_diff_len)
 
 
 
