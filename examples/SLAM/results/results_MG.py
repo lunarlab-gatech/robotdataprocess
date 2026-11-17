@@ -180,13 +180,13 @@ def main():
     dataset_name_by_seq = {group.dataset_seq: group.dataset_name for group in robot_groups}
 
     max_size_40 = {"submap_align_params.submap_max_size": 40}
-    methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#009E73"),
-               SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#CC79A7"),
-               SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#D55E00"),
+    methods = [SLAMMethod("SLIDEMATCH", "SlideMatch", "SLIDEMATCH", "#893429"),
+               SLAMMethod("SLIDEGRAPH", "SlideGraph", "SLIDEGRAPH", "#D53C34"),
+               SLAMMethod("ROMAN_O", "ROMAN", "ROMAN_O", "#FF6600"),
                #SLAMMethod("MG_SM_40", "MeronomyGraph (HMO, Max Size 40)", "MG_SM", "#0000FF", max_size_40),
                #SLAMMethod("MG_TS_SM_40", "MeronomyGraph (Max Size 40)", "MG_TS_SM", "#008000", max_size_40),
-               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#00588B"),
-               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#56B4E9")]
+               SLAMMethod("MG_SM", "MeronomyGraph (HMO)", "MG_SM", "#12C1CA"),
+               SLAMMethod("MG_TS_SM", "MeronomyGraph", "MG_TS_SM", "#2B5EC5"),]
     user = getpass.getuser()
     figures_base_dir = Path('/home/' + user + '/Research/robotdataprocess/figures')
     roman_root = Path('/home/' + user + '/Research/ROMAN_DEVEL')

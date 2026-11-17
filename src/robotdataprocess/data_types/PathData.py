@@ -696,7 +696,7 @@ class PathData(SequentialData):
                      loop_closure_data=None, lc_line_width: float = 0.8,
                      title: str | None = None, lc_errors_vmax: float = 50.0,
                      yaw_rotation_deg: float = 0.0, label_suffixes: bool = True,
-                     gt_linestyle: Union[str, Tuple] = "dotted"):
+                     gt_linestyle: Union[str, Tuple] = "dotted", exact_est_colors: bool = False):
         """
         Plot all PathData objects on a 2D XY plane.
 
@@ -740,6 +740,8 @@ class PathData(SequentialData):
                 otherwise just ``"<name>"``.
             gt_linestyle: Matplotlib linestyle for GT trajectories, a named style or an
                 ``(offset, (on, off, ...))`` dash tuple.
+            exact_est_colors: If true, non-GT trajectories are drawn in exactly their colorList
+                color; otherwise at the fixed lightness of their color's palette. GT is unaffected.
         """
 
         # Check lengths of arguments
@@ -839,7 +841,10 @@ class PathData(SequentialData):
         for i in range(num_data_objs):
             label = nameList[i] + ((" (GT)" if isGTList[i] else " (Est.)") if label_suffixes else "")
             linestyle = (gt_linestyle if isGTList[i] else None)
-            color = (paletteList[i][gt_color_lightness_range_val] if isGTList[i] else paletteList[i][9])
+            if isGTList[i]:
+                color = paletteList[i][gt_color_lightness_range_val]
+            else:
+                color = colorList[i] if exact_est_colors else paletteList[i][9]
             axs.plot(dataList[i].positions[:,0], dataList[i].positions[:,1],
                      label=label, color=color, linewidth=line_width, linestyle=linestyle, zorder=2)
     

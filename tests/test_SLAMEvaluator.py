@@ -1,5 +1,6 @@
 import matplotlib
 matplotlib.use('Agg')
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
 from operator import attrgetter
@@ -273,10 +274,12 @@ class TestSaveAllMethodsTrajFigure(unittest.TestCase):
         # Stored gt_align_list is 2 poses long, unlike the 3-pose full GT, to tell them apart
         return SLAMResult(None, None, [], [self._make_path(y) for y in ys], [self._make_path(-9.0) for _ in ys])
 
-    def _save_and_get_figure(self, run_names, results_by_run, gt_data_lst, run_to_color, run_display_names, save_dir):
+    def _save_and_get_figure(self, run_names, results_by_run, gt_data_lst, run_to_color, run_display_names, save_dir,
+                             clean_style: bool = False):
         with unittest.mock.patch('robotdataprocess.eval.SLAMEvaluator.plt.close') as mock_close:
             SLAMEvaluator._save_all_methods_traj_figure(run_names, results_by_run, gt_data_lst, 'G\nRA-RB',
-                                        self.viz_config, run_to_color, run_display_names, save_dir)
+                                        self.viz_config, run_to_color, run_display_names, save_dir,
+                                        clean_style=clean_style)
         fig = mock_close.call_args[0][0]
         self.addCleanup(plt.close, fig)
         return fig.axes[0]
@@ -318,6 +321,63 @@ class TestSaveAllMethodsTrajFigure(unittest.TestCase):
                                        {'X': '#FF0000'}, {}, self.tmp_dir)
         self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["X", "GT"])
         self.assertEqual(len(ax.get_lines()), 2)
+
+    def test_clean_style(self):
+        # Same inputs as test_two_runs_two_robots; RUN_C must still not be drawn
+        results_by_run = {'RUN_A': self._make_result([0.0, 1.0]), 'RUN_B': self._make_result([2.0, 3.0]),
+                          'RUN_C': self._make_result([7.0, 8.0])}
+        gt_data_lst = [self._make_path(-1.0, 3), self._make_path(-2.0, 3)]
+        save_dir = self.tmp_dir / 'not_yet_created'
+        ax = self._save_and_get_figure(['RUN_A', 'RUN_B'], results_by_run, gt_data_lst,
+                                       {'RUN_A': '#FF0000', 'RUN_B': '#0000FF', 'RUN_C': '#00FF00'},
+                                       {'RUN_A': 'Run A Display'}, save_dir, clean_style=True)
+        fig = ax.figure
+
+        # Saved under the same file name, in a 9x6 in figure
+        saved = save_dir / "traj_G_RA-RB.pdf"
+        self.assertTrue(saved.is_file(), f"Expected figure not saved: {saved}")
+        self.assertGreater(saved.stat().st_size, 0)
+        np.testing.assert_allclose(fig.get_size_inches(), [9.0, 6.0])
+
+        # Each drawn line, in order: (y value, color, unscaled dash pattern, num points); estimates use exact colors
+        RED, BLUE = (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        solid = (0, None)
+        dotted = (0.0, (1.0, 1.65))
+        expected = [(0.0, RED, solid, 2), (1.0, RED, solid, 2), (2.0, BLUE, solid, 2), (3.0, BLUE, solid, 2),
+                    (-1.0, self.GT_GRAY, dotted, 3), (-2.0, self.GT_GRAY, dotted, 3)]
+        lines = [line for line in ax.get_lines() if line.get_transform() != ax.transAxes]
+        self.assertEqual(len(lines), 6)
+        for line, (y, color, dash_pattern, num_points) in zip(lines, expected):
+            np.testing.assert_allclose(np.asarray(line.get_ydata(), dtype=float), [y] * num_points)
+            np.testing.assert_allclose(matplotlib.colors.to_rgb(line.get_color()), color, atol=1e-9)
+            self.assertEqual(line._unscaled_dash_pattern, dash_pattern)
+            self.assertEqual(line.get_linewidth(), 2.0)
+
+        # No axes or grid, and a scale bar (x range 8.25 m -> 2 m / 25 ft)
+        self.assertFalse(ax.axison)
+        self.assertFalse(any(gl.get_visible() for gl in ax.get_xgridlines() + ax.get_ygridlines()))
+        self.assertEqual([t.get_text() for t in ax.texts], ["2 m", "25 ft"])
+
+        # Frameless legend above the plot, filled row by row over two rows
+        legend = ax.get_legend()
+        self.assertFalse(legend.get_frame_on())
+        fig.canvas.draw()
+        rows: dict = {}
+        for text in legend.get_texts():
+            rows.setdefault(round(text.get_window_extent().y0), []).append(
+                (round(text.get_window_extent().x0), text.get_text()))
+        self.assertEqual([[label for _, label in sorted(rows[y])] for y in sorted(rows, reverse=True)],
+                         [["Run A Display", "RUN_B"], ["GT"]])
+        self.assertGreater(legend.get_window_extent().y0, ax.get_window_extent().y1 - 1)
+
+        # Method entries are exact-color patches; GT is the dotted line
+        handles = dict(zip([t.get_text() for t in legend.get_texts()], legend.legend_handles))
+        self.assertIsInstance(handles["Run A Display"], Patch)
+        np.testing.assert_allclose(handles["Run A Display"].get_facecolor(), RED + (1.0,), atol=1e-9)
+        self.assertIsInstance(handles["RUN_B"], Patch)
+        np.testing.assert_allclose(handles["RUN_B"].get_facecolor(), BLUE + (1.0,), atol=1e-9)
+        self.assertNotIsInstance(handles["GT"], Patch)
+        self.assertEqual(handles["GT"]._unscaled_dash_pattern, dotted)
 
 
 @unittest.skipIf(os.getenv("SKIP_PURE_PYTHON_TESTS") == "True", "Skipping pure python tests")
@@ -983,6 +1043,12 @@ class TestRunEvaluationFailureThresholds(unittest.TestCase):
         # R5: GT loaded only where it already was -- once for the all-methods figure plus once per LC mode
         loads_per_seq = [c[0][0] for c in load_gt_data_fn.call_args_list]
         self.assertEqual((loads_per_seq.count('s1'), loads_per_seq.count('s2'), len(loads_per_seq)), (4, 4, 8))
+        # R6: each group's all-methods figure is saved in both styles, reusing that group's GT
+        traj_dir = base_dir / 'traj' / 'est_and_gt'
+        self.assertEqual([(c[0][2] is self.gt_by_seq[seq], c[0][3], c[0][7], c[1]['clean_style'])
+                          for c, seq in zip(patched['_save_all_methods_traj_figure'].call_args_list, ['s1', 's1', 's2', 's2'])],
+                         [(True, 'g1', traj_dir / 'all_methods', False), (True, 'g1', traj_dir / 'all_methods_clean', True),
+                          (True, 'g2', traj_dir / 'all_methods', False), (True, 'g2', traj_dir / 'all_methods_clean', True)])
 
     def test_old_and_positional_threshold_arguments_rejected(self):
         args = (Path('/unused'), Path('out'), self.methods, self.groups, {}, Path('/unused'), unittest.mock.MagicMock())

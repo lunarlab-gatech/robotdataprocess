@@ -6,6 +6,7 @@ import matplotlib
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.patches import Patch
 from multiprocessing import Pool
 import numpy as np
 from operator import attrgetter
@@ -655,11 +656,13 @@ class SLAMEvaluator:
     def _save_all_methods_traj_figure(run_names: List[str], results_by_run: Dict[str, SLAMResult],
                                       gt_data_lst: List[OdometryData], label: str, viz_config: RobotGroupViz,
                                       run_to_color: Dict[str, str], run_display_names: Dict[str, str],
-                                      save_dir: Path) -> None:
+                                      save_dir: Path, clean_style: bool = False) -> None:
         """
         Save one 2D figure overlaying every method's aligned estimated trajectories for one group on
         top of the full GT, with each method's robots all drawn in that method's color, GT in black,
-        and one legend entry per method plus one for GT.
+        and one legend entry per method plus one for GT. ``clean_style`` imitates Figure 10 of the
+        HERCULES paper: no axes or grid, thicker lines in each method's exact color, dotted GT, a
+        scale bar, and a frameless two-row legend above the plot with one color patch per method.
 
         Args:
             run_names: Ordered list of run identifiers to overlay.
@@ -670,6 +673,7 @@ class SLAMEvaluator:
             run_to_color: Maps each run identifier to a hex color.
             run_display_names: Maps each run identifier to its legend name.
             save_dir: Directory in which to save ``traj_<label>.pdf``.
+            clean_style: If true, draw in the HERCULES paper (Figure 10) style instead of the default.
         """
         dataList: List[PathData] = []
         isGTList: List[bool] = []
@@ -691,9 +695,12 @@ class SLAMEvaluator:
             colorList.append("#000000")
             nameList.append("GT")
 
-        fig, ax = plt.subplots(1, 1)
-        PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True, line_width=1.0, show_grid=True,
-                        legend=False, label_suffixes=False, ax=ax, gt_linestyle=(0, (4, 1.65)),
+        fig, ax = plt.subplots(1, 1, figsize=(9, 6) if clean_style else None)
+        PathData.visualize_2D(dataList, isGTList, colorList, nameList, no_background=True,
+                        line_width=2.0 if clean_style else 1.0, show_grid=not clean_style,
+                        no_border=clean_style, google_maps_scale_bar=clean_style, google_maps_scale_bar_loc="top-right",
+                        legend=False, label_suffixes=False, ax=ax,
+                        gt_linestyle="dotted" if clean_style else (0, (4, 1.65)), exact_est_colors=clean_style,
                         background_image_path=viz_config.image_path, background_image_x_edge=viz_config.image_x_edge,
                         background_image_extent_offsets=viz_config.image_extent_offsets,
                         yaw_rotation_deg=viz_config.yaw_rotation_deg)
@@ -706,7 +713,19 @@ class SLAMEvaluator:
             if label_text not in unique_labels:
                 unique_handles.append(handle)
                 unique_labels.append(label_text)
-        ax.legend(unique_handles, unique_labels)
+
+        # Clean style swaps each method's line for a patch in its drawn color, in two frameless rows above the plot
+        if clean_style:
+            unique_handles = [handle if label_text == "GT" else Patch(facecolor=handle.get_color(), edgecolor="none")
+                              for handle, label_text in zip(unique_handles, unique_labels)]
+
+            # Legends fill column by column, so reorder entries to fill the two rows in order instead
+            ncol: int = math.ceil(len(unique_labels) / 2)
+            order: List[int] = [row * ncol + col for col in range(ncol) for row in range(2) if row * ncol + col < len(unique_labels)]
+            ax.legend([unique_handles[i] for i in order], [unique_labels[i] for i in order], loc="lower center",
+                      bbox_to_anchor=(0.5, 1.0), ncol=ncol, frameon=False, fontsize=13)
+        else:
+            ax.legend(unique_handles, unique_labels)
 
         save_dir.mkdir(parents=True, exist_ok=True)
         fig.savefig(str(save_dir / f'traj_{SLAMEvaluator.label_to_filename(label)}.pdf'), format="pdf", bbox_inches="tight", pad_inches=0)
@@ -1455,7 +1474,7 @@ class SLAMEvaluator:
         or several dataset sequences that each need their own background image). Use
         :meth:`make_robot_groups` for the common case of one dataset (and viz_config) shared by
         every group. With ``figure_output_level=FigureOutputLevel.ESSENTIAL``, only the grouping-root
-        summary tables, the ``traj/est_and_gt/all_methods/`` figures, and one ``lc_tables.pdf``/``lc_tables.tex``
+        summary tables, the ``traj/est_and_gt/all_methods/`` and ``all_methods_clean/`` figures, and one ``lc_tables.pdf``/``lc_tables.tex``
         per ``LoopClosureFilterMode`` are written, skipping every other per-group figure
         (``traj/est_and_gt/individual_methods/``, ``traj/gt/``, ``traj_lc/``, ``lc/``, ``lc_success_rate/``,
         ``lc_with_context/``, ``lc_side_by_side/``, ``lc_sep/``, ``lc_sep_inl/``, ``traj_lc_comb/``).
@@ -1497,6 +1516,7 @@ class SLAMEvaluator:
         - ``mg_match_table.pdf`` — MG two-stage matcher stage-count summary table
         - ``traj/est_and_gt/individual_methods/`` — per-group, per-method estimated vs. GT trajectory plots
         - ``traj/est_and_gt/all_methods/``        — per-group overlay of every method's estimated trajectories on GT
+        - ``traj/est_and_gt/all_methods_clean/``  — the same overlays in the HERCULES paper (Figure 10) style
         - ``traj/gt/``                            — per-group, per-method GT-only trajectory plots
 
         Outputs saved under ``<figures_base_dir>/<output_dir>/<LoopClosureFilterMode.name>/``, once per LC filter mode:
@@ -1580,9 +1600,10 @@ class SLAMEvaluator:
         for group in robot_groups:
             gt_data_lst: List[OdometryData] = load_gt_data_fn(group.dataset_seq, list(group.robots))
             ate_threshold_by_col[group.label] = SLAMEvaluator.compute_failure_threshold(gt_data_lst, failure_extent_fraction)
-            SLAMEvaluator._save_all_methods_traj_figure(run_names, {run: results[run][group.label] for run in run_names},
-                                    gt_data_lst, group.label, group.viz_config,
-                                    run_to_color, run_display_names, base_dir / 'traj' / 'est_and_gt' / 'all_methods')
+            for clean_style, dir_name in ((False, 'all_methods'), (True, 'all_methods_clean')):
+                SLAMEvaluator._save_all_methods_traj_figure(run_names, {run: results[run][group.label] for run in run_names},
+                                        gt_data_lst, group.label, group.viz_config, run_to_color, run_display_names,
+                                        base_dir / 'traj' / 'est_and_gt' / dir_name, clean_style=clean_style)
 
         # Define group column names
         cols = [group.label for group in robot_groups]
