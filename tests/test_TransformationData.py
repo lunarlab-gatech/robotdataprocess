@@ -41,7 +41,79 @@ class TestTransformationData(unittest.TestCase):
         actual_matrix = transformation_data.as_matrix()
 
         np.testing.assert_array_almost_equal(actual_matrix, expected_matrix)
-    
+
+    @staticmethod
+    def _unreal_to_flu_matrix(position_cm: list, rotation_deg: list, player_start_cm: list) -> np.ndarray:
+        """ from_unreal followed by the CHANGE_OF_BASIS NED -> FLU conversion HERCULES ground truth uses. """
+        ned = TransformationData.from_unreal("world", "camera", position_cm, rotation_deg, player_start_cm)
+        return ned.to_coordinate_frame(CoordinateFrame.FLU, TransformType.CHANGE_OF_BASIS).as_matrix()
+
+    def _assert_proper_rotation(self, matrix: np.ndarray) -> None:
+        """ The rotation block is orthonormal with determinant +1 (no reflection). """
+        np.testing.assert_array_almost_equal(matrix[0:3, 0:3] @ matrix[0:3, 0:3].T, np.identity(3))
+        self.assertAlmostEqual(np.linalg.det(matrix[0:3, 0:3]), 1.0)
+
+    def test_from_unreal_frame_ids_and_ned_values(self):
+        """ Returns NED with the given frame ids; the real HERCULES camera lands at its hand-computed NED offset. """
+        tf_data = TransformationData.from_unreal("world_ned", "sim_camera", [-13989.27763, 34342.415401, 1057.830428],
+                                                 [0.0, -10.9999, 103.399867], [120.0, 32542.0, 150.0])
+        self.assertEqual(tf_data.frame_id, "world_ned")
+        self.assertEqual(tf_data.child_frame_id, "sim_camera")
+        self.assertEqual(tf_data.frame, CoordinateFrame.NED)
+        np.testing.assert_array_almost_equal(tf_data.translation, [-141.0928, 18.0042, -9.0783], decimal=4)
+        expected_quat = R.from_euler(seq="xyz", angles=[0.0, -10.9999, 103.399867], degrees=True).as_quat()
+        np.testing.assert_array_almost_equal(R.from_quat(tf_data.orientation).as_matrix(),
+                                             R.from_quat(expected_quat).as_matrix())
+
+    def test_from_unreal_position(self):
+        """ Centimetres become metres, Unreal's +y (right) becomes FLU -y and Unreal's +z (up) stays FLU +z. """
+        matrix = self._unreal_to_flu_matrix([100.0, 200.0, 300.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [1.0, -2.0, 3.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 0:3], np.identity(3))
+
+    def test_from_unreal_player_start_subtracted(self):
+        """ PlayerStart is the origin: subtracted (not added) before scaling, per axis (not swapped). """
+        matrix = self._unreal_to_flu_matrix([150.0, 260.0, 370.0], [0.0, 0.0, 0.0], [50.0, 60.0, 70.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [1.0, -2.0, 3.0])
+
+    def test_from_unreal_integer_inputs(self):
+        """ Integer lists (as YAML gives for whole numbers) are accepted and give the same result as floats. """
+        np.testing.assert_array_almost_equal(self._unreal_to_flu_matrix([100, 200, 300], [0, 30, 90], [0, 0, 0]),
+                                             self._unreal_to_flu_matrix([100.0, 200.0, 300.0], [0.0, 30.0, 90.0],
+                                                                        [0.0, 0.0, 0.0]))
+
+    def test_from_unreal_rotation(self):
+        """ Camera forward (+x) in FLU: positive yaw turns right, positive pitch raises the nose, yaw applied after pitch. """
+        pitch, yaw = np.deg2rad(30.0), np.deg2rad(90.0)
+        cases = {
+            "yaw_only": ([0.0, 0.0, 90.0], [0.0, -1.0, 0.0]),
+            "pitch_only": ([0.0, 30.0, 0.0], [np.cos(pitch), 0.0, np.sin(pitch)]),
+            "yaw_and_pitch": ([0.0, 30.0, 60.0], [np.cos(pitch) * np.cos(np.deg2rad(60.0)),
+                                                  -np.cos(pitch) * np.sin(np.deg2rad(60.0)), np.sin(pitch)]),
+            "yaw_and_pitch_90": ([0.0, 30.0, 90.0], [np.cos(pitch) * np.cos(yaw), -np.cos(pitch) * np.sin(yaw),
+                                                     np.sin(pitch)]),
+        }
+        for name, (rotation_deg, expected_forward) in cases.items():
+            with self.subTest(case=name):
+                matrix = self._unreal_to_flu_matrix([0.0, 0.0, 0.0], rotation_deg, [0.0, 0.0, 0.0])
+                np.testing.assert_array_almost_equal(matrix[0:3, 0], expected_forward)
+                self._assert_proper_rotation(matrix)
+
+    def test_from_unreal_roll(self):
+        """ Positive Unreal roll lowers the actor's right side (checked in the editor), so its FLU left axis rises. """
+        matrix = self._unreal_to_flu_matrix([0.0, 0.0, 0.0], [30.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 0], [1.0, 0.0, 0.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 1], [0.0, np.cos(np.deg2rad(30.0)), np.sin(np.deg2rad(30.0))])
+        self._assert_proper_rotation(matrix)
+
+    def test_from_unreal_real_camera(self):
+        """ The HERCULES V2.4.C figure camera, checked by hand: FLU position and forward direction. """
+        matrix = self._unreal_to_flu_matrix([-13989.27763, 34342.415401, 1057.830428], [0.0, -10.9999, 103.399867],
+                                            [120.0, 32542.0, 150.0])
+        np.testing.assert_array_almost_equal(matrix[0:3, 3], [-141.0928, -18.0042, 9.0783], decimal=4)
+        np.testing.assert_array_almost_equal(matrix[0:3, 0], [-0.2275, -0.9549, -0.1908], decimal=4)
+        self._assert_proper_rotation(matrix)
+
     def test_from_matrix(self):
         """ Test creating TransformationData from a 4x4 matrix, including a non-identity rotation. """
         # Matrix with a rotation (90 deg around Z) and translation

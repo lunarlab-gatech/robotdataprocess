@@ -167,10 +167,33 @@ class TestOdometryData(unittest.TestCase):
         odom_data.to_coordinate_frame(CoordinateFrame.FLU)
         compare_with_expected(odom_data)
 
-        # === Test Unsupported conversion throws error ===
-        odom_data.frame = CoordinateFrame.ENU
-        with np.testing.assert_raises(NotImplementedError):
-            odom_data.to_coordinate_frame(CoordinateFrame.FLU)
+        # === Test ENU to FLU, a pair get_rotation now derives generically ===
+        # Hand-derived R such that v_flu = R @ v_enu, independent of CoordinateFrame.get_rotation
+        # (the mechanism under test): ENU's +X/+Y/+Z axes point East/North/Up, i.e. Right/Forward/Up in FLU.
+        R_ENU_TO_FLU = np.array([[0, 1, 0],
+                                 [-1, 0, 0],
+                                 [0, 0, 1]])
+        odom_enu = OdometryData(
+            frame_id='world', child_frame_id='robot',
+            timestamps=np.array([0.0], dtype=object),
+            positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)]], dtype=object),
+            frame=CoordinateFrame.ENU)
+        original_enu_orientation = R.from_quat(odom_enu.orientations[0].astype(np.float64))
+
+        odom_enu.to_coordinate_frame(CoordinateFrame.FLU)
+
+        self.assertEqual(odom_enu.frame, CoordinateFrame.FLU)
+        np.testing.assert_array_almost_equal(odom_enu.positions[0].astype(np.float64), [2.0, -1.0, 3.0], decimal=8)
+        R_frame_enu = R.from_matrix(R_ENU_TO_FLU)
+        np.testing.assert_array_almost_equal(
+            odom_enu.orientations[0].astype(np.float64),
+            (R_frame_enu * original_enu_orientation * R_frame_enu.inv()).as_quat(), decimal=8)
+
+        # === Test conversion to/from CoordinateFrame.NONE throws error ===
+        odom_enu.frame = CoordinateFrame.NONE
+        with np.testing.assert_raises(ValueError):
+            odom_enu.to_coordinate_frame(CoordinateFrame.FLU)
 
         # === Test ROTATION vs CHANGE_OF_BASIS orientations ===
         odom_rotation = OdometryData.from_txt(file_path, '/Husky1', '/Husky1/base_link', CoordinateFrame.NED, False)
@@ -251,15 +274,29 @@ class TestOdometryData(unittest.TestCase):
         self.assertIsInstance(odom_data.positions[0][0], Decimal)
         self.assertIsInstance(odom_data.orientations[0][0], Decimal)
 
-        # Unsupported conversion (some other frame -> LDB) still raises
+        # A target frame other than FLU (NED -> LDB), to verify the target frame is both applied
+        # and recorded -- everything else here converts to FLU, which can't tell the two apart.
+        # Hand-derived R such that v_ldb = R @ v_ned: NED's +X/+Y/+Z (North/East/Down) point
+        # Back/Left-negated/Down, i.e. LDB's -Z/-X/+Y.
+        R_NED_TO_LDB = np.array([[0, -1, 0],
+                                 [0, 0, 1],
+                                 [-1, 0, 0]])
         odom_data2 = OdometryData(
             frame_id='world', child_frame_id='robot',
             timestamps=np.array([0.0], dtype=object),
             positions=np.array([[1.0, 2.0, 3.0]], dtype=object),
-            orientations=np.array([[0.0, 0.0, 0.0, 1.0]], dtype=object),
+            orientations=np.array([[0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)]], dtype=object),
             frame=CoordinateFrame.NED)
-        with np.testing.assert_raises(NotImplementedError):
-            odom_data2.to_coordinate_frame(CoordinateFrame.LDB)
+        original_ned_orientation = R.from_quat(odom_data2.orientations[0].astype(np.float64))
+
+        odom_data2.to_coordinate_frame(CoordinateFrame.LDB)
+
+        self.assertEqual(odom_data2.frame, CoordinateFrame.LDB)
+        np.testing.assert_array_almost_equal(odom_data2.positions[0].astype(np.float64), [-2.0, 3.0, -1.0], decimal=8)
+        R_frame_ned = R.from_matrix(R_NED_TO_LDB)
+        np.testing.assert_array_almost_equal(
+            odom_data2.orientations[0].astype(np.float64),
+            (R_frame_ned * original_ned_orientation * R_frame_ned.inv()).as_quat(), decimal=8)
 
     def test_shift_to_start_at_identity(self):
         """

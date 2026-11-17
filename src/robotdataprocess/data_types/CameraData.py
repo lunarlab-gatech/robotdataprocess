@@ -407,6 +407,32 @@ class CameraData(SequentialData):
                    K=K, D=D, R=R, P=P)
 
     @classmethod
+    def from_Unreal_Engine_CameraActor(cls, frame_id: str, width: int, height: int,
+                                       horizontal_fov_deg: float) -> CameraData:
+        """
+        Create a monocular pinhole camera matching an Unreal Engine CameraActor's render, assuming its Projection
+        Mode is Perspective, its image has no distortion, and its Field of View is horizontal (Unreal's default
+        axis constraint) spanning the full image width, with square pixels and the principal point at the center.
+
+        Args:
+            frame_id: The camera's optical frame ID.
+            width: Rendered image width in pixels.
+            height: Rendered image height in pixels.
+            horizontal_fov_deg: The CameraActor's Field of View: the angle between the image's left and right
+                edges, in degrees.
+        Returns:
+            CameraData: Instance with focal length ``(width / 2) / tan(horizontal_fov_deg / 2)`` and zero distortion.
+        Raises:
+            ValueError: If ``horizontal_fov_deg`` is not strictly between 0 and 180.
+        """
+        if not 0.0 < horizontal_fov_deg < 180.0:
+            raise ValueError(f"horizontal_fov_deg must be strictly between 0 and 180, got {horizontal_fov_deg}")
+
+        # An edge ray at half the FOV from the optical axis lands width / 2 pixels from the center
+        focal: float = (width / 2.0) / float(np.tan(np.deg2rad(horizontal_fov_deg) / 2.0))
+        return cls.from_user_mono(frame_id, width, height, fx=focal, fy=focal, cx=width / 2.0, cy=height / 2.0)
+
+    @classmethod
     def from_kalibr_mono(cls, yaml_path: Union[str, Path], cam_name: str,
                         alpha: float = 0.0) -> CameraData:
         """

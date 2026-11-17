@@ -116,6 +116,32 @@ class TransformationData(SequentialData):
         )
 
     @classmethod
+    def from_unreal(cls, frame_id: str, child_frame_id: str, position_cm: List[float],
+                    rotation_deg: List[float], player_start_cm: List[float]) -> TransformationData:
+        """
+        Converts an Unreal Engine actor pose into a NED frame. Unreal's world frame is FRU (x forward, y right,
+        z up), a left-handed coordinate system, so the position only flips z. Unreal's positive roll and pitch
+        follow the right-hand rule about forward and right, and positive yaw the right-hand rule about down,
+        so the angles apply unchanged in NED as extrinsic x-y-z Euler angles.
+
+        Args:
+            frame_id: Name of the parent (world) frame.
+            child_frame_id: Name of the actor's frame.
+            position_cm: Unreal world location [X, Y, Z] in centimetres, in the FRU frame.
+            rotation_deg: [roll, pitch, yaw] in degrees, the Details panel's Rotation X/Y/Z order.
+            player_start_cm: Unreal world location [X, Y, Z] of the level's PlayerStart in centimetres; the
+                NED frame's origin.
+        Returns:
+            TransformationData: Instance with NED coordinate frame.
+        """
+        # Unreal is centimetres in FRU; NED is metres about PlayerStart with z down
+        offset_m: np.ndarray = (np.array(position_cm, dtype=float) - np.array(player_start_cm, dtype=float)) / 100.0
+        translation: np.ndarray = np.array([offset_m[0], offset_m[1], -offset_m[2]])
+        orientation: np.ndarray = R.from_euler(seq="xyz", angles=rotation_deg, degrees=True).as_quat()
+        return cls(frame_id=frame_id, child_frame_id=child_frame_id, translation=translation,
+                   orientation=orientation, frame=CoordinateFrame.NED)
+
+    @classmethod
     def from_kalibr(cls, yaml_path: Union[Path, str], cam_name: str, transform_name: str,
                      frame: CoordinateFrame) -> TransformationData:
         """

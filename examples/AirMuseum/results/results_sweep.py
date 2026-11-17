@@ -10,7 +10,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
-from robotdataprocess.eval.ROMAN import calculate_merged_ate, load_LC_data_ROMAN, load_system_params_ROMAN, LCFilterMode
+from robotdataprocess import LoopClosureFilterMode
+from robotdataprocess.data_types.SLAMData import SLAMData
+from robotdataprocess.eval.SLAMEvaluator import SLAMEvaluator
 from results_ROMAN import load_gt_data_ROMAN
 
 def _calculate_merged_ate_star(task: Dict[str, Any]):
@@ -21,10 +23,25 @@ def _calculate_merged_ate_star(task: Dict[str, Any]):
     which of potentially hundreds of pooled tasks actually failed.
     """
     try:
-        return calculate_merged_ate(*task["args"])
+        return SLAMEvaluator.calculate_merged_ate(*task["args"])
     except Exception as e:
         raise RuntimeError(f"calculate_merged_ate failed for base_config='{task['base_config']}', "
                            f"overrides={task['overrides']}, robot_pair={task['pair']}") from e
+
+def build_swept_slam_data(mg_root: Path, system_params, robot_names: List[str],
+                          critical_invocation_params: Dict[str, Any]) -> SLAMData:
+    """
+    Builds a SLAMData from an already-constructed (parameter-swept) system_params.
+
+    TODO: A swept system_params doesn't correspond to any experiment config file on disk, so
+    SLAMData.from_MeronomyGraph (which loads its own system_params from one) can't be used
+    directly. This needs a new SLAMData.from_... factory that takes a system_params instead of
+    loading one, sharing a helper with from_MeronomyGraph rather than duplicating its six loader
+    calls here. Not implemented yet.
+    """
+    raise NotImplementedError(
+        "build_swept_slam_data needs a SLAMData factory that accepts an already-built "
+        "system_params -- see the TODO above.")
 
 def load_sweep_data(sweep_path: Path) -> Dict[str, Any]:
     """ Loads a W&B sweep config YAML, raising if it isn't a "method: grid" sweep. """
@@ -96,23 +113,26 @@ def main():
     config (as in results_ROMAN.py), then gets every parameter combination from every named
     sweep applied on top of it.
 
-    A (method, sweep config) combination is a success if its Merged RMS ATE is below
-    ate_threshold_m AND it has at least one inlier inter-robot loop closure; otherwise a failure.
+    A (method, sweep config) combination fails by the same rule as ``robustness_table.pdf`` (see
+    :meth:`SLAMEvaluator.is_failure`): its Merged RMS ATE is above the pair's failure threshold
+    (``failure_extent_fraction`` of its GT extent), or is suppressed for lacking inter-robot LC.
     Missing result directories (a sweep that was never actually run for a given method) raise
     FileNotFoundError rather than being silently skipped.
     """
     roman_root = Path('/home/dbutterfield3/Research/ROMAN_DEVEL')
     critical_invocation_params = {"use_lidar": False, "use_gt_odom": True}
     dataset_prefix = "airmuseum"
-    dataset_name = "Scenario5"
+    dataset_seq = "Scenario5"
     robot_pair = ["drone", "robotB"]
     methods = ["MG"]
     sweep_names = ["sweep_harder_params"]
-    ate_threshold_m = 10.0
+    failure_extent_fraction = 0.10
     trans_err_in_target = 1.0
     rot_err_in_target = 5.0
 
-    gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_name, robot_pair)))
+    gt_dict = dict(zip(robot_pair, load_gt_data_ROMAN(dataset_seq, robot_pair)))
+    ate_threshold_m: float = SLAMEvaluator.compute_failure_threshold(list(gt_dict.values()), failure_extent_fraction)
+    print(f"Failure threshold for {robot_pair}: {ate_threshold_m:.2f} m")
 
     sweeps_dir = roman_root / "research" / "AirMuseum" / "sweeps"
 
@@ -121,16 +141,17 @@ def main():
     overrides_list = [o for sweep_data in sweep_data_by_name.values() for o in sweep_param_grid(sweep_data)]
 
     # Build every (method, swept system_params) task up front, then run the ATE calculations
-    # (the expensive part) in parallel, exactly like run_ROMAN_evaluation does.
+    # (the expensive part) in parallel, exactly like run_evaluation does.
     tasks = []
     for method in methods:
-        base_system_params = load_system_params_ROMAN(roman_root, dataset_prefix, dataset_name, method)
-        base_config = f"{dataset_prefix}_{dataset_name}_{method}.yaml"
+        base_system_params = SLAMData.load_system_params(roman_root, dataset_prefix, dataset_seq, method)
+        base_config = f"{dataset_prefix}_{dataset_seq}_{method}.yaml"
         for overrides in overrides_list:
             swept_system_params = apply_overrides(base_system_params, overrides)
+            slam_data = build_swept_slam_data(roman_root, swept_system_params, robot_pair, critical_invocation_params)
             tasks.append({
-                "args": (roman_root, swept_system_params, dataset_prefix, dataset_name, method,
-                        robot_pair, critical_invocation_params, load_gt_data_ROMAN),
+                "args": (slam_data, load_gt_data_ROMAN),
+                "slam_data": slam_data,
                 "method": method,
                 "base_config": base_config,
                 "overrides": overrides,
@@ -144,11 +165,10 @@ def main():
     counts = {method: {"success": 0, "failure": 0} for method in methods}
     for task, result in zip(tasks, results):
         method = task["method"]
-        system_params, robot_names = task["args"][1], task["args"][5]
+        slam_data = task["slam_data"]
         ate = result.merged_metrics.APE.translation_part.rmse
 
-        lc_all, lc_inlier = load_LC_data_ROMAN(roman_root, system_params, dataset_prefix, dataset_name, robot_names,
-                                         critical_invocation_params, lc_filter=LCFilterMode.ONLY_INTER_LC)
+        lc_all, lc_inlier = slam_data.get_loop_closures(LoopClosureFilterMode.ONLY_INTER_LC)
         num_inlier_inter_lc = lc_inlier.num_loop_closures
 
         lc_all.calculate_errors(gt_dict)
@@ -159,9 +179,11 @@ def main():
         num_successful_inter_lc = int(np.sum(lc_all.results.successful))
         num_total_inter_lc = lc_all.num_loop_closures
 
-        success = ate < ate_threshold_m and num_inlier_inter_lc >= 1
+        if SLAMEvaluator.missing_inter_robot_loop_closures(num_total_inter_lc, len(robot_pair) > 1):
+            ate = float('nan')
+        success = not SLAMEvaluator.is_failure(ate, ate_threshold_m)
         counts[method]["success" if success else "failure"] += 1
-        print(f"[{method}] {robot_names}: ATE={ate:.2f}m, inlier LC={num_successful_inlier_inter_lc}/{num_inlier_inter_lc} "
+        print(f"[{method}] {slam_data.robot_names}: ATE={ate:.2f}m, inlier LC={num_successful_inlier_inter_lc}/{num_inlier_inter_lc} "
               f"all LC={num_successful_inter_lc}/{num_total_inter_lc} "
               f"-> {'SUCCESS' if success else 'FAILURE'}")
 

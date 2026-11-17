@@ -14,8 +14,8 @@ from results_ROMAN import load_gt_data_ROMAN, NAME_TO_FRAME_MAP
 
 def main():
     robot_names: List[str] = ["drone", "robotA", "robotB", "robotC"]
-    dataset_seq: str = "Scenario5"
-    skip_robots: List = ["robotA", "robotB", "robotC"]
+    dataset_seq: str = "Scenario3"
+    skip_robots: List = ["drone"]
 
     # Define camera constants
     robot_left_cam_map: dict = {
@@ -35,7 +35,6 @@ def main():
 
     # Get paths and names
     dataset_path = Path('/media') / getpass.getuser() / 'T73' / 'AirMuseum_dataset' / dataset_seq
-    dataset_version: Path = Path(dataset_path).name
     dataset_config_path: Path = Path(dataset_path).parent
     base_path = Path(dataset_path) / "data"
     results_path = Path(dataset_path) / "results"
@@ -76,21 +75,26 @@ def main():
 
         # ==================================== Load Transformations =========================================
         # Load and calculate T_IMU_CAMERA
-        H_O_to_I = TransformationData.from_kalibr(dataset_config_path / 'sensors' / calib_name, "cam0", "T_cam_imu", CoordinateFrame.FLU)
+        H_O_to_I = TransformationData.from_kalibr(dataset_config_path / 'sensors' / calib_name, cam_id_to_calib_name[left_cam_id], "T_cam_imu", NAME_TO_FRAME_MAP[robot_name])
         local_axes_correction = TransformationData(
             H_O_to_I.child_frame_id, H_O_to_I.child_frame_id, np.zeros(3),
             R.from_matrix(CoordinateFrame.get_rotation(CoordinateFrame.FLU, NAME_TO_FRAME_MAP[robot_name])).as_quat(),
             H_O_to_I.frame)
         H_O_to_I = H_O_to_I.apply_transformation_right_side(local_axes_correction) # Updates local axes from default to FLU
-        
+        H_O_to_I.frame = CoordinateFrame.FLU
+
         # Calculate T_CAMERA_FLU (Should be called T_CAMERA_IMU)
         H_I_to_O = H_O_to_I.invert()
 
         # ==================================== Load Odometry =========================================
 
         # Load the data
-        est_data = OdometryData.from_tum(results_path / 'ORB-SLAM3' / ('AirMuseum_' + robot_name + '_ORBSLAM3_trajectory.txt'), "world", "robot", CoordinateFrame.LDB)
+        est_data = OdometryData.from_tum(results_path / 'ORB-SLAM3' / robot_name / ('f_airmuseum_' + robot_name + '_rgbd_inertial.txt'), "world", "robot", CoordinateFrame.RDF)
 
+        # Convert to FLU frame
+        est_data.to_coordinate_frame(CoordinateFrame.FLU, transform_type=TransformType.ROTATION)
+
+        # Now frame is FLU but local frame is RDF (optical) since this is pose of the camera.
         # Re-target est_data from "pose of rectified camera" to "pose of IMU" via H_I_to_OR = H_I_to_O @ T_O_to_OR.
         T_O_to_OR = TransformationData(
             H_I_to_O.child_frame_id, H_I_to_O.child_frame_id + 'R', np.zeros(3),
@@ -98,25 +102,17 @@ def main():
         H_I_to_OR = H_I_to_O.apply_transformation_right_side(T_O_to_OR)
         est_data.apply_transformation_right_side(H_I_to_OR.invert().as_matrix())
 
-        # Convert from LDB frame to FLU frame
-        est_data.to_coordinate_frame(CoordinateFrame.FLU, transform_type=TransformType.ROTATION)
-
         # Load gt_data
         gt_data: OdometryData = load_gt_data_ROMAN(dataset_seq, [robot_name])[0]
 
-        # Visualize the estimated versus gt data
-        est_data.visualize_3D([gt_data],["Est", "GT"], axes_length=1, axes_interval=500)
-        # TODO: Verify all est_data transformations have a single axis that corresponds to down!
-
         # Calculate RMS ATE, among other metrics
-        # metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,
-        #                                                                     visualize=False, axes_interval=2000)
-        # print("\nMetrics for robot: ", robot_name)
-        # print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
-        # print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse, "\n")
-
-        # print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
-        # print("Robot: ", robot_name, "RMS RPE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
+        metrics_dictionary, _, _ = OdometryData.align_and_calculate_traj_errors(gt_data, est_data, max_diff=0.1,
+                                                                            visualize=True, axes_interval=200, axes_length=1)
+        print("\nMetrics for robot: ", robot_name)
+        print("Robot: ", robot_name, "RMS ATE: ", metrics_dictionary.APE.translation_part.rmse)
+        print("Robot: ", robot_name, "RMS RTE: ", metrics_dictionary.RPE.translation_part.rmse)
+        print("Robot: ", robot_name, "RMS APE Rotation Angle (Deg): ", metrics_dictionary.APE.rotation_angle_deg.rmse, "\n")
+        print("Robot: ", robot_name, "RMS RPE Rotation Angle (Deg): ", metrics_dictionary.RPE.rotation_angle_deg.rmse)
 
 
 if __name__ == "__main__":

@@ -814,6 +814,57 @@ class TestPathData(unittest.TestCase):
         finally:
             os.remove(tmp_img)
 
+    def test_visualize_2D_label_suffixes(self):
+        """ Test legend labels include GT/Est. suffixes by default, and omit them when disabled. """
+        path1 = PathData(
+            frame_id="robot1",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+        path2 = PathData(
+            frame_id="robot2",
+            timestamps=np.array([0.0, 1.0], dtype=object),
+            positions=np.array([[0.0, 1.0, 0.0], [1.0, 1.0, 0.0]], dtype=object),
+            orientations=np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object),
+            frame=CoordinateFrame.FLU)
+
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([path1, path2], [True, False], ['#FF0000', '#0000FF'], ['R1', 'R2'], ax=ax)
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["R1 (GT)", "R2 (Est.)"])
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([path1, path2], [True, False], ['#FF0000', '#0000FF'], ['R1', 'R2'], ax=ax,
+                              label_suffixes=False)
+        self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], ["R1", "R2"])
+        plt.close(fig)
+
+    def test_visualize_2D_exact_est_colors(self):
+        """ Test exact_est_colors draws estimates in their exact color, leaving GT and the default on the lightness ramp. """
+        def make_path(y: float) -> PathData:
+            return PathData("robot", np.array([0.0, 1.0], dtype=object),
+                            np.array([[0.0, y, 0.0], [1.0, y, 0.0]], dtype=object),
+                            np.array([[0, 0, 0, 1], [0, 0, 0, 1]], dtype=object), CoordinateFrame.FLU)
+
+        # Estimate colors have lightness far from 9/19, so the ramp would visibly change them
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([make_path(0.0), make_path(1.0), make_path(2.0)], [False, True, False],
+                              ['#893429', '#FF0000', '#12C1CA'], ['A', 'GT', 'B'], ax=ax, exact_est_colors=True)
+        expected = [(137 / 255, 52 / 255, 41 / 255), (6 / 19, 0.0, 0.0), (18 / 255, 193 / 255, 202 / 255)]
+        lines = ax.get_lines()
+        self.assertEqual(len(lines), 3)
+        for line, y, color in zip(lines, [0.0, 1.0, 2.0], expected):
+            np.testing.assert_allclose(np.asarray(line.get_ydata(), dtype=float), [y, y])
+            np.testing.assert_allclose(matplotlib.colors.to_rgb(line.get_color()), color, atol=1e-9)
+        plt.close(fig)
+
+        # Default keeps estimates on the ramp at lightness 9/19
+        fig, ax = plt.subplots()
+        PathData.visualize_2D([make_path(0.0)], [False], ['#FF0000'], ['A'], ax=ax)
+        np.testing.assert_allclose(matplotlib.colors.to_rgb(ax.get_lines()[0].get_color()), (18 / 19, 0.0, 0.0), atol=1e-9)
+        plt.close(fig)
+
     # =========================================================================
     # ================ visualize_2D_video Tests ================================
     # =========================================================================
